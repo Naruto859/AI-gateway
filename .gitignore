@@ -1,0 +1,10 @@
+# secrets & local state — never commit
+data.db
+data.db-*
+proxies.txt
+.env
+*.log
+__pycache__/
+*.pyc
+.venv/
+venv/

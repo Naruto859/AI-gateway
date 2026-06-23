@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Gateway</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: { extend: { colors: {
+    clay:  "#d97757",
+    clay2: "#c2603f",
+    ink:   "#1a1916",
+    panel: "#262624",
+    panel2:"#2f2d2a",
+    line:  "#3a3833",
+    txt:   "#e8e6dc",
+    mut:   "#a3a097",
+    ok:    "#6fae6f",
+    bad:   "#d4675a",
+    warn:  "#d9a657",
+  }, fontFamily: { mono: ['ui-monospace','SFMono-Regular','Menlo','monospace'] } } }
+}
+</script>
+<style>
+  body{background:#1a1916;color:#e8e6dc}
+  .card{background:#262624;border:1px solid #3a3833;border-radius:14px}
+  input,select,textarea{background:#1a1916;border:1px solid #3a3833;color:#e8e6dc;border-radius:9px}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:#d97757}
+  .btn{background:#d97757;color:#1a1916;font-weight:600;border-radius:9px}
+  .btn:hover{background:#c2603f}
+  .btn-ghost{background:#2f2d2a;color:#e8e6dc;border:1px solid #3a3833;border-radius:9px}
+  .btn-ghost:hover{border-color:#d97757}
+  .pill{border-radius:999px;font-size:11px;padding:2px 9px}
+  .dot{width:9px;height:9px;border-radius:999px;display:inline-block}
+  ::-webkit-scrollbar{height:8px;width:8px}::-webkit-scrollbar-thumb{background:#3a3833;border-radius:8px}
+  .tab.active{color:#d97757;border-color:#d97757}
+</style>
+</head>
+<body class="font-mono text-sm">
+
+<!-- login -->
+<div id="login" class="fixed inset-0 z-50 flex items-center justify-center bg-ink/95">
+  <div class="card p-7 w-[320px]">
+    <div class="text-clay text-lg font-bold mb-1">⚕ AI Gateway</div>
+    <div class="text-mut text-xs mb-5">Enter admin password</div>
+    <input id="loginpw" type="password" class="w-full px-3 py-2 mb-3" placeholder="password" autofocus>
+    <button onclick="doLogin()" class="btn w-full py-2">Unlock</button>
+    <div id="loginerr" class="text-bad text-xs mt-3 hidden">Wrong password</div>
+  </div>
+</div>
+
+<!-- app -->
+<div id="app" class="hidden max-w-5xl mx-auto px-4 pb-24">
+  <!-- header -->
+  <div class="flex items-center justify-between py-5 sticky top-0 bg-ink z-30">
+    <div class="flex items-center gap-2">
+      <span class="text-clay text-xl font-bold">⚕ AI Gateway</span>
+      <span id="hdrCounts" class="text-mut text-xs ml-2"></span>
+    </div>
+    <button onclick="logout()" class="btn-ghost px-3 py-1 text-xs">Lock</button>
+  </div>
+
+  <!-- tabs -->
+  <div class="flex gap-5 border-b border-line mb-5 text-mut overflow-x-auto">
+    <button class="tab active border-b-2 border-transparent pb-2 whitespace-nowrap" data-tab="conn" onclick="tab('conn')">Connection</button>
+    <button class="tab border-b-2 border-transparent pb-2 whitespace-nowrap" data-tab="proxies" onclick="tab('proxies')">Proxies</button>
+    <button class="tab border-b-2 border-transparent pb-2 whitespace-nowrap" data-tab="filter" onclick="tab('filter')">Filter</button>
+    <button class="tab border-b-2 border-transparent pb-2 whitespace-nowrap" data-tab="logs" onclick="tab('logs')">Logs</button>
+    <button class="tab border-b-2 border-transparent pb-2 whitespace-nowrap" data-tab="settings" onclick="tab('settings')">Settings</button>
+  </div>
+
+  <!-- CONNECTION -->
+  <section data-pane="conn" class="space-y-4">
+    <div class="card p-5">
+      <div class="font-semibold mb-3 text-clay">Upstream endpoint</div>
+      <label class="text-mut text-xs">Endpoint base URL</label>
+      <input id="s_endpoint" class="w-full px-3 py-2 mt-1 mb-3" placeholder="https://agentrouter.org">
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label class="text-mut text-xs">Gateway key <span class="text-mut/60">(clients send this)</span></label>
+          <input id="s_gateway_key" class="w-full px-3 py-2 mt-1" placeholder="sk-...">
+        </div>
+        <div>
+          <label class="text-mut text-xs">Upstream key <span class="text-mut/60">(sent to endpoint)</span></label>
+          <input id="s_upstream_key" class="w-full px-3 py-2 mt-1" placeholder="sk-...">
+        </div>
+      </div>
+      <label class="flex items-center gap-2 mt-3 text-xs text-mut">
+        <input id="s_require_client_key" type="checkbox" class="w-4 h-4 accent-clay">
+        Require clients to present the gateway key
+      </label>
+      <button onclick="saveConn()" class="btn px-4 py-2 mt-4">Save</button>
+    </div>
+
+    <div class="card p-5">
+      <div class="font-semibold mb-2 text-clay">Point your agent here</div>
+      <div class="text-mut text-xs mb-3">Set these in Hermes / Claude Code / any Anthropic SDK client. Model: <span class="text-txt">claude-opus-4-8</span></div>
+      <pre id="agentCfg" class="bg-ink border border-line rounded-lg p-3 text-xs whitespace-pre-wrap text-txt"></pre>
+    </div>
+  </section>
+
+  <!-- PROXIES -->
+  <section data-pane="proxies" class="space-y-4 hidden">
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-semibold text-clay">Add proxies</div>
+        <div id="proxyCounts" class="text-xs text-mut"></div>
+      </div>
+      <textarea id="proxyInput" rows="3" class="w-full px-3 py-2 text-xs" placeholder="user:pass@ip:port  (one per line — paste many at once)"></textarea>
+      <div class="flex items-center gap-2 mt-3">
+        <button onclick="addProxies()" class="btn px-4 py-2">Add</button>
+        <button onclick="refresh()" class="btn-ghost px-3 py-2 text-xs">Refresh</button>
+        <span class="text-mut text-xs">Tip: test a few only — don't hammer all at once.</span>
+      </div>
+    </div>
+    <div class="card p-0 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="text-mut border-b border-line">
+            <tr class="text-left">
+              <th class="px-3 py-2">Status</th><th class="px-3 py-2">Proxy</th>
+              <th class="px-3 py-2">Exit IP</th><th class="px-3 py-2">ms</th>
+              <th class="px-3 py-2">ok/fail</th><th class="px-3 py-2 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="proxyRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- FILTER -->
+  <section data-pane="filter" class="space-y-4 hidden">
+    <div class="card p-5">
+      <div class="font-semibold mb-3 text-clay">Add blocked / sensitive content</div>
+      <div class="grid sm:grid-cols-[1fr_130px_1fr_auto] gap-2 items-end">
+        <div><label class="text-mut text-xs">Keyword / value</label>
+          <input id="kwValue" class="w-full px-3 py-2 mt-1" placeholder="e.g. secret-token or 10.0.0.1"></div>
+        <div><label class="text-mut text-xs">Mode</label>
+          <select id="kwMode" class="w-full px-3 py-2 mt-1">
+            <option value="redact">redact</option><option value="block">block</option>
+          </select></div>
+        <div><label class="text-mut text-xs">Replacement</label>
+          <input id="kwRepl" class="w-full px-3 py-2 mt-1" value="[REDACTED]"></div>
+        <button onclick="addKeyword()" class="btn px-4 py-2">+ Add</button>
+      </div>
+      <div class="text-mut text-xs mt-2">redact = replace before sending · block = reject the whole request</div>
+    </div>
+    <div class="card p-0 overflow-hidden">
+      <table class="w-full text-xs">
+        <thead class="text-mut border-b border-line"><tr class="text-left">
+          <th class="px-3 py-2">Value</th><th class="px-3 py-2">Mode</th>
+          <th class="px-3 py-2">Replacement</th><th class="px-3 py-2 text-right">Actions</th>
+        </tr></thead>
+        <tbody id="kwRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- LOGS -->
+  <section data-pane="logs" class="space-y-4 hidden">
+    <div class="flex items-center gap-2">
+      <button onclick="refresh()" class="btn-ghost px-3 py-2 text-xs">Refresh</button>
+      <button onclick="clearLogs()" class="btn-ghost px-3 py-2 text-xs">Clear</button>
+    </div>
+    <div class="card p-0 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="text-mut border-b border-line"><tr class="text-left">
+            <th class="px-3 py-2">Time</th><th class="px-3 py-2">Path</th>
+            <th class="px-3 py-2">Status</th><th class="px-3 py-2">Proxy</th>
+            <th class="px-3 py-2">Try</th><th class="px-3 py-2">ms</th><th class="px-3 py-2">Note</th>
+          </tr></thead>
+          <tbody id="logRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section data-pane="settings" class="space-y-4 hidden">
+    <div class="card p-5">
+      <div class="font-semibold mb-3 text-clay">Routing</div>
+      <div class="grid sm:grid-cols-3 gap-3">
+        <div><label class="text-mut text-xs">Max proxies / request</label>
+          <input id="s_max_retries" class="w-full px-3 py-2 mt-1"></div>
+        <div><label class="text-mut text-xs">Connect timeout (s)</label>
+          <input id="s_connect_timeout" class="w-full px-3 py-2 mt-1"></div>
+        <div><label class="text-mut text-xs">Read timeout (s)</label>
+          <input id="s_read_timeout" class="w-full px-3 py-2 mt-1"></div>
+      </div>
+      <label class="text-mut text-xs block mt-3">User-Agent sent upstream</label>
+      <input id="s_user_agent" class="w-full px-3 py-2 mt-1">
+      <button onclick="saveSettings()" class="btn px-4 py-2 mt-4">Save</button>
+    </div>
+    <div class="card p-5">
+      <div class="font-semibold mb-3 text-clay">Change admin password</div>
+      <input id="s_admin_password" type="password" class="w-full px-3 py-2" placeholder="new password">
+      <button onclick="savePassword()" class="btn px-4 py-2 mt-3">Update</button>
+    </div>
+  </section>
+</div>
+
+<div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 hidden card px-4 py-2 text-xs"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
