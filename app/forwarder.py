@@ -16,6 +16,7 @@ content-type normalisation (agentrouter returns non-stream bodies as text/plain)
 """
 import time
 import json
+import random
 import socket
 import asyncio
 import httpx
@@ -43,6 +44,13 @@ def _client(proxy_url, timeout):
     transport = httpx.AsyncHTTPTransport(proxy=proxy_url, socket_options=_KEEPALIVE_OPTS)
     return httpx.AsyncClient(transport=transport, timeout=timeout)
 
+
+async def _retry_backoff(retry_num):
+    """Claude-Code-style exponential backoff + jitter.  min(1.0×2^retry_num, 8.0) + 0-25% jitter.
+    Spacing out retries prevents the Aliyun WAF from mistaking rapid-fire requests as an attack."""
+    delay = min(1.0 * (2 ** retry_num), 8.0)
+    delay *= 0.75 + random.random() * 0.25
+    await asyncio.sleep(delay)
 HOP_BY_HOP = {
     "host", "content-length", "connection", "keep-alive", "proxy-authenticate",
     "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade",
@@ -470,6 +478,7 @@ async def forward(request, path):
                         yield _sse("error", err)
                         return
                     detail = res[1]  # ("retry", reason) -> try next proxy
+                    await _retry_backoff(attempts)
                 db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                            stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000),
                            note=f"all proxies failed: {detail}")
@@ -491,7 +500,7 @@ async def forward(request, path):
                     r = await client.send(req, stream=True)
                     if _is_waf(r.headers) or r.status_code >= 500:
                         await r.aclose(); await client.aclose()
-                        proxy_pool.mark_bad(p["id"], "waf/5xx"); detail = f"{r.status_code} via {p['url']}"; continue
+                        proxy_pool.mark_bad(p["id"], "waf/5xx"); detail = f"{r.status_code} via {p['url']}"; await _retry_backoff(attempts); continue
                     proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
                     async for chunk in r.aiter_raw():
                         forwarded = True
@@ -504,7 +513,7 @@ async def forward(request, path):
                     detail = f"{type(e).__name__} via {p['url']}"
                     if forwarded:
                         return
-                    proxy_pool.mark_bad(p["id"], "conn"); continue
+                    proxy_pool.mark_bad(p["id"], "conn"); await _retry_backoff(attempts); continue
             yield ("event: error\ndata: " + json.dumps(
                 {"type": "error", "error": {"type": "api_error", "message": f"All proxies failed. {detail}"}}
             ) + "\n\n").encode()
@@ -524,6 +533,7 @@ async def forward(request, path):
                        attempts=attempts, stream=0, redactions=redactions,
                        ms=int((time.time() - t0) * 1000), note="ok(assembled)")
             return Response(content=payload, status_code=status, media_type=ct)
+        await _retry_backoff(attempts)
         detail = res[1]
     db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                stream=0, redactions=redactions, ms=int((time.time() - t0) * 1000),
