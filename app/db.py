@@ -29,8 +29,10 @@ DEFAULT_SETTINGS = {
     "model_note": "claude-opus-4-8",              # informational
     "max_retries": "4",                           # max proxies to try per request
     "connect_timeout": "20",
-    "read_timeout": "300",
+    "read_timeout": "900",                        # long generations need a wide read window
     "user_agent": "claude-cli/1.0.60 (external, cli)",
+    "dedicated_proxy_id": "",                     # pin ALL requests to one proxy ("" = rotate)
+    "dedicated_strict": "0",                      # "1" = never fail over to the pool if the pin is dead
 }
 
 

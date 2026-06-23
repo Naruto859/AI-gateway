@@ -30,10 +30,41 @@ def selectable():
 
 
 def ordered_for_request(max_n):
-    """Return up to max_n proxies to try, healthiest first, rotated for balance."""
+    """Return up to max_n proxies to try.
+
+    If a dedicated proxy is pinned (settings.dedicated_proxy_id), all requests go
+    through that one residential exit IP so the endpoint sees a single stable
+    "real user" address instead of a rotating set. Failover behaviour:
+      - dedicated_strict="1": ONLY the pinned proxy is ever used (no failover); if
+        it is dead/banned the candidate list is empty and forward() returns 503 —
+        it never opens a direct (un-proxied) connection, so the server IP can't leak.
+      - dedicated_strict="0": pinned proxy first, then the rest of the pool as
+        failover.
+    Empty dedicated_proxy_id keeps the legacy rotation behaviour.
+    """
     pool = selectable()
     if not pool:
         return []
+
+    pin = db.get_setting("dedicated_proxy_id", "")
+    if pin:
+        try:
+            pin_id = int(pin)
+        except (TypeError, ValueError):
+            pin_id = None
+        strict = db.get_setting("dedicated_strict", "0") == "1"
+        pinned = next((p for p in pool if p["id"] == pin_id), None)
+        if pinned:
+            if strict:
+                return [pinned]
+            rest = [p for p in pool if p["id"] != pin_id]
+            rest.sort(key=lambda p: _RANK.get(p["status"], 3))
+            return [pinned] + rest[:max(0, max_n - 1)]
+        if strict:
+            # pinned proxy is dead/banned and strict mode forbids failover
+            return []
+        # non-strict + pin missing: fall through to rotation
+
     start = _next_start(len(pool))
     rotated = pool[start:] + pool[:start]
     rotated.sort(key=lambda p: _RANK.get(p["status"], 3))

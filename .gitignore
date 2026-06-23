@@ -1,6 +1,7 @@
 # secrets & local state — never commit
 data.db
 data.db-*
+.bak/
 proxies.txt
 .env
 *.log

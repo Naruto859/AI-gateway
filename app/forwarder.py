@@ -222,6 +222,21 @@ async def _consume_assemble(proxy, url, headers, body, timeout, kind):
                 obj = asm.result()
                 if obj is None:
                     return ("retry", "empty-stream")
+                # Completeness guard: AnthropicAssembler only fills stop_reason/usage on the
+                # final message_delta event. If the upstream stream was cut mid-generation we'd
+                # otherwise return a structurally-incomplete 200 (no stop_reason, empty content,
+                # or a tool_use block with no input) that a strict client rejects. Fail over to
+                # the next proxy instead of returning a malformed success.
+                if kind == "anthropic":
+                    incomplete = obj.get("stop_reason") is None or not obj.get("content")
+                    if not incomplete:
+                        for b in obj.get("content", []):
+                            if b.get("type") == "tool_use" and "input" not in b:
+                                incomplete = True
+                                break
+                    if incomplete:
+                        proxy_pool.mark_bad(proxy["id"], "truncated")
+                        return ("retry", "truncated")
                 return ("respond", 200, "application/json",
                         json.dumps(obj, ensure_ascii=False).encode("utf-8"))
     except Exception as e:
@@ -237,7 +252,7 @@ async def forward(request, path):
     require_key = s.get("require_client_key", "1") == "1"
     max_retries = int(s.get("max_retries", "4") or 4)
     timeout = httpx.Timeout(connect=float(s.get("connect_timeout", "20") or 20),
-                            read=float(s.get("read_timeout", "300") or 300),
+                            read=float(s.get("read_timeout", "900") or 900),
                             write=120.0, pool=20.0)
 
     if require_key and gateway_key:
@@ -288,6 +303,37 @@ async def forward(request, path):
                     if r.status_code >= 500:
                         await r.aclose(); await client.aclose()
                         proxy_pool.mark_bad(p["id"], "5xx"); detail = f"{r.status_code} via {p['url']}"; continue
+                    # The upstream leg MUST actually be an SSE stream. If it isn't — a 4xx JSON
+                    # error, a WAF page that slipped the header sniff, or any plain body — do NOT
+                    # relay it verbatim under a hardcoded 200 text/event-stream: the client SDK
+                    # would then see ZERO message events and raise a bare AssertionError with an
+                    # empty message (the exact bug we are fixing).
+                    ct = r.headers.get("content-type", "")
+                    if "text/event-stream" not in ct:
+                        raw = await r.aread()
+                        await r.aclose(); await client.aclose()
+                        if r.status_code >= 400:
+                            # Genuine upstream rejection (e.g. 400 prompt-too-long, 401). The proxy
+                            # itself worked; failing over won't help. Surface it as a proper SSE
+                            # `error` event so the client raises a diagnosable APIStatusError.
+                            proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                            try:
+                                err = json.loads(raw)
+                                if not isinstance(err, dict) or "error" not in err:
+                                    raise ValueError
+                            except Exception:
+                                err = {"type": "error", "error": {"type": "api_error",
+                                       "message": f"Upstream HTTP {r.status_code}: "
+                                                  f"{raw[:300].decode('utf-8', 'replace')}"}}
+                            db.add_log(method=request.method, path=path, status=r.status_code, proxy=p["url"],
+                                       attempts=attempts, stream=1, redactions=redactions,
+                                       ms=int((time.time() - t0) * 1000), note=f"upstream non-SSE {r.status_code}")
+                            yield ("event: error\ndata: " + json.dumps(err) + "\n\n").encode()
+                            return
+                        # 2xx but not an event stream — almost certainly an interception/WAF page.
+                        # Treat the proxy as bad and fail over to the next candidate.
+                        proxy_pool.mark_bad(p["id"], "non-sse")
+                        detail = f"non-SSE {r.status_code} via {p['url']}"; continue
                     proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
                     async for chunk in r.aiter_raw():
                         forwarded = True
@@ -305,6 +351,13 @@ async def forward(request, path):
                         db.add_log(method=request.method, path=path, status=0, proxy=p["url"],
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000), note=f"mid-stream drop: {detail}")
+                        # Bytes were already sent, so a transparent retry is impossible — but the
+                        # client MUST get a clean terminator. A silently truncated stream makes the
+                        # Anthropic SDK assert on a None final snapshot (the empty-summary error).
+                        yield ("event: error\ndata: " + json.dumps(
+                            {"type": "error", "error": {"type": "api_error",
+                             "message": f"Upstream stream dropped mid-generation: {detail}"}}
+                        ) + "\n\n").encode()
                         return
                     proxy_pool.mark_bad(p["id"], "conn"); continue
             db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
