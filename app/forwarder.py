@@ -26,12 +26,14 @@ from . import db, proxy_pool, filters
 # TCP keepalive so the residential-proxy CONNECT tunnel is NOT idle-dropped while
 # the upstream model "thinks" before emitting its first SSE byte. Without this,
 # slow generations (large Hermes bodies) close the proxy tunnel mid-flight and the
-# assembled stream is "incomplete". Probes start after 15s idle, every 5s, 6 times.
+# assembled stream is "incomplete".
+# Aggressive settings: first probe after 10s idle, every 5s, 30 probes = ~160s total.
+# This covers the worst-case agentrouter thinking time (~90-120s) for large requests.
 _KEEPALIVE_OPTS = [
     (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
-    (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 15),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 10),
     (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5),
-    (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 6),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 30),
 ]
 
 
