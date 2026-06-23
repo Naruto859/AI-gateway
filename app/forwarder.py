@@ -16,10 +16,29 @@ content-type normalisation (agentrouter returns non-stream bodies as text/plain)
 """
 import time
 import json
+import socket
 import asyncio
 import httpx
 from starlette.responses import StreamingResponse, Response, JSONResponse
 from . import db, proxy_pool, filters
+
+
+# TCP keepalive so the residential-proxy CONNECT tunnel is NOT idle-dropped while
+# the upstream model "thinks" before emitting its first SSE byte. Without this,
+# slow generations (large Hermes bodies) close the proxy tunnel mid-flight and the
+# assembled stream is "incomplete". Probes start after 15s idle, every 5s, 6 times.
+_KEEPALIVE_OPTS = [
+    (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 15),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 6),
+]
+
+
+def _client(proxy_url, timeout):
+    """httpx.AsyncClient with TCP keepalive on the proxy connection."""
+    transport = httpx.AsyncHTTPTransport(proxy=proxy_url, socket_options=_KEEPALIVE_OPTS)
+    return httpx.AsyncClient(transport=transport, timeout=timeout)
 
 HOP_BY_HOP = {
     "host", "content-length", "connection", "keep-alive", "proxy-authenticate",
@@ -43,7 +62,20 @@ def _build_upstream_headers(request, upstream_key, kind):
         headers.pop("authorization", None)
         headers["x-api-key"] = upstream_key
         headers.setdefault("anthropic-version", "2023-06-01")
-    headers["user-agent"] = db.get_setting("user_agent", "claude-cli/1.0.60 (external, cli)")
+        # --- Claude Code fingerprint (required by agentrouter) ---
+        # agentrouter rejects "Anthropic/Python 0.87.0" (Hermes' SDK UA) with
+        # 401 "unauthorized client" — it only accepts claude-cli UA.
+        # Hermes already sends correct x-stainless-* headers via the Anthropic
+        # SDK (Lang=python, OS=Linux, Arch=x64, Runtime=CPython,
+        # Runtime-Version=3.x, Package-Version=0.87.0, Retry-Count, Timeout,
+        # Helper-Method, Async, etc.) so we leave those untouched.
+        headers["user-agent"] = "claude-cli/2.1.177 (external, cli)"
+        # Beta features the real Claude Code advertises — upstream may expect them
+        headers.setdefault("anthropic-beta",
+                           "claude-code-20250219,"
+                           "fine-grained-tool-streaming-2025-05-14,"
+                           "prompt-caching-2025-07-21,"
+                           "context-1m-2025-08-07")
     headers["accept-encoding"] = "identity"
     return headers
 
@@ -247,7 +279,7 @@ async def _consume_assemble(proxy, url, headers, body, timeout, kind):
     Returns ("respond", status, content_type, body_bytes) or ("retry", reason).
     """
     try:
-        async with httpx.AsyncClient(proxy=proxy["url"], timeout=timeout) as client:
+        async with _client(proxy["url"], timeout) as client:
             async with client.stream("POST", url, headers=headers, content=body) as r:
                 ct = r.headers.get("content-type", "")
                 if _is_waf(r.headers):
