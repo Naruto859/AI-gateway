@@ -27,13 +27,14 @@ from . import db, proxy_pool, filters
 # the upstream model "thinks" before emitting its first SSE byte. Without this,
 # slow generations (large Hermes bodies) close the proxy tunnel mid-flight and the
 # assembled stream is "incomplete".
-# Aggressive settings: first probe after 10s idle, every 5s, 30 probes = ~160s total.
-# This covers the worst-case agentrouter thinking time (~90-120s) for large requests.
+# 15-minute coverage: first probe after 30s idle, every 5s, 174 probes = ~900s.
+# This covers agentrouter's very slow thinking time for large requests with
+# memory injection (8K+ tokens, 90-180s typical).
 _KEEPALIVE_OPTS = [
     (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
-    (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 10),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30),
     (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5),
-    (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 30),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 174),
 ]
 
 
