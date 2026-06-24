@@ -1,0 +1,22 @@
+# NAT VPS: public reaches us only via forwarded host ports
+#   host 46813 -> VPS 80  (this block)
+#   host 44545 -> VPS 443 (HTTPS upgrade, added later if needed)
+# Serve plain HTTP on :80 for any host so the forwarded port just works.
+:80 {
+	reverse_proxy 127.0.0.1:8787 {
+		# stream Server-Sent Events in real time (no buffering)
+		flush_interval -1
+		# Slow agentrouter generations + retries can take many minutes.
+		# Caddy's default proxy timeout (~120s) was cutting long requests
+		# with status 502 — the main server (via public URL) hit this on
+		# every slow/image request; the local VPS bypasses Caddy so never
+		# saw it. Match the gateway's own 1200s read_timeout so Caddy never
+		# gives up before the gateway does.
+		transport http {
+			dial_timeout 30s
+			read_timeout 1800s
+			write_timeout 1800s
+			response_header_timeout 1800s
+		}
+	}
+}
