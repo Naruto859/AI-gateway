@@ -125,6 +125,48 @@ def _with_stream(body_bytes, want):
     return json.dumps(d, ensure_ascii=False).encode("utf-8")
 
 
+def _strip_thinking(body_bytes):
+    """Remove `thinking` / `redacted_thinking` content blocks from the message history.
+
+    Why: real Claude Code replays its previous turns *including* the assistant's
+    {"type":"thinking","thinking":"...","signature":"..."} blocks. agentrouter's
+    older /v1/messages schema does not accept inbound thinking blocks and rejects
+    the whole request with 400 "thinking: Field required" (its validator mismatches
+    on the block shape). We are NOT the model — we never need to send these back
+    upstream — so we drop them before forwarding. The current turn's generation is
+    untouched; only the echoed history is cleaned.
+
+    Returns (body_bytes, n_removed). Non-JSON / unexpected shapes pass through.
+    """
+    try:
+        d = json.loads(body_bytes)
+    except Exception:
+        return body_bytes, 0
+    msgs = d.get("messages")
+    if not isinstance(msgs, list):
+        return body_bytes, 0
+    removed = 0
+    changed = False
+    for m in msgs:
+        c = m.get("content")
+        if not isinstance(c, list):
+            continue
+        kept = []
+        for b in c:
+            if isinstance(b, dict) and b.get("type") in ("thinking", "redacted_thinking"):
+                removed += 1
+                changed = True
+                continue
+            kept.append(b)
+        if not kept:
+            # an assistant turn that was ONLY thinking — keep it valid with empty text
+            kept = [{"type": "text", "text": ""}]
+        m["content"] = kept
+    if not changed:
+        return body_bytes, 0
+    return json.dumps(d, ensure_ascii=False).encode("utf-8"), removed
+
+
 def _parse_block(block):
     """Parse one raw SSE block (bytes) -> (event:str|None, data:str|None)."""
     event = None
@@ -377,6 +419,11 @@ async def forward(request, path):
         db.add_log(method=request.method, path=path, status=400, proxy="", attempts=0,
                    stream=0, redactions=0, ms=0, note="blocked by content filter")
         return _err("Request blocked by content filter.", 400, "invalid_request_error")
+
+    # Strip echoed thinking blocks from history — agentrouter's schema rejects them
+    # with 400 "thinking: Field required". Only relevant for /v1/messages bodies.
+    if "chat/completions" not in path:
+        body, _thk = _strip_thinking(body)
 
     try:
         client_wants_stream = bool(json.loads(body).get("stream"))

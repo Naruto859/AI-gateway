@@ -110,8 +110,8 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .eprank{width:26px;height:26px;border-radius:8px;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;font-size:13px;font-weight:740;display:grid;place-items:center;flex:none}
 .hidden{display:none}
 .muted{text-align:center;color:var(--ink-faint);font-size:13px;padding:18px}
-.login{position:fixed;inset:0;display:grid;place-items:center;z-index:100;padding:20px}
-.loginbox{background:rgba(255,255,255,.86);border:1px solid var(--line);border-radius:22px;box-shadow:0 20px 60px rgba(40,70,90,.2);padding:32px 26px;max-width:340px;width:100%;text-align:center;animation:rise .5s ease both}
+.login{position:fixed;inset:0;display:grid;place-items:center;z-index:100;padding:20px;background:#f0f6f2}
+.loginbox{background:#fff;border:1px solid var(--line);border-radius:22px;box-shadow:0 20px 60px rgba(40,70,90,.2);padding:32px 26px;max-width:340px;width:100%;text-align:center;animation:rise .5s ease both}
 .loginbox h1{margin:0 0 4px;font-size:22px;font-weight:740;background:linear-gradient(120deg,#6fd6b0,#7fa8e6,#c79ae0);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .loginbox p{margin:0 0 20px;font-size:12.5px;color:var(--ink-faint)}
 .loginbox input{width:100%;text-align:left;margin-bottom:12px}
@@ -285,15 +285,33 @@ async function getState(){
 
 // login
 $('#loginBtn').onclick=async()=>{
-  const pw=$('#pw').value;
-  const ok=(await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})}).then(r=>r.json()).catch(()=>({ok:false}))).ok;
-  if(ok){TOK=pw;sessionStorage.setItem('mr_tok',pw);enter();}
-  else $('#loginErr').textContent='Wrong password';
+  const pw=$('#pw').value.trim();
+  const btn=$('#loginBtn');
+  $('#loginErr').textContent='';
+  btn.disabled=true;btn.textContent='Signing in…';
+  try{
+    const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+    const d=await r.json();
+    if(d.ok){TOK=pw;sessionStorage.setItem('mr_tok',pw);await enter();}
+    else{$('#loginErr').textContent='❌ Wrong password';}
+  }catch(e){$('#loginErr').textContent='❌ Connection error';}
+  finally{btn.disabled=false;btn.textContent='Sign in';}
 };
 $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#loginBtn').click()});
 async function enter(){
-  try{ST=await getState();}catch(e){sessionStorage.removeItem('mr_tok');TOK='';return;}
-  $('#login').classList.add('hidden');$('#app').classList.remove('hidden');render();
+  // 1) auth: fetch state. If THIS fails, the token is bad -> stay on login.
+  try{ST=await getState();}
+  catch(e){
+    sessionStorage.removeItem('mr_tok');TOK='';
+    $('#loginErr').textContent='❌ Wrong password';
+    $('#login').classList.remove('hidden');$('#app').classList.add('hidden');
+    return;
+  }
+  // 2) auth OK -> show the dashboard NOW, then paint. A render() error must
+  //    never trap us on the login screen with a stuck "Signing in…" button.
+  $('#login').classList.add('hidden');$('#app').classList.remove('hidden');
+  try{render();}
+  catch(e){console.error('render failed',e);toast('Loaded with a display glitch','bad');}
 }
 
 // tabs
@@ -331,7 +349,8 @@ $('#tgRotation').onclick=async()=>{const on=!$('#tgRotation').classList.contains
 $('#tgTranslate').onclick=async()=>{const on=!$('#tgTranslate').classList.contains('on');$('#tgTranslate').classList.toggle('on',on);await api('/admin/settings',{format_translation:on?'1':'0'});toast('Translation '+(on?'ON':'OFF'),'ok');};
 
 function render(){
-  const s=ST.settings,st=ST.stats||{};
+  const s=ST.settings||{},st=ST.stats||{};
+  ST.proxies=ST.proxies||[];ST.endpoints=ST.endpoints||[];ST.logs=ST.logs||[];ST.keywords=ST.keywords||[];
   // stats
   $('#s_ok').innerHTML=(st.success_pct!=null?st.success_pct:'—')+'<small>%</small>';
   $('#s_ms').innerHTML=st.avg_ms?(st.avg_ms/1000).toFixed(1)+'<small>s</small>':'—';
@@ -373,7 +392,7 @@ ${isPin?'<span class="badge pin">Pinned</span>':''}
   $$('#prxList [data-del]').forEach(b=>b.onclick=async e=>{e.stopPropagation();await api('/admin/proxy/delete',{id:+b.dataset.del});toast('Proxy removed','ok');await refresh();});
 }
 function renderEndpoints(){
-  const eps=ST.endpoints||[],primary=ST.settings.endpoint;
+  const eps=ST.endpoints||[],primary=ST.settings.endpoint||'https://agentrouter.org';
   let h=`<div class="ep"><span class="eprank">1</span><div class="pi"><div class="ip" style="font-family:inherit">${primary.replace(/^https?:\/\//,'')}</div><div class="tag">primary · always active</div></div><span class="st ok"></span></div>`;
   h+=eps.map((e,i)=>`<div class="ep"><span class="eprank">${i+2}</span><div class="pi"><div class="ip" style="font-family:inherit">${e.url.replace(/^https?:\/\//,'')}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI':'Anthropic'} · fallback</div></div><button class="xbtn" data-epdel="${e.id}">×</button></div>`).join('');
   $('#epList').innerHTML=h;
