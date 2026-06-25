@@ -108,7 +108,7 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .log .lt{color:var(--ink-faint);font-family:ui-monospace,monospace;font-size:11.5px;flex:none}
 .ep{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;background:#fff}
 .eprank{width:26px;height:26px;border-radius:8px;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;font-size:13px;font-weight:740;display:grid;place-items:center;flex:none}
-.hidden{display:none}
+.hidden{display:none!important}
 .muted{text-align:center;color:var(--ink-faint);font-size:13px;padding:18px}
 .login{position:fixed;inset:0;display:grid;place-items:center;z-index:100;padding:20px;background:#f0f6f2}
 .loginbox{background:#fff;border:1px solid var(--line);border-radius:22px;box-shadow:0 20px 60px rgba(40,70,90,.2);padding:32px 26px;max-width:340px;width:100%;text-align:center;animation:rise .5s ease both}
@@ -269,7 +269,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="toast" id="toast"></div>
 <script>
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-let TOK=sessionStorage.getItem('mr_tok')||'',ST=null;
+let TOK=localStorage.getItem('mr_tok')||'',ST=null;
 
 function toast(msg,k){const t=$('#toast');t.textContent=msg;t.className='toast '+(k||'')+' show';clearTimeout(t._h);t._h=setTimeout(()=>t.className='toast',2400)}
 async function api(path,body){
@@ -283,6 +283,17 @@ async function getState(){
   return r.json();
 }
 
+// show the dashboard panel (no auth gate — caller already verified the password)
+function showApp(){
+  $('#login').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+}
+function showLogin(msg){
+  $('#app').classList.add('hidden');
+  $('#login').classList.remove('hidden');
+  if(msg)$('#loginErr').textContent=msg;
+}
+
 // login
 $('#loginBtn').onclick=async()=>{
   const pw=$('#pw').value.trim();
@@ -292,26 +303,38 @@ $('#loginBtn').onclick=async()=>{
   try{
     const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
     const d=await r.json();
-    if(d.ok){TOK=pw;sessionStorage.setItem('mr_tok',pw);await enter();}
-    else{$('#loginErr').textContent='❌ Wrong password';}
-  }catch(e){$('#loginErr').textContent='❌ Connection error';}
+    if(d.ok){
+      // password is correct -> remember it and open the dashboard IMMEDIATELY.
+      TOK=pw;localStorage.setItem('mr_tok',pw);
+      showApp();
+      loadState();           // paint data; failures here never bounce us back
+    }else{
+      $('#loginErr').textContent='❌ Wrong password';
+    }
+  }catch(e){$('#loginErr').textContent='❌ Connection error — try again';}
   finally{btn.disabled=false;btn.textContent='Sign in';}
 };
 $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#loginBtn').click()});
-async function enter(){
-  // 1) auth: fetch state. If THIS fails, the token is bad -> stay on login.
-  try{ST=await getState();}
-  catch(e){
-    sessionStorage.removeItem('mr_tok');TOK='';
-    $('#loginErr').textContent='❌ Wrong password';
-    $('#login').classList.remove('hidden');$('#app').classList.add('hidden');
+
+// fetch state + paint. Used after login and on auto-resume. NEVER throws out.
+async function loadState(){
+  try{
+    ST=await getState();
+  }catch(e){
+    // token rejected -> only NOW go back to login
+    localStorage.removeItem('mr_tok');TOK='';
+    showLogin('❌ Session expired — sign in again');
     return;
   }
-  // 2) auth OK -> show the dashboard NOW, then paint. A render() error must
-  //    never trap us on the login screen with a stuck "Signing in…" button.
-  $('#login').classList.add('hidden');$('#app').classList.remove('hidden');
   try{render();}
   catch(e){console.error('render failed',e);toast('Loaded with a display glitch','bad');}
+}
+
+// auto-resume: if we already have a saved token, show the dashboard and load.
+async function boot(){
+  if(!TOK){showLogin();return;}
+  showApp();
+  loadState();
 }
 
 // tabs
@@ -440,6 +463,6 @@ $('#addKw').onclick=async()=>{
 $('#clearLogs').onclick=async()=>{await api('/admin/logs/clear');toast('Logs cleared','ok');await refresh();};
 
 setInterval(()=>{if(!$('#app').classList.contains('hidden'))refresh();},12000);
-if(TOK)enter();
+boot();
 </script>
 </body></html>

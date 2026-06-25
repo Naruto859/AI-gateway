@@ -46,14 +46,20 @@ def _build_proxy_url(ptype, host, port, user, pw):
 
 
 # ---------------- dashboard ----------------
+_NOCACHE = {"Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache", "Expires": "0"}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
-    return FileResponse(os.path.join(STATIC, "dashboard.html"))
+    # never let the browser cache the dashboard — stale HTML/JS was breaking login
+    return FileResponse(os.path.join(STATIC, "dashboard.html"), headers=_NOCACHE)
 
 
 @app.get("/app.js")
 async def appjs():
-    return FileResponse(os.path.join(STATIC, "app.js"), media_type="application/javascript")
+    return FileResponse(os.path.join(STATIC, "app.js"),
+                        media_type="application/javascript", headers=_NOCACHE)
 
 
 @app.get("/health")
