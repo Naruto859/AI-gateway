@@ -27,28 +27,38 @@ from . import db, proxy_pool, filters
 # TCP keepalive so the residential-proxy CONNECT tunnel is NOT idle-dropped while
 # the upstream model "thinks" before emitting its first SSE byte. Without this,
 # slow generations (large Hermes bodies) close the proxy tunnel mid-flight and the
-# assembled stream is "incomplete".
-# 15-minute coverage: first probe after 30s idle, every 5s, 174 probes = ~900s.
-# This covers agentrouter's very slow thinking time for large requests with
-# memory injection (8K+ tokens, 90-180s typical).
-_KEEPALIVE_OPTS = [
-    (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
-    (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30),
-    (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5),
-    (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 174),
-]
+# assembled stream is "incomplete". All three values are dashboard-tunable.
+def _keepalive_opts():
+    try:
+        idle = int(float(db.get_setting("keepalive_idle", "30") or 30))
+        intvl = int(float(db.get_setting("keepalive_intvl", "5") or 5))
+        cnt = int(float(db.get_setting("keepalive_cnt", "174") or 174))
+    except (TypeError, ValueError):
+        idle, intvl, cnt = 30, 5, 174
+    return [
+        (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+        (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, idle),
+        (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, intvl),
+        (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, cnt),
+    ]
 
 
 def _client(proxy_url, timeout):
     """httpx.AsyncClient with TCP keepalive on the proxy connection."""
-    transport = httpx.AsyncHTTPTransport(proxy=proxy_url, socket_options=_KEEPALIVE_OPTS)
+    transport = httpx.AsyncHTTPTransport(proxy=proxy_url, socket_options=_keepalive_opts())
     return httpx.AsyncClient(transport=transport, timeout=timeout)
 
 
 async def _retry_backoff(retry_num):
-    """Claude-Code-style exponential backoff + jitter.  min(1.0×2^retry_num, 8.0) + 0-25% jitter.
-    Spacing out retries prevents the Aliyun WAF from mistaking rapid-fire requests as an attack."""
-    delay = min(1.0 * (2 ** retry_num), 8.0)
+    """Claude-Code-style exponential backoff + jitter: min(initial×2^n, max) + 0-25% jitter.
+    Spacing out retries prevents the Aliyun WAF from mistaking rapid-fire requests as an attack.
+    Both bounds are dashboard-tunable."""
+    try:
+        initial = float(db.get_setting("retry_initial_delay", "1.0") or 1.0)
+        cap = float(db.get_setting("retry_max_delay", "8.0") or 8.0)
+    except (TypeError, ValueError):
+        initial, cap = 1.0, 8.0
+    delay = min(initial * (2 ** retry_num), cap)
     delay *= 0.75 + random.random() * 0.25
     await asyncio.sleep(delay)
 HOP_BY_HOP = {

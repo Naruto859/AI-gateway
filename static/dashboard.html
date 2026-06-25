@@ -1,209 +1,426 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI Gateway</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-tailwind.config = {
-  theme: { extend: { colors: {
-    clay:  "#d97757",
-    clay2: "#c2603f",
-    ink:   "#1a1916",
-    panel: "#262624",
-    panel2:"#2f2d2a",
-    line:  "#3a3833",
-    txt:   "#e8e6dc",
-    mut:   "#a3a097",
-    ok:    "#6fae6f",
-    bad:   "#d4675a",
-    warn:  "#d9a657",
-  }, fontFamily: { mono: ['ui-monospace','SFMono-Regular','Menlo','monospace'] } } }
-}
-</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Mugen Routes</title>
 <style>
-  body{background:#1a1916;color:#e8e6dc}
-  .card{background:#262624;border:1px solid #3a3833;border-radius:14px}
-  input,select,textarea{background:#1a1916;border:1px solid #3a3833;color:#e8e6dc;border-radius:9px}
-  input:focus,select:focus,textarea:focus{outline:none;border-color:#d97757}
-  .btn{background:#d97757;color:#1a1916;font-weight:600;border-radius:9px}
-  .btn:hover{background:#c2603f}
-  .btn-ghost{background:#2f2d2a;color:#e8e6dc;border:1px solid #3a3833;border-radius:9px}
-  .btn-ghost:hover{border-color:#d97757}
-  .pill{border-radius:999px;font-size:11px;padding:2px 9px}
-  .dot{width:9px;height:9px;border-radius:999px;display:inline-block}
-  ::-webkit-scrollbar{height:8px;width:8px}::-webkit-scrollbar-thumb{background:#3a3833;border-radius:8px}
-  .tab.active{color:#d97757;border-color:#d97757}
+:root{--g-50:#f0faf4;--g-100:#dcf5e6;--g-300:#86d6a8;--g-400:#4fbd82;--g-500:#2fa56a;--g-600:#1f8a56;--g-700:#1a6e46;--ink:#1d2a33;--ink-soft:#4a5a64;--ink-faint:#8595a0;--card:rgba(255,255,255,.72);--line:rgba(90,120,150,.18);--shadow:0 1px 2px rgba(40,60,80,.05),0 10px 30px rgba(40,70,90,.08);--r:18px;--c-mint:#a7e0c4;--c-mint-d:#3f9e78;--c-sky:#bad0f5;--c-sky-d:#5278c4;--c-lav:#e7c4f0;--c-lav-d:#9a63c0;--c-peach:#ffd6c4;--c-peach-d:#d77a4e;--c-pink:#f5c8e0;--c-pink-d:#c35a93;--c-aqua:#c4ece0;--c-aqua-d:#2f9e86}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);min-height:100vh;background:#eef2f8;-webkit-font-smoothing:antialiased;-webkit-overflow-scrolling:touch}
+.bg{position:fixed;inset:0;z-index:-1;overflow:hidden;background:#eef2f8;transform:translateZ(0);contain:strict}
+.mesh{position:absolute;inset:-25%;background:radial-gradient(40% 42% at 15% 15%,rgba(120,220,180,.95) 0%,rgba(120,220,180,0) 55%),radial-gradient(40% 42% at 85% 12%,rgba(130,180,250,.95) 0%,rgba(130,180,250,0) 55%),radial-gradient(38% 40% at 50% 6%,rgba(220,160,245,.92) 0%,rgba(220,160,245,0) 52%),radial-gradient(42% 44% at 78% 45%,rgba(255,185,150,.92) 0%,rgba(255,185,150,0) 56%),radial-gradient(40% 42% at 20% 48%,rgba(255,230,150,.9) 0%,rgba(255,230,150,0) 54%),radial-gradient(38% 40% at 50% 62%,rgba(255,170,205,.88) 0%,rgba(255,170,205,0) 54%);filter:blur(50px) saturate(1.5);animation:mesh 12s linear infinite}
+@keyframes mesh{0%{transform:rotate(0) scale(1.3)}100%{transform:rotate(360deg) scale(1.3)}}
+.mesh2{position:absolute;inset:-25%;opacity:.85;background:radial-gradient(42% 44% at 65% 20%,rgba(150,235,215,.9) 0%,rgba(150,235,215,0) 55%),radial-gradient(40% 42% at 30% 30%,rgba(255,180,215,.9) 0%,rgba(255,180,215,0) 56%),radial-gradient(40% 42% at 82% 60%,rgba(180,195,255,.88) 0%,rgba(180,195,255,0) 55%),radial-gradient(40% 42% at 40% 80%,rgba(190,230,160,.85) 0%,rgba(190,230,160,0) 55%);filter:blur(56px) saturate(1.4);animation:mesh2 16s linear infinite reverse}
+@keyframes mesh2{0%{transform:rotate(0) scale(1.35)}100%{transform:rotate(360deg) scale(1.35)}}
+.mesh3{position:absolute;inset:-25%;opacity:.7;background:radial-gradient(45% 48% at 40% 35%,rgba(170,210,255,.7) 0%,rgba(170,210,255,0) 60%),radial-gradient(45% 48% at 75% 75%,rgba(255,200,170,.7) 0%,rgba(255,200,170,0) 60%),radial-gradient(45% 48% at 20% 80%,rgba(210,180,255,.7) 0%,rgba(210,180,255,0) 60%);filter:blur(54px) saturate(1.3);animation:wave 14s linear infinite}
+@keyframes wave{0%{transform:rotate(0) scale(1.4)}100%{transform:rotate(-360deg) scale(1.4)}}
+.wrap{max-width:920px;margin:0 auto;padding:22px 16px 60px}
+header{display:flex;align-items:center;gap:13px;margin:4px 4px 22px;animation:rise .6s ease both}
+.logo3d{width:50px;height:50px;flex:none;display:grid;place-items:center}
+.logo3d svg{width:50px;height:50px;overflow:visible}
+.infBg{fill:none;stroke:rgba(120,150,180,.14);stroke-width:5;stroke-linecap:round}
+.inf{fill:none;stroke:url(#infGrad);stroke-width:5;stroke-linecap:round;stroke-dasharray:52 105;animation:infFlow 7s linear infinite;filter:drop-shadow(0 2px 5px rgba(90,120,180,.28))}
+@keyframes infFlow{0%{stroke-dashoffset:0}100%{stroke-dashoffset:-157}}
+.htext h1{margin:0;font-size:21px;font-weight:740;letter-spacing:-.4px;background:linear-gradient(120deg,#6fd6b0,#7fa8e6,#c79ae0,#ffb48a,#6fd6b0);background-size:300% auto;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:titleShift 9s linear infinite}
+@keyframes titleShift{0%{background-position:0% center}100%{background-position:300% center}}
+.htext p{margin:2px 0 0;font-size:12px;color:var(--ink-faint)}
+.pill{margin-left:auto;display:flex;align-items:center;gap:7px;background:var(--g-100);color:var(--g-700);padding:7px 13px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid var(--line)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--g-500);animation:pulse 2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(47,165,106,.5)}70%{box-shadow:0 0 0 7px rgba(47,165,106,0)}100%{box-shadow:0 0 0 0 rgba(47,165,106,0)}}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-bottom:20px}
+.stat{border:1px solid var(--line);border-radius:var(--r);padding:14px 15px;box-shadow:var(--shadow);animation:rise .6s ease both;transform:translateZ(0)}
+.stat:nth-child(1){background:linear-gradient(135deg,rgba(167,224,196,.45),var(--card))}
+.stat:nth-child(2){background:linear-gradient(135deg,rgba(186,208,245,.45),var(--card));animation-delay:.05s}
+.stat:nth-child(3){background:linear-gradient(135deg,rgba(231,196,240,.45),var(--card));animation-delay:.1s}
+.stat .k{font-size:12px;color:var(--ink-faint);font-weight:600}.stat .v{font-size:22px;font-weight:740;margin-top:4px;letter-spacing:-.5px}
+.stat .v small{font-size:13px;color:var(--ink-faint);font-weight:600}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:5px;background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:18px;box-shadow:var(--shadow);scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:none;padding:9px 15px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--ink-soft);border:none;background:transparent;cursor:pointer;white-space:nowrap;transition:.22s;display:flex;align-items:center;gap:6px}
+.tab svg{width:15px;height:15px}
+.tab[data-t="timers"].active{background:linear-gradient(145deg,var(--c-mint),var(--c-mint-d));color:#fff;box-shadow:0 4px 12px rgba(63,158,120,.32)}
+.tab[data-t="proxy"].active{background:linear-gradient(145deg,var(--c-sky),var(--c-sky-d));color:#fff;box-shadow:0 4px 12px rgba(82,120,196,.32)}
+.tab[data-t="keys"].active{background:linear-gradient(145deg,var(--c-lav),var(--c-lav-d));color:#fff;box-shadow:0 4px 12px rgba(154,99,192,.32)}
+.tab[data-t="endpoints"].active{background:linear-gradient(145deg,var(--c-peach),var(--c-peach-d));color:#fff;box-shadow:0 4px 12px rgba(215,122,78,.32)}
+.tab[data-t="logs"].active{background:linear-gradient(145deg,var(--c-aqua),var(--c-aqua-d));color:#fff;box-shadow:0 4px 12px rgba(47,158,134,.32)}
+.tab[data-t="filters"].active{background:linear-gradient(145deg,var(--c-pink),var(--c-pink-d));color:#fff;box-shadow:0 4px 12px rgba(195,90,147,.32)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:15px;box-shadow:var(--shadow);animation:rise .5s ease both;transform:translateZ(0)}
+.card h2{margin:0 0 3px;font-size:16px;font-weight:700;display:flex;align-items:center;gap:9px}
+.card h2 .ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;background:var(--g-100)}
+.card h2 .ic svg{width:17px;height:17px;stroke:var(--g-600)}
+[data-p="timers"] .ic{background:var(--c-mint)}[data-p="timers"] .ic svg{stroke:var(--c-mint-d)}
+[data-p="proxy"] .ic{background:var(--c-sky)}[data-p="proxy"] .ic svg{stroke:var(--c-sky-d)}
+[data-p="keys"] .ic{background:var(--c-lav)}[data-p="keys"] .ic svg{stroke:var(--c-lav-d)}
+[data-p="endpoints"] .ic{background:var(--c-peach)}[data-p="endpoints"] .ic svg{stroke:var(--c-peach-d)}
+[data-p="logs"] .ic{background:var(--c-aqua)}[data-p="logs"] .ic svg{stroke:var(--c-aqua-d)}
+[data-p="filters"] .ic{background:var(--c-pink)}[data-p="filters"] .ic svg{stroke:var(--c-pink-d)}
+.card .sub{margin:0 0 18px 39px;font-size:12.5px;color:var(--ink-faint)}
+.field{padding:14px 0;border-top:1px solid var(--line);display:flex;gap:14px;align-items:flex-start}
+.field:first-of-type{border-top:none}
+.field .meta{flex:1;min-width:0}.field .lbl{font-size:14px;font-weight:640}
+.field .desc{font-size:12px;color:var(--ink-faint);margin-top:3px;line-height:1.5}
+.field .ctrl{flex:none;display:flex;align-items:center}
+input[type=text],input[type=number],input[type=password]{font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);width:120px;text-align:right;transition:.2s;outline:none}
+input:focus{border-color:var(--c-mint-d);box-shadow:0 0 0 3px rgba(63,158,120,.16)}
+input.wide{width:100%;text-align:left}
+.csel{position:relative;display:inline-block;min-width:130px}.csel.wide{display:block;width:100%}
+.csel-btn{font:inherit;font-size:14px;font-weight:600;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:11px;padding:9px 36px 9px 13px;cursor:pointer;width:100%;text-align:left;transition:.2s;display:flex;align-items:center;gap:8px;position:relative}
+.csel-btn:hover{border-color:var(--c-mint-d);background:var(--g-50)}
+.csel-btn::after{content:"";position:absolute;right:13px;top:50%;width:9px;height:9px;border-right:2px solid var(--c-mint-d);border-bottom:2px solid var(--c-mint-d);transform:translateY(-65%) rotate(45deg);transition:.25s}
+.csel.open .csel-btn::after{transform:translateY(-35%) rotate(-135deg)}
+.csel.open .csel-btn{border-color:var(--c-mint-d);box-shadow:0 0 0 3px rgba(63,158,120,.16)}
+.csel-dot{width:9px;height:9px;border-radius:50%;flex:none}
+.csel-pop{position:absolute;top:calc(100% + 7px);left:0;right:0;min-width:200px;background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(40,70,90,.18);padding:6px;z-index:50;opacity:0;transform:translateY(-8px) scale(.97);pointer-events:none;transition:.2s cubic-bezier(.2,.8,.2,1);max-height:260px;overflow:auto;scrollbar-width:none}
+.csel-pop::-webkit-scrollbar{display:none}
+.csel.open .csel-pop{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
+.csel-opt{padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;display:flex;align-items:center;gap:9px;transition:.14s}
+.csel-opt:hover{background:var(--g-50);color:var(--ink)}.csel-opt.sel{background:var(--g-100);color:var(--g-700)}
+.csel-opt .ck{margin-left:auto;width:16px;height:16px;opacity:0;transition:.14s}.csel-opt.sel .ck{opacity:1}
+.unit{font-size:12px;color:var(--ink-faint);margin-left:7px;font-weight:600}
+.tg{width:48px;height:28px;border-radius:999px;background:#cfe3d6;position:relative;cursor:pointer;transition:.28s;flex:none}
+.tg::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.18);transition:.28s}
+.tg.on{background:linear-gradient(145deg,var(--g-400),var(--g-600))}.tg.on::after{transform:translateX(20px)}
+.prx{display:flex;align-items:center;gap:11px;padding:12px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;background:#fff;transition:.2s}
+.prx:hover{border-color:var(--g-300);box-shadow:0 6px 16px rgba(31,138,86,.1)}
+.prx .st{width:9px;height:9px;border-radius:50%;flex:none}
+.st.ok{background:var(--g-500);box-shadow:0 0 7px rgba(47,165,106,.55)}
+.st.warn{background:#e3a92f}.st.dead{background:#d35a5a}
+.prx .pi{flex:1;min-width:0}.prx .ip{font-size:13.5px;font-weight:640;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prx .tag{font-size:11px;color:var(--ink-faint);margin-top:2px}
+.badge{font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:7px;text-transform:uppercase;letter-spacing:.4px;flex:none}
+.badge.http{background:#e3f0ff;color:#2b6cb0}.badge.https{background:#e0f5ec;color:#1f8a56}
+.badge.socks5,.badge.socks4{background:#f0e8ff;color:#7c4dca}
+.badge.pin{background:var(--g-100);color:var(--g-700)}
+.xbtn{width:26px;height:26px;border:none;border-radius:8px;background:#f4f6f9;color:#94a3ad;cursor:pointer;font-size:15px;flex:none;transition:.15s;display:grid;place-items:center}
+.xbtn:hover{background:#fbe4e4;color:#c0392b}.xbtn.t:hover{background:var(--g-100);color:var(--g-700)}
+.addbox{background:var(--g-50);border:1px dashed var(--g-300);border-radius:14px;padding:15px;margin-top:6px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:9px}.grid2 .full{grid-column:1/-1}
+label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;margin:0 0 4px 2px}
+.btn{font:inherit;font-size:14px;font-weight:650;padding:11px 18px;border-radius:12px;border:none;cursor:pointer;transition:.2s;background:linear-gradient(145deg,var(--g-500),var(--g-600));color:#fff;box-shadow:0 4px 13px rgba(31,138,86,.3);width:100%}
+.btn:active{transform:scale(.98)}.btn:disabled{opacity:.6;cursor:default}
+.btn.ghost{background:#fff;color:var(--g-700);border:1px solid var(--g-300);box-shadow:none}
+.log{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:11px;font-size:12.5px;margin-bottom:6px;background:#fff;border:1px solid var(--line)}
+.log .code{font-weight:740;font-family:ui-monospace,monospace;padding:2px 8px;border-radius:6px;font-size:12px;flex:none}
+.code.s2{background:var(--g-100);color:var(--g-700)}.code.s5{background:#fbe4e4;color:#c0392b}.code.s4{background:#fdf0d8;color:#b8841f}
+.log .ld{flex:1;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log .lt{color:var(--ink-faint);font-family:ui-monospace,monospace;font-size:11.5px;flex:none}
+.ep{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;background:#fff}
+.eprank{width:26px;height:26px;border-radius:8px;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;font-size:13px;font-weight:740;display:grid;place-items:center;flex:none}
+.hidden{display:none}
+.muted{text-align:center;color:var(--ink-faint);font-size:13px;padding:18px}
+.login{position:fixed;inset:0;display:grid;place-items:center;z-index:100;padding:20px}
+.loginbox{background:rgba(255,255,255,.86);border:1px solid var(--line);border-radius:22px;box-shadow:0 20px 60px rgba(40,70,90,.2);padding:32px 26px;max-width:340px;width:100%;text-align:center;animation:rise .5s ease both}
+.loginbox h1{margin:0 0 4px;font-size:22px;font-weight:740;background:linear-gradient(120deg,#6fd6b0,#7fa8e6,#c79ae0);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.loginbox p{margin:0 0 20px;font-size:12.5px;color:var(--ink-faint)}
+.loginbox input{width:100%;text-align:left;margin-bottom:12px}
+.err{color:#c0392b;font-size:12px;margin:-6px 0 12px;min-height:14px}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(80px);background:#1d2a33;color:#fff;padding:12px 20px;border-radius:13px;font-size:13.5px;font-weight:600;box-shadow:0 12px 36px rgba(0,0,0,.28);z-index:200;opacity:0;transition:.32s;max-width:90%;text-align:center}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.toast.ok{background:linear-gradient(145deg,var(--g-500),var(--g-600))}.toast.bad{background:linear-gradient(145deg,#d35a5a,#b83f3f)}
+footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:600px){.stat .v{font-size:19px}.grid2{grid-template-columns:1fr}.field input{width:100px}}
 </style>
 </head>
-<body class="font-mono text-sm">
+<body>
+<div class="bg"><div class="mesh"></div><div class="mesh2"></div><div class="mesh3"></div></div>
+<svg width="0" height="0" style="position:absolute"><defs><linearGradient id="infGrad" x1="0" y1="0" x2="56" y2="32" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5fcf9f"/><stop offset=".35" stop-color="#6fa8e6"/><stop offset=".7" stop-color="#b98fe0"/><stop offset="1" stop-color="#ffac82"/></linearGradient></defs></svg>
 
-<!-- login -->
-<div id="login" class="fixed inset-0 z-50 flex items-center justify-center bg-ink/95">
-  <div class="card p-7 w-[320px]">
-    <div class="text-clay text-lg font-bold mb-1">⚕ AI Gateway</div>
-    <div class="text-mut text-xs mb-5">Enter admin password</div>
-    <input id="loginpw" type="password" class="w-full px-3 py-2 mb-3" placeholder="password" autofocus>
-    <button onclick="doLogin()" class="btn w-full py-2">Unlock</button>
-    <div id="loginerr" class="text-bad text-xs mt-3 hidden">Wrong password</div>
-  </div>
+<!-- LOGIN -->
+<div class="login" id="login">
+<div class="loginbox">
+<div class="logo3d" style="margin:0 auto 14px"><svg viewBox="0 0 56 32"><path class="infBg" d="M48,16 L47.3,18.4 L45.5,20.5 L43,21.9 L40,22.5 L37,22 L34.2,20.5 L32,18.4 L30.8,16 L30,14 L28.8,12 L27,10.5 L24.5,10 L22,10.5 L20,12 L18.8,14 L18.3,16 L18.8,18 L20,20 L22,21.5 L24.5,22 L27,21.5 L29,20 L30.2,18 L31,16 L32,14 L34.2,11.5 L37,10 L40,9.5 L43,10.1 L45.5,11.5 L47.3,13.6 Z"/><path class="inf" d="M48,16 L47.3,18.4 L45.5,20.5 L43,21.9 L40,22.5 L37,22 L34.2,20.5 L32,18.4 L30.8,16 L30,14 L28.8,12 L27,10.5 L24.5,10 L22,10.5 L20,12 L18.8,14 L18.3,16 L18.8,18 L20,20 L22,21.5 L24.5,22 L27,21.5 L29,20 L30.2,18 L31,16 L32,14 L34.2,11.5 L37,10 L40,9.5 L43,10.1 L45.5,11.5 L47.3,13.6 Z"/></svg></div>
+<h1>Mugen&nbsp;Routes</h1><p>Sign in to control panel</p>
+<input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+<div class="err" id="loginErr"></div>
+<button class="btn" id="loginBtn">Sign in</button>
+</div>
 </div>
 
-<!-- app -->
-<div id="app" class="hidden max-w-5xl mx-auto px-4 pb-24">
-  <!-- header -->
-  <div class="flex items-center justify-between py-5 sticky top-0 bg-ink z-30">
-    <div class="flex items-center gap-2">
-      <span class="text-clay text-xl font-bold">⚕ AI Gateway</span>
-      <span id="hdrCounts" class="text-mut text-xs ml-2"></span>
-    </div>
-    <button onclick="logout()" class="btn-ghost px-3 py-1 text-xs">Lock</button>
-  </div>
-
-  <!-- tabs -->
-  <div class="flex gap-5 border-b border-line mb-5 text-mut overflow-x-auto">
-    <button class="tab active border-b-2 border-transparent pb-2 whitespace-nowrap" data-tab="conn" onclick="tab('conn')">Connection</button>
-    <button class="tab border-b-2 border-transparent pb-2 whitespace-nowrap" data-tab="proxies" onclick="tab('proxies')">Proxies</button>
-    <button class="tab border-b-2 border-transparent pb-2 whitespace-nowrap" data-tab="filter" onclick="tab('filter')">Filter</button>
-    <button class="tab border-b-2 border-transparent pb-2 whitespace-nowrap" data-tab="logs" onclick="tab('logs')">Logs</button>
-    <button class="tab border-b-2 border-transparent pb-2 whitespace-nowrap" data-tab="settings" onclick="tab('settings')">Settings</button>
-  </div>
-
-  <!-- CONNECTION -->
-  <section data-pane="conn" class="space-y-4">
-    <div class="card p-5">
-      <div class="font-semibold mb-3 text-clay">Upstream endpoint</div>
-      <label class="text-mut text-xs">Endpoint base URL</label>
-      <input id="s_endpoint" class="w-full px-3 py-2 mt-1 mb-3" placeholder="https://agentrouter.org">
-      <div class="grid sm:grid-cols-2 gap-3">
-        <div>
-          <label class="text-mut text-xs">Gateway key <span class="text-mut/60">(clients send this)</span></label>
-          <input id="s_gateway_key" class="w-full px-3 py-2 mt-1" placeholder="sk-...">
-        </div>
-        <div>
-          <label class="text-mut text-xs">Upstream key <span class="text-mut/60">(sent to endpoint)</span></label>
-          <input id="s_upstream_key" class="w-full px-3 py-2 mt-1" placeholder="sk-...">
-        </div>
-      </div>
-      <label class="flex items-center gap-2 mt-3 text-xs text-mut">
-        <input id="s_require_client_key" type="checkbox" class="w-4 h-4 accent-clay">
-        Require clients to present the gateway key
-      </label>
-      <button onclick="saveConn()" class="btn px-4 py-2 mt-4">Save</button>
-    </div>
-
-    <div class="card p-5">
-      <div class="font-semibold mb-2 text-clay">Point your agent here</div>
-      <div class="text-mut text-xs mb-3">Set these in Hermes / Claude Code / any Anthropic SDK client. Model: <span class="text-txt">claude-opus-4-8</span></div>
-      <pre id="agentCfg" class="bg-ink border border-line rounded-lg p-3 text-xs whitespace-pre-wrap text-txt"></pre>
-    </div>
-  </section>
-
-  <!-- PROXIES -->
-  <section data-pane="proxies" class="space-y-4 hidden">
-    <div class="card p-5">
-      <div class="flex items-center justify-between mb-3">
-        <div class="font-semibold text-clay">Add proxies</div>
-        <div id="proxyCounts" class="text-xs text-mut"></div>
-      </div>
-      <textarea id="proxyInput" rows="3" class="w-full px-3 py-2 text-xs" placeholder="user:pass@ip:port  (one per line — paste many at once)"></textarea>
-      <div class="flex items-center gap-2 mt-3">
-        <button onclick="addProxies()" class="btn px-4 py-2">Add</button>
-        <button onclick="refresh()" class="btn-ghost px-3 py-2 text-xs">Refresh</button>
-        <span class="text-mut text-xs">Tip: test a few only — don't hammer all at once.</span>
-      </div>
-    </div>
-    <div class="card p-0 overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full text-xs">
-          <thead class="text-mut border-b border-line">
-            <tr class="text-left">
-              <th class="px-3 py-2">Status</th><th class="px-3 py-2">Proxy</th>
-              <th class="px-3 py-2">Exit IP</th><th class="px-3 py-2">ms</th>
-              <th class="px-3 py-2">ok/fail</th><th class="px-3 py-2 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="proxyRows"></tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <!-- FILTER -->
-  <section data-pane="filter" class="space-y-4 hidden">
-    <div class="card p-5">
-      <div class="font-semibold mb-3 text-clay">Add blocked / sensitive content</div>
-      <div class="grid sm:grid-cols-[1fr_130px_1fr_auto] gap-2 items-end">
-        <div><label class="text-mut text-xs">Keyword / value</label>
-          <input id="kwValue" class="w-full px-3 py-2 mt-1" placeholder="e.g. secret-token or 10.0.0.1"></div>
-        <div><label class="text-mut text-xs">Mode</label>
-          <select id="kwMode" class="w-full px-3 py-2 mt-1">
-            <option value="redact">redact</option><option value="block">block</option>
-          </select></div>
-        <div><label class="text-mut text-xs">Replacement</label>
-          <input id="kwRepl" class="w-full px-3 py-2 mt-1" value="[REDACTED]"></div>
-        <button onclick="addKeyword()" class="btn px-4 py-2">+ Add</button>
-      </div>
-      <div class="text-mut text-xs mt-2">redact = replace before sending · block = reject the whole request</div>
-    </div>
-    <div class="card p-0 overflow-hidden">
-      <table class="w-full text-xs">
-        <thead class="text-mut border-b border-line"><tr class="text-left">
-          <th class="px-3 py-2">Value</th><th class="px-3 py-2">Mode</th>
-          <th class="px-3 py-2">Replacement</th><th class="px-3 py-2 text-right">Actions</th>
-        </tr></thead>
-        <tbody id="kwRows"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- LOGS -->
-  <section data-pane="logs" class="space-y-4 hidden">
-    <div class="flex items-center gap-2">
-      <button onclick="refresh()" class="btn-ghost px-3 py-2 text-xs">Refresh</button>
-      <button onclick="clearLogs()" class="btn-ghost px-3 py-2 text-xs">Clear</button>
-    </div>
-    <div class="card p-0 overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full text-xs">
-          <thead class="text-mut border-b border-line"><tr class="text-left">
-            <th class="px-3 py-2">Time</th><th class="px-3 py-2">Path</th>
-            <th class="px-3 py-2">Status</th><th class="px-3 py-2">Proxy</th>
-            <th class="px-3 py-2">Try</th><th class="px-3 py-2">ms</th><th class="px-3 py-2">Note</th>
-          </tr></thead>
-          <tbody id="logRows"></tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <!-- SETTINGS -->
-  <section data-pane="settings" class="space-y-4 hidden">
-    <div class="card p-5">
-      <div class="font-semibold mb-3 text-clay">Routing</div>
-      <div class="grid sm:grid-cols-3 gap-3">
-        <div><label class="text-mut text-xs">Max proxies / request</label>
-          <input id="s_max_retries" class="w-full px-3 py-2 mt-1"></div>
-        <div><label class="text-mut text-xs">Connect timeout (s)</label>
-          <input id="s_connect_timeout" class="w-full px-3 py-2 mt-1"></div>
-        <div><label class="text-mut text-xs">Read timeout (s)</label>
-          <input id="s_read_timeout" class="w-full px-3 py-2 mt-1"></div>
-      </div>
-      <label class="text-mut text-xs block mt-3">User-Agent sent upstream</label>
-      <input id="s_user_agent" class="w-full px-3 py-2 mt-1">
-      <button onclick="saveSettings()" class="btn px-4 py-2 mt-4">Save</button>
-    </div>
-    <div class="card p-5">
-      <div class="font-semibold mb-3 text-clay">Change admin password</div>
-      <input id="s_admin_password" type="password" class="w-full px-3 py-2" placeholder="new password">
-      <button onclick="savePassword()" class="btn px-4 py-2 mt-3">Update</button>
-    </div>
-  </section>
+<!-- APP -->
+<div class="wrap hidden" id="app">
+<header>
+<div class="logo3d"><svg viewBox="0 0 56 32"><path class="infBg" d="M48,16 L47.3,18.4 L45.5,20.5 L43,21.9 L40,22.5 L37,22 L34.2,20.5 L32,18.4 L30.8,16 L30,14 L28.8,12 L27,10.5 L24.5,10 L22,10.5 L20,12 L18.8,14 L18.3,16 L18.8,18 L20,20 L22,21.5 L24.5,22 L27,21.5 L29,20 L30.2,18 L31,16 L32,14 L34.2,11.5 L37,10 L40,9.5 L43,10.1 L45.5,11.5 L47.3,13.6 Z"/><path class="inf" d="M48,16 L47.3,18.4 L45.5,20.5 L43,21.9 L40,22.5 L37,22 L34.2,20.5 L32,18.4 L30.8,16 L30,14 L28.8,12 L27,10.5 L24.5,10 L22,10.5 L20,12 L18.8,14 L18.3,16 L18.8,18 L20,20 L22,21.5 L24.5,22 L27,21.5 L29,20 L30.2,18 L31,16 L32,14 L34.2,11.5 L37,10 L40,9.5 L43,10.1 L45.5,11.5 L47.3,13.6 Z"/></svg></div>
+<div class="htext"><h1>Mugen&nbsp;Routes</h1><p>Infinite routing &amp; reliability</p></div>
+<div class="pill" id="hpill"><span class="dot"></span><span id="hstatus">Online</span></div>
+</header>
+<div class="stats">
+<div class="stat"><div class="k">Success (24h)</div><div class="v" id="s_ok" style="color:var(--c-mint-d)">—</div></div>
+<div class="stat"><div class="k">Avg latency</div><div class="v" id="s_ms" style="color:var(--c-sky-d)">—</div></div>
+<div class="stat"><div class="k">Active proxies</div><div class="v" id="s_px" style="color:var(--c-lav-d)">—</div></div>
 </div>
+<div class="tabs">
+<button class="tab active" data-t="timers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 1h6"/></svg>Timers</button>
+<button class="tab" data-t="proxy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/><path d="M6 9v6"/></svg>Proxies</button>
+<button class="tab" data-t="keys"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8 2 2-3 3"/></svg>Keys</button>
+<button class="tab" data-t="endpoints"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg>Endpoints</button>
+<button class="tab" data-t="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Logs</button>
+<button class="tab" data-t="filters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h18l-7 8v6l-4 2v-8L3 4z"/></svg>Filters</button>
+</div>
+<!-- TIMERS -->
+<section data-p="timers">
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/></svg></span>Timeouts</h2>
+<p class="sub">How long the gateway waits before giving up on the upstream.</p>
+<div class="field"><div class="meta"><div class="lbl">Read timeout</div><div class="desc">Max seconds to wait for model response. Long generations need this large.</div></div><div class="ctrl"><input type="number" data-set="read_timeout"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Seconds to establish the proxy connection.</div></div><div class="ctrl"><input type="number" data-set="connect_timeout"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Max retries</div><div class="desc">Attempts per request before returning an error.</div></div><div class="ctrl"><input type="number" data-set="max_retries"></div></div>
+</div>
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="4"/></svg></span>Retry backoff</h2>
+<p class="sub">Spacing between retries — Claude-Code style, prevents WAF trigger.</p>
+<div class="field"><div class="meta"><div class="lbl">Initial delay</div><div class="desc">Wait before 1st retry. Doubles each time up to Max delay.</div></div><div class="ctrl"><input type="number" step="0.5" data-set="retry_initial_delay"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Max delay</div><div class="desc">Cap on the backoff wait — never grows past this.</div></div><div class="ctrl"><input type="number" step="0.5" data-set="retry_max_delay"><span class="unit">sec</span></div></div>
+</div>
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>TCP keepalive</h2>
+<p class="sub">Keeps proxy tunnel alive while the model "thinks". Stops idle-drops.</p>
+<div class="field"><div class="meta"><div class="lbl">Idle before probe</div><div class="desc">Seconds of silence before keepalive probes start.</div></div><div class="ctrl"><input type="number" data-set="keepalive_idle"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Probe interval</div><div class="desc">Gap between each probe.</div></div><div class="ctrl"><input type="number" data-set="keepalive_intvl"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Probe count</div><div class="desc">Coverage = idle + interval × count (≈15 min at defaults).</div></div><div class="ctrl"><input type="number" data-set="keepalive_cnt"></div></div>
+<button class="btn" id="saveTimers" style="margin-top:14px">Save timer settings</button>
+</div>
+</section>
+<!-- PROXY -->
+<section data-p="proxy" class="hidden">
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M16 3l5 5-5 5M21 8H9a4 4 0 00-4 4v9"/></svg></span>Rotation</h2>
+<p class="sub">Switch IPs when one fails.</p>
+<div class="field"><div class="meta"><div class="lbl">Auto rotation</div><div class="desc">OFF = use one pinned proxy (all retries same IP). ON = rotate across enabled proxies when one fails.</div></div><div class="ctrl"><div class="tg" id="tgRotation"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Dedicated proxy</div><div class="desc">Single IP used when rotation is OFF. Add this exit IP to agentrouter watchlist.</div></div><div class="ctrl" id="dedWrap"></div></div>
+</div>
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/></svg></span>Proxy pool <span id="prxCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
+<p class="sub">Tap ⟳ to test a proxy against the upstream endpoint.</p>
+<div id="prxList"></div>
+<div class="addbox">
+<label class="fl" style="font-size:13px;margin-bottom:10px">+ Add new proxy</label>
+<div class="grid2">
+<div><label class="fl">Type</label><div class="csel wide" id="newPtype" data-val="http"><button class="csel-btn">HTTP</button><div class="csel-pop"><div class="csel-opt sel" data-v="http">HTTP <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="https">HTTPS</div><div class="csel-opt" data-v="socks5">SOCKS5</div><div class="csel-opt" data-v="socks4">SOCKS4</div></div></div></div>
+<div><label class="fl">Host / IP</label><input class="wide" id="newHost" type="text" placeholder="217.181.91.60"></div>
+<div><label class="fl">Port</label><input class="wide" id="newPort" type="text" placeholder="3129"></div>
+<div><label class="fl">Username (opt)</label><input class="wide" id="newUser" type="text" placeholder="user"></div>
+<div class="full"><label class="fl">Password (opt)</label><input class="wide" id="newPass" type="password" placeholder="••••••"></div>
+</div>
+<button class="btn" id="addProxy">Add proxy</button>
+</div>
+</div>
+</section>
+<!-- KEYS -->
+<section data-p="keys" class="hidden">
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8 2 2-3 3"/></svg></span>Keys &amp; endpoint</h2>
+<p class="sub">Credentials and connection URLs.</p>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Gateway key — clients present this to us</label><input class="wide" type="text" data-set="gateway_key"></div>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Upstream key — we send this to the endpoint</label><input class="wide" type="text" data-set="upstream_key"></div>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Primary endpoint</label><input class="wide" type="text" data-set="endpoint"></div>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Local URL (same-VPS agents)</label><input class="wide" type="text" value="http://127.0.0.1:8787" readonly></div>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Public URL (remote agents via Caddy)</label><input class="wide" type="text" id="publicUrl" readonly></div>
+<button class="btn" id="saveKeys" style="margin-top:14px">Save keys</button>
+</div>
+</section>
+<!-- ENDPOINTS -->
+<section data-p="endpoints" class="hidden">
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints</h2>
+<p class="sub">Add backup providers. Top endpoint always used first; next one only when top fully fails all retries.</p>
+<div class="field"><div class="meta"><div class="lbl">Format translation</div><div class="desc">Auto-convert between Anthropic ↔ OpenAI format when endpoints use different APIs.</div></div><div class="ctrl"><div class="tg" id="tgTranslate"></div></div></div>
+<div id="epList" style="margin-top:6px"></div>
+<div class="addbox">
+<label class="fl" style="font-size:13px;margin-bottom:10px">+ Add endpoint</label>
+<div class="grid2">
+<div class="full"><label class="fl">Base URL</label><input class="wide" id="epUrl" type="text" placeholder="https://api.provider.com"></div>
+<div><label class="fl">API mode</label><div class="csel wide" id="epMode" data-val="anthropic_messages"><button class="csel-btn">Anthropic Messages</button><div class="csel-pop"><div class="csel-opt sel" data-v="anthropic_messages">Anthropic Messages <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="chat_completions">OpenAI Chat</div></div></div></div>
+<div><label class="fl">API key (opt)</label><input class="wide" id="epKey" type="password" placeholder="sk-..."></div>
+</div>
+<button class="btn" id="addEndpoint">Add endpoint</button>
+</div>
+</div>
+</section>
+<!-- LOGS -->
+<section data-p="logs" class="hidden">
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h10"/></svg></span>Recent requests</h2>
+<p class="sub">Live tail — refreshes every 12 seconds.</p>
+<div id="logList"></div>
+<button class="btn ghost" id="clearLogs" style="margin-top:12px">Clear logs</button>
+</div>
+</section>
+<!-- FILTERS -->
+<section data-p="filters" class="hidden">
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M3 4h18l-7 8v6l-4 2v-8L3 4z"/></svg></span>Content filters</h2>
+<p class="sub">Redact or block keywords before requests leave the gateway.</p>
+<div id="kwList"></div>
+<div class="addbox" style="margin-top:10px">
+<div class="grid2">
+<div class="full"><label class="fl">Keyword</label><input class="wide" id="kwVal" type="text" placeholder="secret-word"></div>
+<div><label class="fl">Mode</label><div class="csel wide" id="kwMode" data-val="redact"><button class="csel-btn">Redact</button><div class="csel-pop"><div class="csel-opt sel" data-v="redact">Redact <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="block">Block request</div></div></div></div>
+<div><label class="fl">Replace with</label><input class="wide" id="kwRepl" type="text" placeholder="[REDACTED]"></div>
+</div>
+<button class="btn" id="addKw">Add filter</button>
+</div>
+</div>
+</section>
+<footer>Mugen Routes · v1</footer>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+let TOK=sessionStorage.getItem('mr_tok')||'',ST=null;
 
-<div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 hidden card px-4 py-2 text-xs"></div>
+function toast(msg,k){const t=$('#toast');t.textContent=msg;t.className='toast '+(k||'')+' show';clearTimeout(t._h);t._h=setTimeout(()=>t.className='toast',2400)}
+async function api(path,body){
+  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','x-admin-token':TOK},body:JSON.stringify(body||{})});
+  if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
+  return r.json();
+}
+async function getState(){
+  const r=await fetch('/admin/state',{headers:{'x-admin-token':TOK}});
+  if(!r.ok)throw new Error('auth');
+  return r.json();
+}
 
-<script src="/app.js"></script>
-</body>
-</html>
+// login
+$('#loginBtn').onclick=async()=>{
+  const pw=$('#pw').value;
+  const ok=(await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})}).then(r=>r.json()).catch(()=>({ok:false}))).ok;
+  if(ok){TOK=pw;sessionStorage.setItem('mr_tok',pw);enter();}
+  else $('#loginErr').textContent='Wrong password';
+};
+$('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#loginBtn').click()});
+async function enter(){
+  try{ST=await getState();}catch(e){sessionStorage.removeItem('mr_tok');TOK='';return;}
+  $('#login').classList.add('hidden');$('#app').classList.remove('hidden');render();
+}
+
+// tabs
+$$('.tab').forEach(t=>t.onclick=()=>{
+  $$('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');
+  const tgt=t.dataset.t;$$('section[data-p]').forEach(s=>s.classList.toggle('hidden',s.dataset.p!==tgt));
+  window.scrollTo({top:0,behavior:'smooth'});
+});
+
+// custom dropdowns
+function initCsel(cs){
+  if(cs._i)return;cs._i=1;
+  const btn=cs.querySelector('.csel-btn');
+  btn.onclick=e=>{e.stopPropagation();const o=cs.classList.contains('open');$$('.csel.open').forEach(c=>c.classList.remove('open'));if(!o)cs.classList.add('open');};
+  cs.querySelectorAll('.csel-opt').forEach(opt=>opt.onclick=e=>{
+    e.stopPropagation();cs.querySelectorAll('.csel-opt').forEach(o=>o.classList.remove('sel'));opt.classList.add('sel');
+    btn.innerHTML=opt.childNodes[0].textContent.trim();
+    if(opt.dataset.v!==undefined)cs.dataset.val=opt.dataset.v;
+    cs.classList.remove('open');if(cs._cb)cs._cb(opt.dataset.v);
+  });
+}
+document.addEventListener('click',()=>$$('.csel.open').forEach(c=>c.classList.remove('open')));
+
+function mkCsel(id,opts,cur,cb){
+  const optHtml=opts.map(o=>`<div class="csel-opt${o.v===cur?' sel':''}" data-v="${o.v}">${o.l} <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div>`).join('');
+  const curL=(opts.find(o=>o.v===cur)||opts[0]||{}).l||cur;
+  const el=$('#'+id);
+  el.dataset.val=cur;
+  el.innerHTML=`<button class="csel-btn">${curL}</button><div class="csel-pop">${optHtml}</div>`;
+  el._cb=cb;initCsel(el);
+}
+
+// toggles
+$('#tgRotation').onclick=async()=>{const on=!$('#tgRotation').classList.contains('on');$('#tgRotation').classList.toggle('on',on);await api('/admin/settings',{auto_rotation:on?'1':'0'});toast('Auto rotation '+(on?'ON':'OFF'),'ok');};
+$('#tgTranslate').onclick=async()=>{const on=!$('#tgTranslate').classList.contains('on');$('#tgTranslate').classList.toggle('on',on);await api('/admin/settings',{format_translation:on?'1':'0'});toast('Translation '+(on?'ON':'OFF'),'ok');};
+
+function render(){
+  const s=ST.settings,st=ST.stats||{};
+  // stats
+  $('#s_ok').innerHTML=(st.success_pct!=null?st.success_pct:'—')+'<small>%</small>';
+  $('#s_ms').innerHTML=st.avg_ms?(st.avg_ms/1000).toFixed(1)+'<small>s</small>':'—';
+  const enp=ST.proxies.filter(p=>p.enabled).length;
+  $('#s_px').innerHTML=enp+'<small>/ '+ST.proxies.length+'</small>';
+  // setting inputs
+  $$('[data-set]').forEach(el=>{if(s[el.dataset.set]!==undefined)el.value=s[el.dataset.set];});
+  $('#publicUrl').value=location.origin;
+  // toggles
+  $('#tgRotation').classList.toggle('on',s.auto_rotation==='1');
+  $('#tgTranslate').classList.toggle('on',s.format_translation==='1');
+  // dedicated dropdown
+  const pin=s.dedicated_proxy_id;
+  const pxOpts=ST.proxies.map(p=>({v:String(p.id),l:'#'+p.id+' · '+p.url.split('@').pop()}));
+  mkCsel('dedWrap',[{v:'',l:'(first enabled)'},...pxOpts],String(pin||''),async v=>{await api('/admin/settings',{dedicated_proxy_id:v});toast('Dedicated proxy set','ok');ST.settings.dedicated_proxy_id=v;});
+  renderProxies();renderEndpoints();renderLogs();renderKeywords();
+  $$('.csel').forEach(initCsel);
+}
+
+function pst(p){if(p.status==='ok')return'ok';if(p.status==='banned'||p.status==='unhealthy')return'dead';return'warn';}
+function renderProxies(){
+  const pin=ST.settings.dedicated_proxy_id;
+  $('#prxCount').textContent=ST.proxies.length+' total';
+  $('#prxList').innerHTML=ST.proxies.slice(0,80).map(p=>{
+    const host=p.url.split('@').pop(),cl=pst(p);
+    const lat=p.latency_ms?' · '+(p.latency_ms/1000).toFixed(1)+'s':'';
+    const isPin=String(p.id)===String(pin);
+    return`<div class="prx">
+<span class="st ${cl}"></span><div class="pi"><div class="ip">${host}</div><div class="tag">#${p.id} · ${p.status||'unknown'}${lat} · ${p.success_count||0} ok</div></div>
+${isPin?'<span class="badge pin">Pinned</span>':''}
+<span class="badge ${p.ptype||'http'}">${(p.ptype||'http').toUpperCase()}</span>
+<button class="xbtn t" title="test" data-test="${p.id}">⟳</button>
+<button class="xbtn" title="delete" data-del="${p.id}">×</button>
+</div>`;
+  }).join('')||'<div class="muted">No proxies yet.</div>';
+  $$('#prxList [data-test]').forEach(b=>b.onclick=async e=>{e.stopPropagation();b.textContent='…';
+    try{const r=await api('/admin/proxy/test',{id:+b.dataset.test});toast(r.ok?'Clean ✓ '+r.exit_ip:r.detail,r.ok?'ok':'bad');await refresh();}catch(e){toast('Test failed','bad');b.textContent='⟳';}
+  });
+  $$('#prxList [data-del]').forEach(b=>b.onclick=async e=>{e.stopPropagation();await api('/admin/proxy/delete',{id:+b.dataset.del});toast('Proxy removed','ok');await refresh();});
+}
+function renderEndpoints(){
+  const eps=ST.endpoints||[],primary=ST.settings.endpoint;
+  let h=`<div class="ep"><span class="eprank">1</span><div class="pi"><div class="ip" style="font-family:inherit">${primary.replace(/^https?:\/\//,'')}</div><div class="tag">primary · always active</div></div><span class="st ok"></span></div>`;
+  h+=eps.map((e,i)=>`<div class="ep"><span class="eprank">${i+2}</span><div class="pi"><div class="ip" style="font-family:inherit">${e.url.replace(/^https?:\/\//,'')}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI':'Anthropic'} · fallback</div></div><button class="xbtn" data-epdel="${e.id}">×</button></div>`).join('');
+  $('#epList').innerHTML=h;
+  $$('#epList [data-epdel]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/delete',{id:+b.dataset.epdel});toast('Endpoint removed','ok');await refresh();});
+}
+function renderLogs(){
+  $('#logList').innerHTML=(ST.logs||[]).slice(0,40).map(l=>{
+    const c=l.status>=500?'s5':l.status>=400?'s4':'s2';
+    const t=l.ts?new Date(l.ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
+    const ms=l.ms?(l.ms>=1000?(l.ms/1000).toFixed(1)+'s':l.ms+'ms'):'';
+    let note=(l.note||'');if(note.length>40)note=note.slice(0,40)+'…';
+    return`<div class="log"><span class="code ${c}">${l.status}</span><span class="ld">${note}${l.attempts&&l.attempts>1?' · att '+l.attempts:''} ${ms?'· '+ms:''}</span><span class="lt">${t}</span></div>`;
+  }).join('')||'<div class="muted">No requests yet.</div>';
+}
+function renderKeywords(){
+  $('#kwList').innerHTML=(ST.keywords||[]).map(k=>`<div class="prx"><span class="st ${k.enabled?'ok':'dead'}"></span><div class="pi"><div class="ip" style="font-family:inherit">${k.value}</div><div class="tag">${k.mode==='block'?'block request':'redact → '+k.replacement}</div></div><div class="tg ${k.enabled?'on':''}" data-kwtg="${k.id}"></div><button class="xbtn" data-kwdel="${k.id}">×</button></div>`).join('')||'<div class="muted">No filters.</div>';
+  $$('[data-kwtg]').forEach(t=>t.onclick=async()=>{await api('/admin/keyword/toggle',{id:+t.dataset.kwtg});await refresh();});
+  $$('[data-kwdel]').forEach(b=>b.onclick=async()=>{await api('/admin/keyword/delete',{id:+b.dataset.kwdel});toast('Filter removed','ok');await refresh();});
+}
+async function refresh(){try{ST=await getState();render();}catch(e){}}
+
+// save buttons
+async function saveSettings(keys,lbl){const body={};keys.forEach(k=>{const el=$('[data-set="'+k+'"]');if(el)body[k]=el.value;});await api('/admin/settings',body);toast((lbl||'Settings')+' saved','ok');}
+$('#saveTimers').onclick=()=>saveSettings(['read_timeout','connect_timeout','max_retries','retry_initial_delay','retry_max_delay','keepalive_idle','keepalive_intvl','keepalive_cnt'],'Timers');
+$('#saveKeys').onclick=()=>saveSettings(['gateway_key','upstream_key','endpoint'],'Keys');
+
+$('#addProxy').onclick=async()=>{
+  const host=$('#newHost').value.trim(),port=$('#newPort').value.trim();
+  if(!host||!port){toast('Host and port required','bad');return;}
+  try{const r=await api('/admin/proxy/add',{ptype:$('#newPtype').dataset.val,host,port,user:$('#newUser').value.trim(),password:$('#newPass').value.trim()});
+    toast(r.added?'Proxy added ✓':'Already exists',r.added?'ok':'bad');
+    ['newHost','newPort','newUser','newPass'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});await refresh();}
+  catch(e){toast('Invalid: '+e.message,'bad');}
+};
+$('#addEndpoint').onclick=async()=>{
+  const url=$('#epUrl').value.trim();if(!url){toast('URL required','bad');return;}
+  try{await api('/admin/endpoint/add',{url,api_mode:$('#epMode').dataset.val,api_key:$('#epKey').value.trim()});toast('Endpoint added ✓','ok');$('#epUrl').value='';$('#epKey').value='';await refresh();}
+  catch(e){toast('Failed: '+e.message,'bad');}
+};
+$('#addKw').onclick=async()=>{
+  const v=$('#kwVal').value.trim();if(!v){toast('Keyword required','bad');return;}
+  await api('/admin/keyword/add',{value:v,mode:$('#kwMode').dataset.val,replacement:$('#kwRepl').value.trim()||'[REDACTED]'});
+  toast('Filter added ✓','ok');$('#kwVal').value='';$('#kwRepl').value='';await refresh();
+};
+$('#clearLogs').onclick=async()=>{await api('/admin/logs/clear');toast('Logs cleared','ok');await refresh();};
+
+setInterval(()=>{if(!$('#app').classList.contains('hidden'))refresh();},12000);
+if(TOK)enter();
+</script>
+</body></html>

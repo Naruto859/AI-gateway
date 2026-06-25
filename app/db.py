@@ -16,7 +16,7 @@ _conn = None
 
 # columns that update_proxy is allowed to set
 _PROXY_COLS = {
-    "url", "label", "enabled", "status", "exit_ip", "latency_ms",
+    "url", "label", "ptype", "enabled", "status", "exit_ip", "latency_ms",
     "fail_count", "success_count", "last_used", "last_checked", "note",
 }
 
@@ -27,12 +27,20 @@ DEFAULT_SETTINGS = {
     "require_client_key": "1",                    # 1 = clients must send the gateway_key
     "admin_password": "claude",                   # dashboard password (CHANGE THIS)
     "model_note": "claude-opus-4-8",              # informational
-    "max_retries": "4",                           # max proxies to try per request
-    "connect_timeout": "20",
-    "read_timeout": "900",                        # long generations need a wide read window
-    "user_agent": "claude-cli/1.0.60 (external, cli)",
-    "dedicated_proxy_id": "",                     # pin ALL requests to one proxy ("" = rotate)
-    "dedicated_strict": "0",                      # "1" = never fail over to the pool if the pin is dead
+    "max_retries": "10",                          # max attempts per request (same proxy or rotation)
+    "connect_timeout": "20",                      # seconds to establish the proxy connection
+    "read_timeout": "1200",                       # seconds to wait for upstream bytes (long generations)
+    "user_agent": "claude-cli/2.1.177 (external, cli)",  # Claude Code fingerprint (agentrouter requires this)
+    "dedicated_proxy_id": "",                     # pin ALL requests to one proxy ("" = first enabled)
+    "dedicated_strict": "0",                      # legacy; unused when auto_rotation drives selection
+    "auto_rotation": "0",                         # 1 = rotate across enabled proxies on fail; 0 = single dedicated
+    # --- retry backoff (Claude Code SDK formula: min(initial*2^n, max) + jitter) ---
+    "retry_initial_delay": "1.0",                 # seconds before first retry
+    "retry_max_delay": "8.0",                     # cap on the backoff delay
+    # --- TCP keepalive on the proxy tunnel (covers slow upstream "thinking") ---
+    "keepalive_idle": "30",                       # seconds idle before first probe
+    "keepalive_intvl": "5",                       # seconds between probes
+    "keepalive_cnt": "174",                       # probe count (idle + intvl*cnt = total coverage)
 }
 
 
@@ -56,6 +64,7 @@ def _init(c):
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             url           TEXT UNIQUE NOT NULL,
             label         TEXT    DEFAULT '',
+            ptype         TEXT    DEFAULT 'http',        -- http|https|socks5|socks4
             enabled       INTEGER DEFAULT 1,
             status        TEXT    DEFAULT 'unknown',   -- unknown|ok|banned|unhealthy
             exit_ip       TEXT    DEFAULT '',
@@ -86,12 +95,36 @@ def _init(c):
             ms         INTEGER,
             note       TEXT
         );
+        CREATE TABLE IF NOT EXISTS endpoints (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            url       TEXT UNIQUE NOT NULL,
+            api_mode  TEXT    DEFAULT 'anthropic_messages',  -- anthropic_messages|chat_completions
+            api_key   TEXT    DEFAULT '',                    -- '' = use global upstream_key
+            enabled   INTEGER DEFAULT 1,
+            priority  INTEGER DEFAULT 0,                     -- lower = tried first
+            status    TEXT    DEFAULT 'unknown',
+            note      TEXT    DEFAULT ''
+        );
         """
     )
     c.commit()
     # seed default settings (only missing keys)
     for k, v in DEFAULT_SETTINGS.items():
         c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
+    c.commit()
+    # --- migrations: add columns introduced after first deploy ---
+    cols = [r[1] for r in c.execute("PRAGMA table_info(proxies)").fetchall()]
+    if "ptype" not in cols:
+        c.execute("ALTER TABLE proxies ADD COLUMN ptype TEXT DEFAULT 'http'")
+        # infer type from existing url scheme
+        for row in c.execute("SELECT id, url FROM proxies").fetchall():
+            u = row[1] or ""
+            t = "http"
+            for scheme in ("socks5h", "socks5", "socks4", "https", "http"):
+                if u.startswith(scheme + "://"):
+                    t = "socks5" if scheme == "socks5h" else scheme
+                    break
+            c.execute("UPDATE proxies SET ptype=? WHERE id=?", (t, row[0]))
     c.commit()
 
 
@@ -132,10 +165,10 @@ def get_proxy(pid):
     return dict(row) if row else None
 
 
-def add_proxy(url, label=""):
+def add_proxy(url, label="", ptype="http"):
     with _lock:
         c = conn()
-        c.execute("INSERT OR IGNORE INTO proxies(url, label) VALUES (?, ?)", (url, label))
+        c.execute("INSERT OR IGNORE INTO proxies(url, label, ptype) VALUES (?, ?, ?)", (url, label, ptype))
         c.commit()
         return c.total_changes
 
@@ -245,3 +278,65 @@ def clear_logs():
         c = conn()
         c.execute("DELETE FROM logs")
         c.commit()
+
+
+# ----- endpoints (multi-provider failover) -----
+def list_endpoints():
+    with _lock:
+        return [dict(r) for r in conn().execute(
+            "SELECT * FROM endpoints ORDER BY priority, id").fetchall()]
+
+
+def add_endpoint(url, api_mode="anthropic_messages", api_key=""):
+    with _lock:
+        c = conn()
+        # new endpoint goes last in priority
+        nxt = c.execute("SELECT COALESCE(MAX(priority),0)+1 FROM endpoints").fetchone()[0]
+        c.execute("INSERT OR IGNORE INTO endpoints(url, api_mode, api_key, priority) VALUES (?,?,?,?)",
+                  (url, api_mode, api_key, nxt))
+        c.commit()
+        return c.total_changes
+
+
+def update_endpoint(eid, **fields):
+    allowed = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note"}
+    fields = {k: v for k, v in fields.items() if k in allowed}
+    if not fields:
+        return
+    cols = ", ".join(f"{k}=?" for k in fields)
+    with _lock:
+        c = conn()
+        c.execute(f"UPDATE endpoints SET {cols} WHERE id=?", list(fields.values()) + [eid])
+        c.commit()
+
+
+def delete_endpoint(eid):
+    with _lock:
+        c = conn()
+        c.execute("DELETE FROM endpoints WHERE id=?", (eid,))
+        c.commit()
+
+
+# ----- computed stats for the dashboard -----
+def stats(window_sec=86400):
+    """Real success rate / avg latency / counts over the recent window."""
+    import time as _t
+    cutoff = _t.time() - window_sec
+    with _lock:
+        rows = conn().execute(
+            "SELECT status, attempts, ms, stream FROM logs WHERE ts>=?", (cutoff,)).fetchall()
+    # only count real model calls (POST messages -> stream/buffered/assembled), skip 404 probes
+    real = [r for r in rows if r["status"] and r["status"] != 404]
+    total = len(real)
+    ok = sum(1 for r in real if 200 <= (r["status"] or 0) < 300)
+    fails = total - ok
+    oks_ms = [r["ms"] for r in real if 200 <= (r["status"] or 0) < 300 and r["ms"]]
+    avg_ms = round(sum(oks_ms) / len(oks_ms)) if oks_ms else 0
+    return {
+        "total": total,
+        "ok": ok,
+        "fails": fails,
+        "success_pct": round(ok / total * 100, 1) if total else 0.0,
+        "avg_ms": avg_ms,
+        "window_sec": window_sec,
+    }

@@ -14,7 +14,9 @@ app = FastAPI(title="AI Gateway", docs_url=None, redoc_url=None)
 # warm the DB / defaults at import
 db.conn()
 
-_PROXY_RE = re.compile(r"^(?:https?://)?(?:[^:@/\s]+:[^@/\s]+@)?[^:@/\s]+:\d+$")
+_PROXY_RE = re.compile(r"^(?:(?:https?|socks[45]h?)://)?(?:[^:@/\s]+:[^@/\s]+@)?[^:@/\s]+:\d+$")
+
+_SCHEME = {"http": "http", "https": "https", "socks5": "socks5", "socks4": "socks4"}
 
 
 def _require_admin(token):
@@ -27,9 +29,20 @@ def _normalize_proxy(line):
     line = line.strip()
     if not line:
         return None
-    if not line.startswith("http://") and not line.startswith("https://"):
+    if "://" not in line:
         line = "http://" + line
     return line
+
+
+def _build_proxy_url(ptype, host, port, user, pw):
+    """Compose a proxy URL from structured fields. socks5 -> socks5h (remote DNS)."""
+    scheme = _SCHEME.get((ptype or "http").lower(), "http")
+    if scheme == "socks5":
+        scheme = "socks5h"   # resolve DNS through the proxy
+    auth = ""
+    if user:
+        auth = f"{user}:{pw}@" if pw else f"{user}@"
+    return f"{scheme}://{auth}{host}:{port}"
 
 
 # ---------------- dashboard ----------------
@@ -73,6 +86,8 @@ async def state(x_admin_token: str = Header(default="")):
         "proxies": proxies,
         "counts": counts,
         "keywords": db.list_keywords(),
+        "endpoints": db.list_endpoints(),
+        "stats": db.stats(),
         "logs": db.recent_logs(80),
     }
 
@@ -88,6 +103,18 @@ async def upd_settings(payload: dict, x_admin_token: str = Header(default="")):
 @app.post("/admin/proxy/add")
 async def proxy_add(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
+    # structured single add (type/host/port/user/pass) takes priority if host given
+    host = (payload.get("host") or "").strip()
+    if host:
+        url = _build_proxy_url(payload.get("ptype", "http"), host,
+                               str(payload.get("port", "")).strip(),
+                               (payload.get("user") or "").strip(),
+                               (payload.get("password") or "").strip())
+        if not _PROXY_RE.match(url):
+            raise HTTPException(400, "invalid proxy fields")
+        added = db.add_proxy(url, ptype=(payload.get("ptype", "http") or "http").lower())
+        return {"added": added, "url": url.split("@")[-1]}
+    # bulk paste (one per line / comma) — type inferred from scheme
     raw = payload.get("text", "")
     urls = []
     for line in raw.replace(",", "\n").splitlines():
@@ -96,6 +123,33 @@ async def proxy_add(payload: dict, x_admin_token: str = Header(default="")):
             urls.append(u)
     added = db.bulk_add(urls)
     return {"added": added, "parsed": len(urls)}
+
+
+# ---------------- endpoints (multi-provider failover) ----------------
+@app.post("/admin/endpoint/add")
+async def endpoint_add(payload: dict, x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    url = (payload.get("url") or "").strip().rstrip("/")
+    if not url.startswith("http"):
+        raise HTTPException(400, "endpoint must be an http(s) URL")
+    mode = payload.get("api_mode", "anthropic_messages")
+    added = db.add_endpoint(url, mode, payload.get("api_key", ""))
+    return {"added": added}
+
+
+@app.post("/admin/endpoint/update")
+async def endpoint_update(payload: dict, x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    eid = payload.pop("id")
+    db.update_endpoint(eid, **payload)
+    return {"ok": True}
+
+
+@app.post("/admin/endpoint/delete")
+async def endpoint_delete(payload: dict, x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    db.delete_endpoint(payload["id"])
+    return {"ok": True}
 
 
 @app.post("/admin/proxy/toggle")

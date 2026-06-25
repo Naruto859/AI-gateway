@@ -30,28 +30,19 @@ def selectable():
 
 
 def ordered_for_request(max_n):
-    """Single dedicated proxy — NO rotation, NO failover (per user).
+    """Build the per-request proxy attempt list.
 
-    All requests go through exactly ONE pinned residential exit IP
-    (settings.dedicated_proxy_id) so the endpoint always sees the same stable
-    "real user" address. The gateway never switches to a different proxy on
-    failure: if the pinned proxy has a transient hiccup the request just errors
-    and the client retries through the same IP.
+    auto_rotation = "0" (default): ONE dedicated proxy (settings.dedicated_proxy_id),
+    repeated max_n times so transient WAF/timeout retries hit the SAME exit IP — the
+    endpoint always sees one stable "real user" address, never a switch.
 
-    Ban status is intentionally IGNORED for the pinned proxy: a WAF challenge is
-    transient (the residential IP/cookie resets), so a single bad response must
-    not drop the dedicated proxy out of service. This is what stops the old
-    "every proxy gets permanently banned until the pool is empty -> 503" bug.
+    auto_rotation = "1": pinned proxy first (2 in-place tries), then the rest of the
+    enabled pool as failover. When one IP is hard-down/WAF-blocked the request rolls
+    to the next IP instead of erroring. Use this with multiple whitelisted IPs.
 
-    Retry behaviour (like Claude Code): on a transient failure — a WAF HTML page
-    or an upstream that cuts the stream incomplete — we retry through the SAME
-    pinned proxy, NOT a different one. So we return the pinned proxy repeated
-    `max_n` times. forward()'s loop then re-attempts on the identical exit IP;
-    the endpoint never sees a switch, and the proxy is never dropped. This is
-    what fixes the "single try -> instant 503" problem without rotation.
-
-    If no proxy is pinned, the first enabled proxy is used (still single IP,
-    repeated for retries).
+    Ban status is intentionally IGNORED — a WAF challenge is transient (the residential
+    IP/cookie resets), so a single bad response must not drop a proxy out of service.
+    This is what stops the old "every proxy banned -> pool empty -> 503" bug.
     """
     enabled = [p for p in db.list_proxies() if p["enabled"]]
     if not enabled:
@@ -59,17 +50,35 @@ def ordered_for_request(max_n):
 
     retries = max(1, max_n)
     pin = db.get_setting("dedicated_proxy_id", "")
+    auto = db.get_setting("auto_rotation", "0") == "1"
+    pinned = None
     if pin:
         try:
             pin_id = int(pin)
         except (TypeError, ValueError):
             pin_id = None
         pinned = next((p for p in enabled if p["id"] == pin_id), None)
+
+    if not auto:
+        # ---- single dedicated proxy: same IP repeated for transparent retries ----
         if pinned:
             return [pinned] * retries
+        return [enabled[0]] * retries
 
-    # no valid pin: use the first enabled proxy (single IP, repeated for retries)
-    return [enabled[0]] * retries
+    # ---- auto rotation ON: pinned first, then the rest as failover ----
+    # Each distinct proxy is still retried a couple of times before moving on, so a
+    # transient WAF/timeout on the current IP recovers in place; a hard failure rolls
+    # to the next IP. Order: pinned (if any) -> health-sorted rest.
+    rest = [p for p in enabled if not (pinned and p["id"] == pinned["id"])]
+    rest.sort(key=lambda p: _RANK.get(p["status"], 3))
+    ordered = ([pinned] if pinned else []) + rest
+    # build the attempt list: 2 in-place tries per proxy, capped at `retries`
+    seq = []
+    for p in ordered:
+        seq.append(p); seq.append(p)
+        if len(seq) >= retries:
+            break
+    return seq[:retries] if seq else [enabled[0]] * retries
 
 
 def mark_good(pid, latency_ms=0):
