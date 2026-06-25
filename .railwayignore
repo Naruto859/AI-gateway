@@ -1,0 +1,10 @@
+data.db
+data.db-*
+.bak/
+.git/
+__pycache__/
+*.pyc
+*.log
+proxies.txt
+.env
+preview/

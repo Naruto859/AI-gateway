@@ -23,17 +23,27 @@ def main():
     if admin:
         db.set_setting("admin_password", admin)
 
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxies.txt")
+    # Proxy list: from the PROXIES env var (Railway / any host where proxies.txt
+    # is gitignored) OR proxies.txt (local dev). Env takes priority so secrets
+    # never live in the repo. PROXIES may be newline- or comma-separated.
+    raw_lines = []
+    env_proxies = os.environ.get("PROXIES", "")
+    if env_proxies:
+        raw_lines = env_proxies.replace(",", "\n").splitlines()
+    else:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxies.txt")
+        if os.path.exists(path):
+            with open(path) as f:
+                raw_lines = f.readlines()
+
     urls = []
-    if os.path.exists(path):
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if not line.startswith("http"):
-                    line = "http://" + line
-                urls.append(line)
+    for line in raw_lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not line.startswith("http") and "://" not in line:
+            line = "http://" + line
+        urls.append(line)
 
     added = db.bulk_add(urls)
     print(f"endpoint   = {endpoint}")
