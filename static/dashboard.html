@@ -58,6 +58,7 @@ header{display:flex;align-items:center;gap:13px;margin:4px 4px 22px;animation:ri
 [data-p="filters"] .ic{background:var(--c-pink)}[data-p="filters"] .ic svg{stroke:var(--c-pink-d)}
 .card .sub{margin:0 0 18px 39px;font-size:12.5px;color:var(--ink-faint)}
 .field{padding:14px 0;border-top:1px solid var(--line);display:flex;gap:14px;align-items:flex-start}
+.field.stack{flex-direction:column;gap:9px}.field.stack .ctrl{width:100%}.field.stack .ctrl .csel{width:100%}
 .field:first-of-type{border-top:none}
 .field .meta{flex:1;min-width:0}.field .lbl{font-size:14px;font-weight:640}
 .field .desc{font-size:12px;color:var(--ink-faint);margin-top:3px;line-height:1.5}
@@ -158,6 +159,13 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 #agentLog{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:9px}
 .agentpanel .chatin{border-top:1px solid var(--line)}
 .attbadge{align-self:flex-end;font-size:11px;color:var(--g-700);background:var(--g-50);border:1px solid var(--g-300);border-radius:8px;padding:3px 8px}
+.apavatar{width:30px;height:30px;border-radius:9px;background:linear-gradient(145deg,var(--g-400),var(--g-600));display:grid;place-items:center;flex:none}
+.apavatar svg{width:17px;height:17px}
+.apicon svg{width:16px;height:16px}
+.apsettings .fl{margin-top:10px}
+.apsettings input{width:100%;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:11px;padding:9px 12px;background:#fff}
+.apsettings input:focus{outline:none;border-color:var(--g-400);box-shadow:0 0 0 3px rgba(63,158,120,.14)}
+.apsettings .csel-btn{font-size:13px}
 .hidden{display:none!important}
 .muted{text-align:center;color:var(--ink-faint);font-size:13px;padding:18px}
 .login{position:fixed;inset:0;display:grid;place-items:center;z-index:100;padding:20px;background:#f0f6f2}
@@ -240,7 +248,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <p class="sub">Switch IPs when one fails.</p>
 <div class="field"><div class="meta"><div class="lbl">Auto rotation</div><div class="desc">OFF = use one pinned proxy (all retries same IP). ON = rotate across enabled proxies when one fails.</div></div><div class="ctrl"><div class="tg" id="tgRotation"></div></div></div>
 <div id="rotInfo" style="font-size:12px;color:var(--ink-faint);padding:2px 2px 8px;line-height:1.5"></div>
-<div class="field"><div class="meta"><div class="lbl">Dedicated proxy</div><div class="desc">Single IP used when rotation is OFF. Add this exit IP to agentrouter watchlist.</div></div><div class="ctrl" id="dedWrap"></div></div>
+<div class="field stack"><div class="meta"><div class="lbl">Dedicated proxy</div><div class="desc">Single IP used when rotation is OFF. Add this exit IP to agentrouter watchlist.</div></div><div class="ctrl" id="dedWrap"></div></div>
 </div>
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/></svg></span>Proxy pool <span id="prxCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
@@ -279,34 +287,39 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div id="keyList" style="margin-top:6px"></div>
 <button class="btn" id="createKey" style="margin-top:12px">+ Create new key</button>
 </div>
-<div class="card">
-<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg></span>Connection</h2>
-<p class="sub">Where your apps point, and the master key.</p>
-<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Master gateway key — always works</label><div class="copyrow"><input class="wide" type="text" data-set="gateway_key"><button class="xbtn cp" data-copyset="gateway_key" title="copy">⧉</button></div></div>
-<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Upstream key — gateway sends this to the endpoint</label><input class="wide" type="text" data-set="upstream_key"></div>
-<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Local URL (same-VPS agents)</label><div class="copyrow"><input class="wide" type="text" value="http://127.0.0.1:8787" readonly><button class="xbtn cp" data-copyval="http://127.0.0.1:8787" title="copy">⧉</button></div></div>
-<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Public URL (remote agents)</label><div class="copyrow"><input class="wide" type="text" id="publicUrl" readonly><button class="xbtn cp" id="cpPublic" title="copy">⧉</button></div></div>
-<button class="btn" id="saveKeys" style="margin-top:14px">Save connection</button>
-</div>
 </section>
 <!-- ENDPOINTS -->
 <section data-p="endpoints" class="hidden">
 <div class="card">
-<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints</h2>
-<p class="sub">Add backup providers. Top endpoint always used first; next one only when top fully fails all retries.</p>
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></span>Your gateway endpoint</h2>
+<p class="sub">This is the URL your apps connect to. Copy it into your client.</p>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Public endpoint URL</label><div class="copyrow"><input class="wide" type="text" id="publicUrl" readonly><button class="xbtn cp" id="cpPublic" title="copy">⧉</button></div></div>
+<div id="activeEpInfo" style="font-size:12px;color:var(--ink-faint);padding:8px 2px 2px;line-height:1.55"></div>
+</div>
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints <span id="epCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
+<p class="sub">Where the gateway forwards. Set one as primary; if it fails all retries the next is tried, then it loops back to primary.</p>
 <div class="field"><div class="meta"><div class="lbl">Format translation</div><div class="desc">Auto-convert between Anthropic ↔ OpenAI format when endpoints use different APIs.</div></div><div class="ctrl"><div class="tg" id="tgTranslate"></div></div></div>
 <div id="epList" style="margin-top:6px"></div>
 <div class="addbox">
 <label class="fl" style="font-size:13px;margin-bottom:10px">+ Add endpoint</label>
 <div class="grid2">
-<div class="full"><label class="fl">Base URL</label><input class="wide" id="epUrl" type="text" placeholder="https://api.provider.com"></div>
+<div class="full"><label class="fl">Base URL</label><input class="wide" id="epUrl" type="text" placeholder="https://api.provider.com/v1"></div>
 <div><label class="fl">API mode</label><div class="csel wide" id="epMode" data-val="anthropic_messages"><button class="csel-btn">Anthropic Messages</button><div class="csel-pop"><div class="csel-opt sel" data-v="anthropic_messages">Anthropic Messages <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="chat_completions">OpenAI Chat</div></div></div></div>
-<div><label class="fl">API key (opt)</label><input class="wide" id="epKey" type="password" placeholder="sk-..."></div>
+<div><label class="fl">API key</label><input class="wide" id="epKey" type="password" placeholder="sk-..."></div>
 </div>
 <button class="btn" id="addEndpoint">Add endpoint</button>
 </div>
 </div>
 </section>
+
+<!-- ENDPOINT SETTINGS MODAL -->
+<div class="modal" id="epSetModal">
+<div class="modalbox">
+<div class="modalhd"><h3 id="epSetTitle">Endpoint settings</h3><button class="x" id="epSetX">×</button></div>
+<div class="modalbody" id="epSetBody"></div>
+</div>
+</div>
 <!-- LOGS -->
 <section data-p="logs" class="hidden">
 <div class="card">
@@ -359,9 +372,9 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <!-- AGENT FAB + PANEL -->
 <button class="fab" id="agentFab" title="Mugen assistant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></button>
 <div class="agentpanel" id="agentPanel">
-<div class="aphd"><div class="logo3d" style="width:26px;height:18px"><svg viewBox="0 0 56 32"><path class="infBg" d="M48,16 L47.3,18.4 L45.5,20.5 L43,21.9 L40,22.5 L37,22 L34.2,20.5 L32,18.4 L30.8,16 L30,14 L28.8,12 L27,10.5 L24.5,10 L22,10.5 L20,12 L18.8,14 L18.3,16 L18.8,18 L20,20 L22,21.5 L24.5,22 L27,21.5 L29,20 L30.2,18 L31,16 L32,14 L34.2,11.5 L37,10 L40,9.5 L43,10.1 L45.5,11.5 L47.3,13.6 Z"/><path class="inf" d="M48,16 L47.3,18.4 L45.5,20.5 L43,21.9 L40,22.5 L37,22 L34.2,20.5 L32,18.4 L30.8,16 L30,14 L28.8,12 L27,10.5 L24.5,10 L22,10.5 L20,12 L18.8,14 L18.3,16 L18.8,18 L20,20 L22,21.5 L24.5,22 L27,21.5 L29,20 L30.2,18 L31,16 L32,14 L34.2,11.5 L37,10 L40,9.5 L43,10.1 L45.5,11.5 L47.3,13.6 Z"/></svg></div>
+<div class="aphd"><div class="apavatar"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
 <div style="flex:1"><div style="font-size:13.5px;font-weight:720">Mugen Assistant</div><div style="font-size:10.5px;color:var(--ink-faint)" id="agentBrain">Default brain</div></div>
-<button class="apicon" id="agentCfgBtn" title="settings">⚙</button>
+<button class="apicon" id="agentCfgBtn" title="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
 <button class="apicon" id="agentClose" title="close">×</button></div>
 <div class="apsettings" id="agentSettings">
 <div class="field" style="padding:8px 0"><div class="meta"><div class="lbl">Brain</div><div class="desc">Default uses this gateway. Custom uses your own model.</div></div><div class="ctrl"><div class="tg" id="agentMode"></div></div></div>
@@ -475,9 +488,12 @@ function initCsel(cs){
 document.addEventListener('click',()=>$$('.csel.open').forEach(c=>c.classList.remove('open')));
 
 function mkCsel(id,opts,cur,cb){
+  const el=$('#'+id);
+  if(!el)return;
+  // don't rebuild while the user has it open (12s refresh would slam it shut)
+  if(el.classList.contains('open')){el._cb=cb;return;}
   const optHtml=opts.map(o=>`<div class="csel-opt${o.v===cur?' sel':''}" data-v="${o.v}">${o.l} <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div>`).join('');
   const curL=(opts.find(o=>o.v===cur)||opts[0]||{}).l||cur;
-  const el=$('#'+id);
   el.dataset.val=cur;
   el.innerHTML=`<button class="csel-btn">${curL}</button><div class="csel-pop">${optHtml}</div>`;
   el._cb=cb;initCsel(el);
@@ -567,14 +583,19 @@ function epName(e){return e.name||e.url.replace(/^https?:\/\//,'');}
 function renderEndpoints(){
   const eps=ST.endpoints||[];
   const arEnabled=ST.settings.agentrouter_enabled!=='0';
-  const arPrimary=!eps.some(e=>e.is_primary);  // agentrouter is primary if no custom endpoint is
+  const arPrimary=!eps.some(e=>e.is_primary);
   const arUrl=(ST.settings.endpoint||'https://agentrouter.org').replace(/^https?:\/\//,'');
-  // built-in agentrouter (the gateway's own upstream) — toggle + primary, no delete
+  $('#epCount').textContent=(eps.length+1)+' total';
+  // active endpoint info line at the top card
+  const activePrimary=arPrimary?('AgentRouter · '+arUrl):(()=>{const e=eps.find(x=>x.is_primary);return e?epName(e):arUrl;})();
+  const ai=$('#activeEpInfo');if(ai)ai.innerHTML=`⚡ Primary in use: <b>${activePrimary}</b>`;
+  // built-in agentrouter (the gateway's own upstream) — settings + toggle + primary, no delete
   let h=`<div class="ep"><span class="eprank">${arPrimary?'★':'1'}</span>
 <div class="pi"><div class="ip" style="font-family:inherit">${arUrl}</div><div class="tag">AgentRouter (gateway) · ${arPrimary?'primary':'fallback'}</div></div>
 <div class="epacts">
 <button class="sbtn star${arPrimary?' on':''}" data-arprimary="1">${arPrimary?'★ Primary':'Set primary'}</button>
 <button class="sbtn chat" data-archat="1">💬 Chat</button>
+<button class="sbtn" data-arset="1">⚙ Settings</button>
 <div class="tg ${arEnabled?'on':''}" data-artg="1"></div>
 </div></div>`;
   // custom endpoints
@@ -586,6 +607,7 @@ function renderEndpoints(){
 <button class="sbtn star${prim?' on':''}" data-epprimary="${e.id}">${prim?'★ Primary':'Set primary'}</button>
 <button class="sbtn chat" data-epchat="${e.id}">💬 Chat</button>
 <button class="sbtn" data-eptest="${e.id}">🧪 Test</button>
+<button class="sbtn" data-epset="${e.id}">⚙</button>
 <div class="tg ${e.enabled?'on':''}" data-eptg="${e.id}"></div>
 <button class="xbtn" data-epdel="${e.id}">×</button>
 </div></div>`;
@@ -595,10 +617,12 @@ function renderEndpoints(){
   $$('#epList [data-artg]').forEach(b=>b.onclick=async()=>{const on=!b.classList.contains('on');await api('/admin/settings',{agentrouter_enabled:on?'1':'0'});ST.settings.agentrouter_enabled=on?'1':'0';toast('AgentRouter '+(on?'ON':'OFF'),'ok');render();});
   $$('#epList [data-arprimary]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/primary',{id:0});toast('AgentRouter is primary','ok');await refresh();});
   $$('#epList [data-archat]').forEach(b=>b.onclick=()=>openEndpointChat({name:'AgentRouter',url:ST.settings.endpoint||'https://agentrouter.org',api_mode:'anthropic_messages',api_key:'',model:ST.settings.model_note||'claude-sonnet-4-6'}));
+  $$('#epList [data-arset]').forEach(b=>b.onclick=()=>openAgentRouterSettings());
   // custom endpoint controls
   $$('#epList [data-eptg]').forEach(b=>b.onclick=async()=>{const e=eps.find(x=>x.id==b.dataset.eptg);await api('/admin/endpoint/update',{id:+b.dataset.eptg,enabled:e.enabled?0:1});toast('Endpoint '+(e.enabled?'OFF':'ON'),'ok');await refresh();});
   $$('#epList [data-epprimary]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/primary',{id:+b.dataset.epprimary});toast('Primary set','ok');await refresh();});
   $$('#epList [data-epdel]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/delete',{id:+b.dataset.epdel});toast('Endpoint removed','ok');await refresh();});
+  $$('#epList [data-epset]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epset);openEndpointSettings(e);});
   $$('#epList [data-eptest]').forEach(b=>b.onclick=async()=>{
     const e=eps.find(x=>x.id==b.dataset.eptest);b.textContent='…';
     try{const r=await api('/admin/endpoint/test',{url:e.url,api_mode:e.api_mode,api_key:e.api_key,model:ST.settings.model_note});
@@ -606,6 +630,41 @@ function renderEndpoints(){
     }catch(e){toast('Test error','bad');}b.textContent='🧪 Test';
   });
   $$('#epList [data-epchat]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epchat);openEndpointChat({name:epName(e),url:e.url,api_mode:e.api_mode,api_key:e.api_key,model:ST.settings.model_note||'claude-sonnet-4-6'});});
+}
+// AgentRouter settings modal — upstream key + endpoint URL (the gateway's own upstream)
+function openAgentRouterSettings(){
+  const s=ST.settings;
+  $('#epSetTitle').textContent='AgentRouter settings';
+  $('#epSetBody').innerHTML=`
+<label class="fl">Endpoint URL</label><input class="wide" id="arUrl" value="${s.endpoint||'https://agentrouter.org'}" style="margin-bottom:10px">
+<label class="fl">Upstream API key (sent to AgentRouter)</label><div class="copyrow" style="margin-bottom:10px"><input class="wide" id="arKey" type="text" value="${s.upstream_key||''}"><button class="xbtn cp" id="arKeyCopy" title="copy">⧉</button></div>
+<label class="fl">Master gateway key (clients send this)</label><div class="copyrow" style="margin-bottom:14px"><input class="wide" id="arGw" type="text" value="${s.gateway_key||''}"><button class="xbtn cp" id="arGwCopy" title="copy">⧉</button></div>
+<button class="btn" id="arSave">Save AgentRouter settings</button>`;
+  $('#epSetModal').classList.add('show');
+  $('#arKeyCopy').onclick=()=>copyText($('#arKey').value);
+  $('#arGwCopy').onclick=()=>copyText($('#arGw').value);
+  $('#arSave').onclick=async()=>{
+    await api('/admin/settings',{endpoint:$('#arUrl').value.trim(),upstream_key:$('#arKey').value.trim(),gateway_key:$('#arGw').value.trim()});
+    toast('AgentRouter settings saved','ok');closeModal('epSetModal');await refresh();
+  };
+}
+// per-endpoint settings modal — only this endpoint's own details
+function openEndpointSettings(e){
+  if(!e)return;
+  $('#epSetTitle').textContent='Endpoint settings';
+  $('#epSetBody').innerHTML=`
+<label class="fl">Name (optional)</label><input class="wide" id="esName" value="${e.name||''}" placeholder="my provider" style="margin-bottom:10px">
+<label class="fl">Base URL</label><input class="wide" id="esUrl" value="${e.url||''}" style="margin-bottom:10px">
+<label class="fl">API key</label><div class="copyrow" style="margin-bottom:10px"><input class="wide" id="esKey" type="text" value="${e.api_key||''}"><button class="xbtn cp" id="esKeyCopy" title="copy">⧉</button></div>
+<div class="kv"><span class="k">Mode</span><span class="v">${e.api_mode==='chat_completions'?'OpenAI Chat':'Anthropic Messages'}</span></div>
+<div class="kv"><span class="k">Status</span><span class="v">${e.status||'unknown'}</span></div>
+<button class="btn" id="esSave" style="margin-top:14px">Save endpoint</button>`;
+  $('#epSetModal').classList.add('show');
+  $('#esKeyCopy').onclick=()=>copyText($('#esKey').value);
+  $('#esSave').onclick=async()=>{
+    await api('/admin/endpoint/update',{id:e.id,name:$('#esName').value.trim(),url:$('#esUrl').value.trim(),api_key:$('#esKey').value.trim()});
+    toast('Endpoint saved','ok');closeModal('epSetModal');await refresh();
+  };
 }
 function renderLogs(){
   const logs=(ST.logs||[]).slice(0,40);
@@ -668,11 +727,8 @@ $('#createKey').onclick=async()=>{
 // save buttons
 async function saveSettings(keys,lbl){const body={};keys.forEach(k=>{const el=$('[data-set="'+k+'"]');if(el)body[k]=el.value;});await api('/admin/settings',body);toast((lbl||'Settings')+' saved','ok');}
 $('#saveTimers').onclick=()=>saveSettings(['read_timeout','connect_timeout','max_retries','retry_initial_delay','retry_max_delay','keepalive_idle','keepalive_intvl','keepalive_cnt'],'Timers');
-$('#saveKeys').onclick=()=>saveSettings(['gateway_key','upstream_key'],'Connection');
-// static copy buttons in the Connection card
+// public endpoint URL copy (Endpoints tab)
 $('#cpPublic')&&($('#cpPublic').onclick=()=>copyText($('#publicUrl').value));
-$$('[data-copyset]').forEach(b=>b.onclick=()=>{const el=$('[data-set="'+b.dataset.copyset+'"]');if(el)copyText(el.value);});
-$$('[data-copyval]').forEach(b=>b.onclick=()=>copyText(b.dataset.copyval));
 
 $('#addProxy').onclick=async()=>{
   const bulk=$('#newBulk').value.trim();
@@ -728,6 +784,7 @@ setInterval(()=>{if(!$('#app').classList.contains('hidden'))refresh();},12000);
 function closeModal(id){$('#'+id).classList.remove('show');}
 $('#logModalX').onclick=()=>closeModal('logModal');
 $('#chatModalX').onclick=()=>closeModal('chatModal');
+$('#epSetX')&&($('#epSetX').onclick=()=>closeModal('epSetModal'));
 $$('.modal').forEach(m=>m.onclick=e=>{if(e.target===m)m.classList.remove('show');});
 
 // ---- LOG DETAIL ----
@@ -778,7 +835,7 @@ $('#chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){
 
 // ============ EMBEDDED AGENT ============
 let AG={cfg:JSON.parse(localStorage.getItem('mr_agent')||'{}'),msgs:[],attach:null};
-function agentBrainLabel(){return AG.cfg.mode==='custom'?('Custom · '+(AG.cfg.model||'?')):'Default brain (gateway)';}
+function agentBrainLabel(){return AG.cfg.mode==='custom'?('Custom · '+(AG.cfg.model||'?')):'Default brain';}
 function openAgent(){
   $('#agentPanel').classList.add('show');$('#agentFab').style.display='none';
   $('#agentBrain').textContent=agentBrainLabel();
