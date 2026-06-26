@@ -4,7 +4,7 @@ import time
 import re
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
-from . import db, proxy_pool, forwarder
+from . import db, proxy_pool, forwarder, agent
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(BASE, "static")
@@ -26,12 +26,28 @@ def _require_admin(token):
 
 
 def _normalize_proxy(line):
+    """Accept the common proxy text formats and return a canonical proxy URL:
+      1. IP:PORT                         -> http://IP:PORT
+      2. scheme://[user:pass@]IP:PORT    -> unchanged
+      3. user:pass@IP:PORT               -> http://user:pass@IP:PORT
+      4. IP:PORT:user:pass               -> http://user:pass@IP:PORT
+    Returns None for blanks/comments."""
     line = line.strip()
-    if not line:
+    if not line or line.startswith("#"):
         return None
-    if "://" not in line:
-        line = "http://" + line
-    return line
+    # already has a scheme -> leave as-is (covers format 2)
+    if "://" in line:
+        return line
+    # already has credentials inline (format 3) -> just add scheme
+    if "@" in line:
+        return "http://" + line
+    parts = line.split(":")
+    # format 4: host:port:user:pass  -> reorder into user:pass@host:port
+    if len(parts) == 4 and parts[1].isdigit():
+        host, port, user, pw = parts
+        return f"http://{user}:{pw}@{host}:{port}"
+    # format 1: host:port
+    return "http://" + line
 
 
 def _build_proxy_url(ptype, host, port, user, pw):
@@ -93,6 +109,7 @@ async def state(x_admin_token: str = Header(default="")):
         "counts": counts,
         "keywords": db.list_keywords(),
         "endpoints": db.list_endpoints(),
+        "api_keys": db.list_api_keys(),
         "stats": db.stats(),
         "logs": db.recent_logs(80),
     }
@@ -156,6 +173,72 @@ async def endpoint_delete(payload: dict, x_admin_token: str = Header(default="")
     _require_admin(x_admin_token)
     db.delete_endpoint(payload["id"])
     return {"ok": True}
+
+
+@app.post("/admin/endpoint/update")
+async def endpoint_update2(payload: dict, x_admin_token: str = Header(default="")):
+    """Toggle enabled, set name/key/mode, set priority for one endpoint."""
+    _require_admin(x_admin_token)
+    eid = payload.pop("id")
+    db.update_endpoint(eid, **payload)
+    return {"ok": True}
+
+
+@app.post("/admin/endpoint/primary")
+async def endpoint_primary(payload: dict, x_admin_token: str = Header(default="")):
+    """Set one endpoint as primary (id=0 -> agentrouter/global endpoint setting)."""
+    _require_admin(x_admin_token)
+    db.set_primary_endpoint(int(payload.get("id", 0)))
+    return {"ok": True}
+
+
+@app.post("/admin/endpoint/test")
+async def endpoint_test(payload: dict, x_admin_token: str = Header(default="")):
+    """Send ONE tiny chat message through a specific endpoint to verify it works.
+    Goes through the proxy pool just like a real request. Token-cheap (max_tokens small)."""
+    _require_admin(x_admin_token)
+    url = (payload.get("url") or "").strip().rstrip("/")
+    mode = payload.get("api_mode", "anthropic_messages")
+    key = payload.get("api_key", "") or db.get_setting("upstream_key") or db.get_setting("gateway_key", "")
+    model = payload.get("model") or db.get_setting("model_note", "claude-sonnet-4-6")
+    msg = payload.get("message", "Reply with exactly: OK")
+    if not url.startswith("http"):
+        raise HTTPException(400, "endpoint must be an http(s) URL")
+    res = await forwarder.test_endpoint(url, mode, key, model, msg)
+    return res
+
+
+# ---------------- api keys (client-facing) ----------------
+def _gen_key():
+    import secrets
+    return "mugen_" + secrets.token_urlsafe(12).replace("-", "").replace("_", "")[:14]
+
+
+@app.post("/admin/key/create")
+async def key_create(payload: dict, x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    name = _gen_key()
+    db.add_api_key(name, name, (payload.get("label") or "").strip())
+    return {"ok": True, "key": name}
+
+
+@app.post("/admin/key/delete")
+async def key_delete(payload: dict, x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    db.delete_api_key(payload["id"])
+    return {"ok": True}
+
+
+# ---------------- embedded dashboard agent ----------------
+@app.post("/admin/agent/chat")
+async def agent_chat(payload: dict, x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    messages = payload.get("messages", [])
+    cfg = payload.get("config") or {}
+    if not messages:
+        raise HTTPException(400, "no messages")
+    res = await agent.chat(messages, cfg)
+    return res
 
 
 @app.post("/admin/proxy/toggle")

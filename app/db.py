@@ -105,6 +105,16 @@ def _init(c):
             status    TEXT    DEFAULT 'unknown',
             note      TEXT    DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT UNIQUE NOT NULL,   -- e.g. "mugen_a3f9k2x8q1"
+            key        TEXT NOT NULL,          -- the secret clients send (== name here)
+            label      TEXT    DEFAULT '',     -- human note ("my phone", "n8n")
+            created_at REAL    DEFAULT 0,
+            last_used  REAL    DEFAULT 0,
+            hit_count  INTEGER DEFAULT 0,
+            enabled    INTEGER DEFAULT 1
+        );
         """
     )
     c.commit()
@@ -125,6 +135,22 @@ def _init(c):
                     t = "socks5" if scheme == "socks5h" else scheme
                     break
             c.execute("UPDATE proxies SET ptype=? WHERE id=?", (t, row[0]))
+    # endpoints: add is_primary + name introduced for primary-select / labels
+    ecols = [r[1] for r in c.execute("PRAGMA table_info(endpoints)").fetchall()]
+    if "is_primary" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN is_primary INTEGER DEFAULT 0")
+    if "name" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN name TEXT DEFAULT ''")
+    # logs: add ip / model / detail for the log-detail view
+    lcols = [r[1] for r in c.execute("PRAGMA table_info(logs)").fetchall()]
+    if "ip" not in lcols:
+        c.execute("ALTER TABLE logs ADD COLUMN ip TEXT DEFAULT ''")
+    if "model" not in lcols:
+        c.execute("ALTER TABLE logs ADD COLUMN model TEXT DEFAULT ''")
+    if "detail" not in lcols:
+        c.execute("ALTER TABLE logs ADD COLUMN detail TEXT DEFAULT ''")
+    if "endpoint" not in lcols:
+        c.execute("ALTER TABLE logs ADD COLUMN endpoint TEXT DEFAULT ''")
     c.commit()
 
 
@@ -247,8 +273,8 @@ def add_log(**f):
     with _lock:
         c = conn()
         c.execute(
-            "INSERT INTO logs(ts, method, path, status, proxy, attempts, stream, redactions, ms, note) "
-            "VALUES (:ts, :method, :path, :status, :proxy, :attempts, :stream, :redactions, :ms, :note)",
+            "INSERT INTO logs(ts, method, path, status, proxy, attempts, stream, redactions, ms, note, ip, model, detail, endpoint) "
+            "VALUES (:ts, :method, :path, :status, :proxy, :attempts, :stream, :redactions, :ms, :note, :ip, :model, :detail, :endpoint)",
             {
                 "ts": f.get("ts", time.time()),
                 "method": f.get("method", ""),
@@ -260,6 +286,10 @@ def add_log(**f):
                 "redactions": f.get("redactions", 0),
                 "ms": f.get("ms", 0),
                 "note": f.get("note", ""),
+                "ip": f.get("ip", ""),
+                "model": f.get("model", ""),
+                "detail": f.get("detail", ""),
+                "endpoint": f.get("endpoint", ""),
             },
         )
         # keep last 500
@@ -299,7 +329,7 @@ def add_endpoint(url, api_mode="anthropic_messages", api_key=""):
 
 
 def update_endpoint(eid, **fields):
-    allowed = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note"}
+    allowed = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name"}
     fields = {k: v for k, v in fields.items() if k in allowed}
     if not fields:
         return
@@ -314,6 +344,54 @@ def delete_endpoint(eid):
     with _lock:
         c = conn()
         c.execute("DELETE FROM endpoints WHERE id=?", (eid,))
+        c.commit()
+
+
+def set_primary_endpoint(eid):
+    """Mark one endpoint primary (clears the flag on all others). eid=0 -> none."""
+    with _lock:
+        c = conn()
+        c.execute("UPDATE endpoints SET is_primary=0")
+        if eid:
+            c.execute("UPDATE endpoints SET is_primary=1, enabled=1 WHERE id=?", (eid,))
+        c.commit()
+
+
+# ----- api keys (client-facing keys the gateway accepts) -----
+def list_api_keys():
+    with _lock:
+        return [dict(r) for r in conn().execute(
+            "SELECT * FROM api_keys ORDER BY id DESC").fetchall()]
+
+
+def add_api_key(name, key, label=""):
+    with _lock:
+        c = conn()
+        c.execute(
+            "INSERT OR IGNORE INTO api_keys(name, key, label, created_at) VALUES (?,?,?,?)",
+            (name, key, label, time.time()))
+        c.commit()
+        return c.total_changes
+
+
+def delete_api_key(kid):
+    with _lock:
+        c = conn()
+        c.execute("DELETE FROM api_keys WHERE id=?", (kid,))
+        c.commit()
+
+
+def get_api_key_by_value(key):
+    with _lock:
+        row = conn().execute("SELECT * FROM api_keys WHERE key=? AND enabled=1", (key,)).fetchone()
+    return dict(row) if row else None
+
+
+def touch_api_key(kid):
+    with _lock:
+        c = conn()
+        c.execute("UPDATE api_keys SET last_used=?, hit_count=hit_count+1 WHERE id=?",
+                  (time.time(), kid))
         c.commit()
 
 

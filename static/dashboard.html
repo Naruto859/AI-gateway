@@ -65,14 +65,14 @@ header{display:flex;align-items:center;gap:13px;margin:4px 4px 22px;animation:ri
 input[type=text],input[type=number],input[type=password]{font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);width:120px;text-align:right;transition:.2s;outline:none}
 input:focus{border-color:var(--c-mint-d);box-shadow:0 0 0 3px rgba(63,158,120,.16)}
 input.wide{width:100%;text-align:left}
-.csel{position:relative;display:inline-block;min-width:130px}.csel.wide{display:block;width:100%}
+.csel{position:relative;display:inline-block;min-width:130px}.csel.wide{display:block;width:100%}.csel.open{z-index:998}
 .csel-btn{font:inherit;font-size:14px;font-weight:600;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:11px;padding:9px 36px 9px 13px;cursor:pointer;width:100%;text-align:left;transition:.2s;display:flex;align-items:center;gap:8px;position:relative}
 .csel-btn:hover{border-color:var(--c-mint-d);background:var(--g-50)}
 .csel-btn::after{content:"";position:absolute;right:13px;top:50%;width:9px;height:9px;border-right:2px solid var(--c-mint-d);border-bottom:2px solid var(--c-mint-d);transform:translateY(-65%) rotate(45deg);transition:.25s}
 .csel.open .csel-btn::after{transform:translateY(-35%) rotate(-135deg)}
 .csel.open .csel-btn{border-color:var(--c-mint-d);box-shadow:0 0 0 3px rgba(63,158,120,.16)}
 .csel-dot{width:9px;height:9px;border-radius:50%;flex:none}
-.csel-pop{position:absolute;top:calc(100% + 7px);left:0;right:0;min-width:200px;background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(40,70,90,.18);padding:6px;z-index:50;opacity:0;transform:translateY(-8px) scale(.97);pointer-events:none;transition:.2s cubic-bezier(.2,.8,.2,1);max-height:260px;overflow:auto;scrollbar-width:none}
+.csel-pop{position:absolute;top:calc(100% + 7px);left:0;right:0;min-width:200px;background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(40,70,90,.18);padding:6px;z-index:999;opacity:0;transform:translateY(-8px) scale(.97);pointer-events:none;transition:.2s cubic-bezier(.2,.8,.2,1);max-height:260px;overflow:auto;scrollbar-width:none}
 .csel-pop::-webkit-scrollbar{display:none}
 .csel.open .csel-pop{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
 .csel-opt{padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;display:flex;align-items:center;gap:9px;transition:.14s}
@@ -105,9 +105,59 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .log .code{font-weight:740;font-family:ui-monospace,monospace;padding:2px 8px;border-radius:6px;font-size:12px;flex:none}
 .code.s2{background:var(--g-100);color:var(--g-700)}.code.s5{background:#fbe4e4;color:#c0392b}.code.s4{background:#fdf0d8;color:#b8841f}
 .log .ld{flex:1;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.copyrow{display:flex;gap:7px;align-items:center}.copyrow input{flex:1}
+.xbtn.cp{background:var(--g-50);color:var(--g-700)}.xbtn.cp:hover{background:var(--g-100);color:var(--g-700)}
+.keyrow{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;background:#fff}
+.keyrow .km{flex:1;min-width:0}.keyrow .kn{font-size:13.5px;font-weight:660;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.keyrow .kt{font-size:11px;color:var(--ink-faint);margin-top:2px}
+.newkey{background:var(--g-50);border:1px solid var(--g-300);border-radius:13px;padding:13px;margin-bottom:10px}
+.newkey .nk{font-family:ui-monospace,monospace;font-size:13px;font-weight:660;color:var(--g-700);word-break:break-all}
+.prxbar{display:flex;gap:9px;margin-bottom:11px;align-items:center}
+.prxbar input{flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:11px;padding:9px 12px}
+.prxbar .csel{min-width:120px;flex:none}
+.prxpage{display:flex;gap:8px;align-items:center;justify-content:center;margin:4px 0 2px}
+.prxpage button{font:inherit;font-size:12px;font-weight:700;padding:6px 12px;border-radius:9px;border:1px solid var(--g-300);background:#fff;color:var(--g-700);cursor:pointer}
+.prxpage button:disabled{opacity:.4;cursor:default}.prxpage .pinfo{font-size:12px;color:var(--ink-faint);font-weight:600}
+.upbox{border:2px dashed var(--g-300);border-radius:13px;padding:18px;text-align:center;cursor:pointer;transition:.2s;background:#fff}
+.upbox:hover,.upbox.drag{border-color:var(--g-500);background:var(--g-50)}
 .log .lt{color:var(--ink-faint);font-family:ui-monospace,monospace;font-size:11.5px;flex:none}
 .ep{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;background:#fff}
 .eprank{width:26px;height:26px;border-radius:8px;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;font-size:13px;font-weight:740;display:grid;place-items:center;flex:none}
+.ep{flex-wrap:wrap}.ep .epacts{display:flex;gap:6px;align-items:center;margin-left:auto}
+.ep .tg{width:40px;height:24px}.ep .tg::after{width:18px;height:18px}.ep .tg.on::after{transform:translateX(16px)}
+.sbtn{font:inherit;font-size:11px;font-weight:700;padding:6px 10px;border-radius:9px;border:1px solid var(--g-300);background:#fff;color:var(--g-700);cursor:pointer;transition:.15s;white-space:nowrap}
+.sbtn:hover{background:var(--g-50)}.sbtn.star{border-color:#e3b341;color:#b8841f}.sbtn.star.on{background:#fdf6e3;border-color:#e3b341}
+.sbtn.chat{border-color:var(--c-sky-d);color:var(--c-sky-d)}.sbtn.chat:hover{background:#eef5ff}
+/* modal */
+.modal{position:fixed;inset:0;background:rgba(30,50,45,.42);backdrop-filter:blur(4px);z-index:1000;display:none;place-items:center;padding:16px}
+.modal.show{display:grid}
+.modalbox{background:#fff;border-radius:20px;box-shadow:0 24px 70px rgba(20,40,50,.3);width:100%;max-width:480px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;animation:rise .35s ease both}
+.modalhd{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.modalhd h3{margin:0;font-size:15px;font-weight:720;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modalhd .x{width:30px;height:30px;border:none;border-radius:9px;background:#f4f6f9;color:#94a3ad;cursor:pointer;font-size:18px;flex:none}
+.modalbody{padding:16px 18px;overflow:auto;font-size:13px;line-height:1.6}
+.kv{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}.kv .k{color:var(--ink-faint);font-weight:600;min-width:90px;flex:none}.kv .v{color:var(--ink);word-break:break-word;font-family:ui-monospace,monospace;font-size:12px}
+.chatlog{flex:1;overflow:auto;padding:14px 18px;display:flex;flex-direction:column;gap:10px;min-height:200px;max-height:48vh}
+.msg{padding:9px 13px;border-radius:13px;font-size:13.5px;line-height:1.5;max-width:85%;white-space:pre-wrap;word-break:break-word}
+.msg.u{align-self:flex-end;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;border-bottom-right-radius:4px}
+.msg.a{align-self:flex-start;background:var(--g-50);color:var(--ink);border:1px solid var(--line);border-bottom-left-radius:4px}
+.msg.sys{align-self:center;background:#fdf0d8;color:#b8841f;font-size:11.5px;font-weight:600;border-radius:8px;padding:5px 10px}
+.chatin{padding:12px 14px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-end}
+.chatin textarea{flex:1;resize:none;font:inherit;font-size:13.5px;border:1px solid var(--line);border-radius:11px;padding:9px 12px;max-height:90px;min-height:40px}
+.chatin .send{width:40px;height:40px;border:none;border-radius:11px;background:linear-gradient(145deg,var(--g-500),var(--g-600));color:#fff;cursor:pointer;flex:none;font-size:16px}
+/* agent fab + panel */
+.fab{position:fixed;right:18px;bottom:18px;width:56px;height:56px;border-radius:50%;border:none;cursor:pointer;z-index:900;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;box-shadow:0 8px 24px rgba(31,138,86,.4);display:grid;place-items:center;transition:.2s}
+.fab:hover{transform:scale(1.07)}.fab svg{width:24px;height:24px}
+.agentpanel{position:fixed;right:18px;bottom:18px;width:min(380px,calc(100vw - 28px));height:min(560px,calc(100vh - 90px));background:#fff;border-radius:20px;box-shadow:0 24px 70px rgba(20,40,50,.34);z-index:901;display:none;flex-direction:column;overflow:hidden;animation:rise .3s ease both}
+.agentpanel.show{display:flex}
+.aphd{display:flex;align-items:center;gap:9px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--g-50)}
+.apicon{width:30px;height:30px;border:none;border-radius:9px;background:#fff;color:var(--ink-soft);cursor:pointer;font-size:16px;flex:none;border:1px solid var(--line)}
+.apicon:hover{background:var(--g-100)}
+.apsettings{padding:12px 14px;border-bottom:1px solid var(--line);background:#fbfdfc;display:none;max-height:50%;overflow:auto}
+.apsettings.show{display:block}
+#agentLog{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:9px}
+.agentpanel .chatin{border-top:1px solid var(--line)}
+.attbadge{align-self:flex-end;font-size:11px;color:var(--g-700);background:var(--g-50);border:1px solid var(--g-300);border-radius:8px;padding:3px 8px}
 .hidden{display:none!important}
 .muted{text-align:center;color:var(--ink-faint);font-size:13px;padding:18px}
 .login{position:fixed;inset:0;display:grid;place-items:center;z-index:100;padding:20px;background:#f0f6f2}
@@ -189,14 +239,27 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M16 3l5 5-5 5M21 8H9a4 4 0 00-4 4v9"/></svg></span>Rotation</h2>
 <p class="sub">Switch IPs when one fails.</p>
 <div class="field"><div class="meta"><div class="lbl">Auto rotation</div><div class="desc">OFF = use one pinned proxy (all retries same IP). ON = rotate across enabled proxies when one fails.</div></div><div class="ctrl"><div class="tg" id="tgRotation"></div></div></div>
+<div id="rotInfo" style="font-size:12px;color:var(--ink-faint);padding:2px 2px 8px;line-height:1.5"></div>
 <div class="field"><div class="meta"><div class="lbl">Dedicated proxy</div><div class="desc">Single IP used when rotation is OFF. Add this exit IP to agentrouter watchlist.</div></div><div class="ctrl" id="dedWrap"></div></div>
 </div>
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/></svg></span>Proxy pool <span id="prxCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
 <p class="sub">Tap ⟳ to test a proxy against the upstream endpoint.</p>
+<div class="prxbar">
+<input id="prxSearch" type="text" placeholder="🔍 Filter by IP / status…" autocomplete="off">
+<div class="csel" id="prxShow" data-val="10"><button class="csel-btn">Show 10</button><div class="csel-pop"><div class="csel-opt sel" data-v="5">Show 5</div><div class="csel-opt" data-v="10">Show 10</div><div class="csel-opt" data-v="25">Show 25</div><div class="csel-opt" data-v="50">Show 50</div><div class="csel-opt" data-v="100">Show 100</div><div class="csel-opt" data-v="all">Show all</div></div></div>
+</div>
 <div id="prxList"></div>
+<div class="prxpage" id="prxPage"></div>
 <div class="addbox">
-<label class="fl" style="font-size:13px;margin-bottom:10px">+ Add new proxy</label>
+<label class="fl" style="font-size:13px;margin-bottom:10px">+ Add proxies</label>
+<div class="upbox" id="upDrop">
+<input type="file" id="prxFile" accept=".txt,.csv,.list,text/*" style="display:none">
+<div style="font-size:13px;font-weight:600;color:var(--g-700)">📄 Upload a proxy file</div>
+<div style="font-size:11.5px;color:var(--ink-faint);margin-top:3px">Any format — IP:PORT · user:pass@IP:PORT · IP:PORT:user:pass · http://… — auto-detected</div>
+</div>
+<div style="text-align:center;font-size:11px;color:var(--ink-faint);margin:10px 0 6px">— or paste / add one —</div>
+<div class="full" style="margin-bottom:9px"><label class="fl">Bulk paste (one per line, any format)</label><textarea class="wide" id="newBulk" rows="2" placeholder="206.123.156.233:6289&#10;user:pass@38.154.203.95:5863" style="resize:vertical;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:11px;padding:9px 12px"></textarea></div>
 <div class="grid2">
 <div><label class="fl">Type</label><div class="csel wide" id="newPtype" data-val="http"><button class="csel-btn">HTTP</button><div class="csel-pop"><div class="csel-opt sel" data-v="http">HTTP <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="https">HTTPS</div><div class="csel-opt" data-v="socks5">SOCKS5</div><div class="csel-opt" data-v="socks4">SOCKS4</div></div></div></div>
 <div><label class="fl">Host / IP</label><input class="wide" id="newHost" type="text" placeholder="217.181.91.60"></div>
@@ -204,21 +267,26 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div><label class="fl">Username (opt)</label><input class="wide" id="newUser" type="text" placeholder="user"></div>
 <div class="full"><label class="fl">Password (opt)</label><input class="wide" id="newPass" type="password" placeholder="••••••"></div>
 </div>
-<button class="btn" id="addProxy">Add proxy</button>
+<button class="btn" id="addProxy">Add proxy / paste</button>
 </div>
 </div>
 </section>
 <!-- KEYS -->
 <section data-p="keys" class="hidden">
 <div class="card">
-<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8 2 2-3 3"/></svg></span>Keys &amp; endpoint</h2>
-<p class="sub">Credentials and connection URLs.</p>
-<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Gateway key — clients present this to us</label><input class="wide" type="text" data-set="gateway_key"></div>
-<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Upstream key — we send this to the endpoint</label><input class="wide" type="text" data-set="upstream_key"></div>
-<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Primary endpoint</label><input class="wide" type="text" data-set="endpoint"></div>
-<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Local URL (same-VPS agents)</label><input class="wide" type="text" value="http://127.0.0.1:8787" readonly></div>
-<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Public URL (remote agents via Caddy)</label><input class="wide" type="text" id="publicUrl" readonly></div>
-<button class="btn" id="saveKeys" style="margin-top:14px">Save keys</button>
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8 2 2-3 3"/></svg></span>Your API keys <span id="keyCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
+<p class="sub">Keys your apps send to this gateway. Create one, copy it, paste into your tool. Each starts with <b>mugen_</b>.</p>
+<div id="keyList" style="margin-top:6px"></div>
+<button class="btn" id="createKey" style="margin-top:12px">+ Create new key</button>
+</div>
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg></span>Connection</h2>
+<p class="sub">Where your apps point, and the master key.</p>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Master gateway key — always works</label><div class="copyrow"><input class="wide" type="text" data-set="gateway_key"><button class="xbtn cp" data-copyset="gateway_key" title="copy">⧉</button></div></div>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Upstream key — gateway sends this to the endpoint</label><input class="wide" type="text" data-set="upstream_key"></div>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Local URL (same-VPS agents)</label><div class="copyrow"><input class="wide" type="text" value="http://127.0.0.1:8787" readonly><button class="xbtn cp" data-copyval="http://127.0.0.1:8787" title="copy">⧉</button></div></div>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Public URL (remote agents)</label><div class="copyrow"><input class="wide" type="text" id="publicUrl" readonly><button class="xbtn cp" id="cpPublic" title="copy">⧉</button></div></div>
+<button class="btn" id="saveKeys" style="margin-top:14px">Save connection</button>
 </div>
 </section>
 <!-- ENDPOINTS -->
@@ -264,9 +332,55 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 </div>
 </div>
 </section>
-<footer>Mugen Routes · v1</footer>
+<footer>Mugen Routes · v2</footer>
 </div>
 <div class="toast" id="toast"></div>
+
+<!-- LOG DETAIL MODAL -->
+<div class="modal" id="logModal">
+<div class="modalbox">
+<div class="modalhd"><h3>Request detail</h3><button class="x" id="logModalX">×</button></div>
+<div class="modalbody" id="logModalBody"></div>
+</div>
+</div>
+
+<!-- ENDPOINT CHAT MODAL -->
+<div class="modal" id="chatModal">
+<div class="modalbox">
+<div class="modalhd"><h3 id="chatTitle">Test chat</h3><button class="x" id="chatModalX">×</button></div>
+<div class="chatlog" id="chatLog"></div>
+<div class="chatin">
+<textarea id="chatInput" placeholder="Type a message…" rows="1"></textarea>
+<button class="send" id="chatSend">↑</button>
+</div>
+</div>
+</div>
+
+<!-- AGENT FAB + PANEL -->
+<button class="fab" id="agentFab" title="Mugen assistant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></button>
+<div class="agentpanel" id="agentPanel">
+<div class="aphd"><div class="logo3d" style="width:26px;height:18px"><svg viewBox="0 0 56 32"><path class="infBg" d="M48,16 L47.3,18.4 L45.5,20.5 L43,21.9 L40,22.5 L37,22 L34.2,20.5 L32,18.4 L30.8,16 L30,14 L28.8,12 L27,10.5 L24.5,10 L22,10.5 L20,12 L18.8,14 L18.3,16 L18.8,18 L20,20 L22,21.5 L24.5,22 L27,21.5 L29,20 L30.2,18 L31,16 L32,14 L34.2,11.5 L37,10 L40,9.5 L43,10.1 L45.5,11.5 L47.3,13.6 Z"/><path class="inf" d="M48,16 L47.3,18.4 L45.5,20.5 L43,21.9 L40,22.5 L37,22 L34.2,20.5 L32,18.4 L30.8,16 L30,14 L28.8,12 L27,10.5 L24.5,10 L22,10.5 L20,12 L18.8,14 L18.3,16 L18.8,18 L20,20 L22,21.5 L24.5,22 L27,21.5 L29,20 L30.2,18 L31,16 L32,14 L34.2,11.5 L37,10 L40,9.5 L43,10.1 L45.5,11.5 L47.3,13.6 Z"/></svg></div>
+<div style="flex:1"><div style="font-size:13.5px;font-weight:720">Mugen Assistant</div><div style="font-size:10.5px;color:var(--ink-faint)" id="agentBrain">Default brain</div></div>
+<button class="apicon" id="agentCfgBtn" title="settings">⚙</button>
+<button class="apicon" id="agentClose" title="close">×</button></div>
+<div class="apsettings" id="agentSettings">
+<div class="field" style="padding:8px 0"><div class="meta"><div class="lbl">Brain</div><div class="desc">Default uses this gateway. Custom uses your own model.</div></div><div class="ctrl"><div class="tg" id="agentMode"></div></div></div>
+<div id="agentCustom" style="display:none">
+<label class="fl">SDK</label><div class="csel wide" id="agentSdk" data-val="openai" style="margin-bottom:8px"><button class="csel-btn">OpenAI</button><div class="csel-pop"><div class="csel-opt sel" data-v="openai">OpenAI <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="anthropic">Anthropic</div></div></div>
+<label class="fl">Endpoint</label><input class="wide" id="agentEp" placeholder="https://api.provider.com/v1" style="margin-bottom:8px">
+<label class="fl">Model name</label><input class="wide" id="agentModel" placeholder="qwen-large" style="margin-bottom:8px">
+<label class="fl">API key</label><input class="wide" id="agentKey" type="password" placeholder="sk-..." style="margin-bottom:8px">
+</div>
+<button class="btn" id="agentSaveCfg" style="margin-top:4px">Save brain settings</button>
+</div>
+<div class="chatlog" id="agentLog"></div>
+<div class="chatin">
+<button class="apicon" id="agentAttach" title="attach image/file">📎</button>
+<input type="file" id="agentFile" accept="image/*,.txt,.md,.json,.csv,.zip" style="display:none">
+<textarea id="agentInput" placeholder="Ask Mugen… (add proxies, diagnose errors)" rows="1"></textarea>
+<button class="send" id="agentSend">↑</button>
+</div>
+</div>
 <script>
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 let TOK=localStorage.getItem('mr_tok')||'',ST=null;
@@ -344,10 +458,12 @@ $$('.tab').forEach(t=>t.onclick=()=>{
   window.scrollTo({top:0,behavior:'smooth'});
 });
 
-// custom dropdowns
+// custom dropdowns. NOTE: no _i guard — mkCsel() rewrites innerHTML on every
+// render(), creating a fresh .csel-btn each time, so we MUST (re)bind handlers
+// every call or the dedicated-proxy dropdown goes dead after the first paint.
 function initCsel(cs){
-  if(cs._i)return;cs._i=1;
   const btn=cs.querySelector('.csel-btn');
+  if(!btn)return;
   btn.onclick=e=>{e.stopPropagation();const o=cs.classList.contains('open');$$('.csel.open').forEach(c=>c.classList.remove('open'));if(!o)cs.classList.add('open');};
   cs.querySelectorAll('.csel-opt').forEach(opt=>opt.onclick=e=>{
     e.stopPropagation();cs.querySelectorAll('.csel-opt').forEach(o=>o.classList.remove('sel'));opt.classList.add('sel');
@@ -368,7 +484,7 @@ function mkCsel(id,opts,cur,cb){
 }
 
 // toggles
-$('#tgRotation').onclick=async()=>{const on=!$('#tgRotation').classList.contains('on');$('#tgRotation').classList.toggle('on',on);await api('/admin/settings',{auto_rotation:on?'1':'0'});toast('Auto rotation '+(on?'ON':'OFF'),'ok');};
+$('#tgRotation').onclick=async()=>{const on=!$('#tgRotation').classList.contains('on');$('#tgRotation').classList.toggle('on',on);await api('/admin/settings',{auto_rotation:on?'1':'0'});ST.settings.auto_rotation=on?'1':'0';render();toast('Auto rotation '+(on?'ON':'OFF'),'ok');};
 $('#tgTranslate').onclick=async()=>{const on=!$('#tgTranslate').classList.contains('on');$('#tgTranslate').classList.toggle('on',on);await api('/admin/settings',{format_translation:on?'1':'0'});toast('Translation '+(on?'ON':'OFF'),'ok');};
 
 function render(){
@@ -379,8 +495,14 @@ function render(){
   $('#s_ms').innerHTML=st.avg_ms?(st.avg_ms/1000).toFixed(1)+'<small>s</small>':'—';
   const enp=ST.proxies.filter(p=>p.enabled).length;
   $('#s_px').innerHTML=enp+'<small>/ '+ST.proxies.length+'</small>';
-  // setting inputs
-  $$('[data-set]').forEach(el=>{if(s[el.dataset.set]!==undefined)el.value=s[el.dataset.set];});
+  // setting inputs — ONLY write on first paint or when the field is NOT being
+  // edited (has no focus). Prevents the 12s refresh from wiping what the user is
+  // typing (the "timer flicker" bug). _inited flag = first render done.
+  $$('[data-set]').forEach(el=>{
+    if(s[el.dataset.set]===undefined)return;
+    if(!render._inited || document.activeElement!==el)el.value=s[el.dataset.set];
+  });
+  render._inited=true;
   $('#publicUrl').value=location.origin;
   // toggles
   $('#tgRotation').classList.toggle('on',s.auto_rotation==='1');
@@ -388,16 +510,36 @@ function render(){
   // dedicated dropdown
   const pin=s.dedicated_proxy_id;
   const pxOpts=ST.proxies.map(p=>({v:String(p.id),l:'#'+p.id+' · '+p.url.split('@').pop()}));
-  mkCsel('dedWrap',[{v:'',l:'(first enabled)'},...pxOpts],String(pin||''),async v=>{await api('/admin/settings',{dedicated_proxy_id:v});toast('Dedicated proxy set','ok');ST.settings.dedicated_proxy_id=v;});
-  renderProxies();renderEndpoints();renderLogs();renderKeywords();
+  mkCsel('dedWrap',[{v:'',l:'(first enabled)'},...pxOpts],String(pin||''),async v=>{await api('/admin/settings',{dedicated_proxy_id:v});toast('Dedicated proxy set','ok');ST.settings.dedicated_proxy_id=v;render();});
+  // rotation info: show exactly what the gateway will do right now
+  const ri=$('#rotInfo');
+  if(ri){
+    const enabled=ST.proxies.filter(p=>p.enabled);
+    const pinned=ST.proxies.find(p=>String(p.id)===String(pin))||enabled[0];
+    const host=pinned?pinned.url.split('@').pop():'none';
+    if(s.auto_rotation==='1')
+      ri.innerHTML=`🔄 <b>Rotation ON</b> — will try ${enabled.length} enabled IPs, starting with <b>${host}</b>, switching on failure.`;
+    else
+      ri.innerHTML=`📌 <b>Rotation OFF</b> — every request uses ONLY <b>${host}</b> (same IP for all retries). No switching.`;
+  }
+  renderProxies();renderEndpoints();renderLogs();renderKeywords();renderKeys();
   $$('.csel').forEach(initCsel);
+  // proxy "Show N" dropdown — wire its callback to re-page the list
+  const ps=$('#prxShow');if(ps){ps._cb=v=>{PRX.show=v;PRX.page=0;renderProxies();};}
 }
 
 function pst(p){if(p.status==='ok')return'ok';if(p.status==='banned'||p.status==='unhealthy')return'dead';return'warn';}
+let PRX={page:0,show:10,q:''};
 function renderProxies(){
   const pin=ST.settings.dedicated_proxy_id;
-  $('#prxCount').textContent=ST.proxies.length+' total';
-  $('#prxList').innerHTML=ST.proxies.slice(0,80).map(p=>{
+  let list=ST.proxies;
+  if(PRX.q){const q=PRX.q.toLowerCase();list=list.filter(p=>(p.url+' '+(p.status||'')).toLowerCase().includes(q));}
+  $('#prxCount').textContent=ST.proxies.length+' total'+(PRX.q?' · '+list.length+' match':'');
+  const per=PRX.show==='all'?list.length||1:+PRX.show;
+  const pages=Math.max(1,Math.ceil(list.length/per));
+  if(PRX.page>=pages)PRX.page=0;
+  const start=PRX.page*per, slice=list.slice(start,start+per);
+  $('#prxList').innerHTML=slice.map(p=>{
     const host=p.url.split('@').pop(),cl=pst(p);
     const lat=p.latency_ms?' · '+(p.latency_ms/1000).toFixed(1)+'s':'';
     const isPin=String(p.id)===String(pin);
@@ -408,27 +550,74 @@ ${isPin?'<span class="badge pin">Pinned</span>':''}
 <button class="xbtn t" title="test" data-test="${p.id}">⟳</button>
 <button class="xbtn" title="delete" data-del="${p.id}">×</button>
 </div>`;
-  }).join('')||'<div class="muted">No proxies yet.</div>';
+  }).join('')||'<div class="muted">No proxies match.</div>';
+  // pagination bar
+  const pg=$('#prxPage');
+  if(pages>1){
+    pg.innerHTML=`<button data-pprev ${PRX.page<=0?'disabled':''}>‹ Prev</button><span class="pinfo">${start+1}–${Math.min(start+per,list.length)} of ${list.length}</span><button data-pnext ${PRX.page>=pages-1?'disabled':''}>Next ›</button>`;
+    pg.querySelector('[data-pprev]').onclick=()=>{if(PRX.page>0){PRX.page--;renderProxies();}};
+    pg.querySelector('[data-pnext]').onclick=()=>{if(PRX.page<pages-1){PRX.page++;renderProxies();}};
+  }else pg.innerHTML='';
   $$('#prxList [data-test]').forEach(b=>b.onclick=async e=>{e.stopPropagation();b.textContent='…';
     try{const r=await api('/admin/proxy/test',{id:+b.dataset.test});toast(r.ok?'Clean ✓ '+r.exit_ip:r.detail,r.ok?'ok':'bad');await refresh();}catch(e){toast('Test failed','bad');b.textContent='⟳';}
   });
   $$('#prxList [data-del]').forEach(b=>b.onclick=async e=>{e.stopPropagation();await api('/admin/proxy/delete',{id:+b.dataset.del});toast('Proxy removed','ok');await refresh();});
 }
+function epName(e){return e.name||e.url.replace(/^https?:\/\//,'');}
 function renderEndpoints(){
-  const eps=ST.endpoints||[],primary=ST.settings.endpoint||'https://agentrouter.org';
-  let h=`<div class="ep"><span class="eprank">1</span><div class="pi"><div class="ip" style="font-family:inherit">${primary.replace(/^https?:\/\//,'')}</div><div class="tag">primary · always active</div></div><span class="st ok"></span></div>`;
-  h+=eps.map((e,i)=>`<div class="ep"><span class="eprank">${i+2}</span><div class="pi"><div class="ip" style="font-family:inherit">${e.url.replace(/^https?:\/\//,'')}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI':'Anthropic'} · fallback</div></div><button class="xbtn" data-epdel="${e.id}">×</button></div>`).join('');
+  const eps=ST.endpoints||[];
+  const arEnabled=ST.settings.agentrouter_enabled!=='0';
+  const arPrimary=!eps.some(e=>e.is_primary);  // agentrouter is primary if no custom endpoint is
+  const arUrl=(ST.settings.endpoint||'https://agentrouter.org').replace(/^https?:\/\//,'');
+  // built-in agentrouter (the gateway's own upstream) — toggle + primary, no delete
+  let h=`<div class="ep"><span class="eprank">${arPrimary?'★':'1'}</span>
+<div class="pi"><div class="ip" style="font-family:inherit">${arUrl}</div><div class="tag">AgentRouter (gateway) · ${arPrimary?'primary':'fallback'}</div></div>
+<div class="epacts">
+<button class="sbtn star${arPrimary?' on':''}" data-arprimary="1">${arPrimary?'★ Primary':'Set primary'}</button>
+<button class="sbtn chat" data-archat="1">💬 Chat</button>
+<div class="tg ${arEnabled?'on':''}" data-artg="1"></div>
+</div></div>`;
+  // custom endpoints
+  h+=eps.map((e)=>{
+    const prim=!!e.is_primary;
+    return`<div class="ep"><span class="eprank">${prim?'★':e.priority||'·'}</span>
+<div class="pi"><div class="ip" style="font-family:inherit">${epName(e)}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI':'Anthropic'} · ${prim?'primary':'fallback'}${e.status&&e.status!=='unknown'?' · '+e.status:''}</div></div>
+<div class="epacts">
+<button class="sbtn star${prim?' on':''}" data-epprimary="${e.id}">${prim?'★ Primary':'Set primary'}</button>
+<button class="sbtn chat" data-epchat="${e.id}">💬 Chat</button>
+<button class="sbtn" data-eptest="${e.id}">🧪 Test</button>
+<div class="tg ${e.enabled?'on':''}" data-eptg="${e.id}"></div>
+<button class="xbtn" data-epdel="${e.id}">×</button>
+</div></div>`;
+  }).join('');
   $('#epList').innerHTML=h;
+  // agentrouter controls
+  $$('#epList [data-artg]').forEach(b=>b.onclick=async()=>{const on=!b.classList.contains('on');await api('/admin/settings',{agentrouter_enabled:on?'1':'0'});ST.settings.agentrouter_enabled=on?'1':'0';toast('AgentRouter '+(on?'ON':'OFF'),'ok');render();});
+  $$('#epList [data-arprimary]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/primary',{id:0});toast('AgentRouter is primary','ok');await refresh();});
+  $$('#epList [data-archat]').forEach(b=>b.onclick=()=>openEndpointChat({name:'AgentRouter',url:ST.settings.endpoint||'https://agentrouter.org',api_mode:'anthropic_messages',api_key:'',model:ST.settings.model_note||'claude-sonnet-4-6'}));
+  // custom endpoint controls
+  $$('#epList [data-eptg]').forEach(b=>b.onclick=async()=>{const e=eps.find(x=>x.id==b.dataset.eptg);await api('/admin/endpoint/update',{id:+b.dataset.eptg,enabled:e.enabled?0:1});toast('Endpoint '+(e.enabled?'OFF':'ON'),'ok');await refresh();});
+  $$('#epList [data-epprimary]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/primary',{id:+b.dataset.epprimary});toast('Primary set','ok');await refresh();});
   $$('#epList [data-epdel]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/delete',{id:+b.dataset.epdel});toast('Endpoint removed','ok');await refresh();});
+  $$('#epList [data-eptest]').forEach(b=>b.onclick=async()=>{
+    const e=eps.find(x=>x.id==b.dataset.eptest);b.textContent='…';
+    try{const r=await api('/admin/endpoint/test',{url:e.url,api_mode:e.api_mode,api_key:e.api_key,model:ST.settings.model_note});
+      toast(r.ok?('✓ '+r.ms+'ms: '+(r.reply||'').slice(0,30)):('✗ '+(r.detail||'failed').slice(0,40)),r.ok?'ok':'bad');
+    }catch(e){toast('Test error','bad');}b.textContent='🧪 Test';
+  });
+  $$('#epList [data-epchat]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epchat);openEndpointChat({name:epName(e),url:e.url,api_mode:e.api_mode,api_key:e.api_key,model:ST.settings.model_note||'claude-sonnet-4-6'});});
 }
 function renderLogs(){
-  $('#logList').innerHTML=(ST.logs||[]).slice(0,40).map(l=>{
+  const logs=(ST.logs||[]).slice(0,40);
+  $('#logList').innerHTML=logs.map((l,i)=>{
     const c=l.status>=500?'s5':l.status>=400?'s4':'s2';
     const t=l.ts?new Date(l.ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
     const ms=l.ms?(l.ms>=1000?(l.ms/1000).toFixed(1)+'s':l.ms+'ms'):'';
-    let note=(l.note||'');if(note.length>40)note=note.slice(0,40)+'…';
-    return`<div class="log"><span class="code ${c}">${l.status}</span><span class="ld">${note}${l.attempts&&l.attempts>1?' · att '+l.attempts:''} ${ms?'· '+ms:''}</span><span class="lt">${t}</span></div>`;
+    let note=(l.note||'');if(note.length>34)note=note.slice(0,34)+'…';
+    const ip=l.ip?' · '+l.ip:'';
+    return`<div class="log" data-logi="${i}" style="cursor:pointer"><span class="code ${c}">${l.status}</span><span class="ld">${note}${l.attempts&&l.attempts>1?' · att '+l.attempts:''}${ip} ${ms?'· '+ms:''}</span><span class="lt">${t}</span><span style="color:var(--ink-faint);font-size:14px;margin-left:4px">›</span></div>`;
   }).join('')||'<div class="muted">No requests yet.</div>';
+  $$('#logList [data-logi]').forEach(el=>el.onclick=()=>openLogDetail(logs[+el.dataset.logi]));
 }
 function renderKeywords(){
   $('#kwList').innerHTML=(ST.keywords||[]).map(k=>`<div class="prx"><span class="st ${k.enabled?'ok':'dead'}"></span><div class="pi"><div class="ip" style="font-family:inherit">${k.value}</div><div class="tag">${k.mode==='block'?'block request':'redact → '+k.replacement}</div></div><div class="tg ${k.enabled?'on':''}" data-kwtg="${k.id}"></div><button class="xbtn" data-kwdel="${k.id}">×</button></div>`).join('')||'<div class="muted">No filters.</div>';
@@ -437,19 +626,90 @@ function renderKeywords(){
 }
 async function refresh(){try{ST=await getState();render();}catch(e){}}
 
+// ---- copy-to-clipboard helper ----
+async function copyText(txt){
+  try{await navigator.clipboard.writeText(txt);toast('Copied ✓','ok');}
+  catch(e){
+    // fallback for non-secure contexts
+    const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);
+    ta.select();try{document.execCommand('copy');toast('Copied ✓','ok');}catch(_){toast('Copy failed','bad');}
+    document.body.removeChild(ta);
+  }
+}
+// ---- API keys ----
+function renderKeys(){
+  const ks=ST.api_keys||[];
+  $('#keyCount').textContent=ks.length+(ks.length===1?' key':' keys');
+  $('#keyList').innerHTML=ks.map(k=>{
+    const when=k.created_at?new Date(k.created_at*1000).toLocaleDateString():'';
+    const lbl=k.label?' · '+k.label:'';
+    return`<div class="keyrow"><span class="st ok"></span><div class="km"><div class="kn">${k.name}</div><div class="kt">${k.hit_count||0} hits${lbl} · ${when}</div></div>
+<button class="xbtn cp" data-copykey="${k.name}" title="copy">⧉</button>
+<button class="xbtn" data-keydel="${k.id}" title="delete">×</button></div>`;
+  }).join('')||'<div class="muted">No keys yet. Create one below.</div>';
+  $$('#keyList [data-copykey]').forEach(b=>b.onclick=()=>copyText(b.dataset.copykey));
+  $$('#keyList [data-keydel]').forEach(b=>b.onclick=async()=>{await api('/admin/key/delete',{id:+b.dataset.keydel});toast('Key deleted','ok');await refresh();});
+}
+$('#createKey').onclick=async()=>{
+  try{
+    const r=await api('/admin/key/create',{});
+    // show the new key prominently with a copy button at the top of the list
+    const box=document.createElement('div');box.className='newkey';
+    box.innerHTML=`<div style="font-size:12px;font-weight:700;color:var(--g-700);margin-bottom:6px">✓ New key created — copy it now</div><div class="nk">${r.key}</div><button class="btn" style="margin-top:10px" data-cpnew="${r.key}">⧉ Copy key</button>`;
+    $('#keyList').prepend(box);
+    box.querySelector('[data-cpnew]').onclick=()=>copyText(r.key);
+    await refresh();
+    // re-prepend after refresh wiped it
+    if(!$('#keyList .newkey')){$('#keyList').prepend(box);box.querySelector('[data-cpnew]').onclick=()=>copyText(r.key);}
+    toast('Key created ✓','ok');
+  }catch(e){toast('Create failed','bad');}
+};
+
 // save buttons
 async function saveSettings(keys,lbl){const body={};keys.forEach(k=>{const el=$('[data-set="'+k+'"]');if(el)body[k]=el.value;});await api('/admin/settings',body);toast((lbl||'Settings')+' saved','ok');}
 $('#saveTimers').onclick=()=>saveSettings(['read_timeout','connect_timeout','max_retries','retry_initial_delay','retry_max_delay','keepalive_idle','keepalive_intvl','keepalive_cnt'],'Timers');
-$('#saveKeys').onclick=()=>saveSettings(['gateway_key','upstream_key','endpoint'],'Keys');
+$('#saveKeys').onclick=()=>saveSettings(['gateway_key','upstream_key'],'Connection');
+// static copy buttons in the Connection card
+$('#cpPublic')&&($('#cpPublic').onclick=()=>copyText($('#publicUrl').value));
+$$('[data-copyset]').forEach(b=>b.onclick=()=>{const el=$('[data-set="'+b.dataset.copyset+'"]');if(el)copyText(el.value);});
+$$('[data-copyval]').forEach(b=>b.onclick=()=>copyText(b.dataset.copyval));
 
 $('#addProxy').onclick=async()=>{
+  const bulk=$('#newBulk').value.trim();
+  if(bulk){
+    try{const r=await api('/admin/proxy/add',{text:bulk});
+      toast(`Added ${r.added} of ${r.parsed} parsed`,r.added?'ok':'bad');
+      $('#newBulk').value='';await refresh();}
+    catch(e){toast('Parse failed: '+e.message,'bad');}
+    return;
+  }
   const host=$('#newHost').value.trim(),port=$('#newPort').value.trim();
-  if(!host||!port){toast('Host and port required','bad');return;}
+  if(!host||!port){toast('Host+port, or paste a list above','bad');return;}
   try{const r=await api('/admin/proxy/add',{ptype:$('#newPtype').dataset.val,host,port,user:$('#newUser').value.trim(),password:$('#newPass').value.trim()});
     toast(r.added?'Proxy added ✓':'Already exists',r.added?'ok':'bad');
     ['newHost','newPort','newUser','newPass'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});await refresh();}
   catch(e){toast('Invalid: '+e.message,'bad');}
 };
+// proxy search + show-N + pagination
+$('#prxSearch')&&$('#prxSearch').addEventListener('input',e=>{PRX.q=e.target.value;PRX.page=0;renderProxies();});
+// file upload (click + drag&drop) — sends raw text, backend auto-detects format
+function handleProxyFile(file){
+  const rd=new FileReader();
+  rd.onload=async()=>{
+    try{const r=await api('/admin/proxy/add',{text:String(rd.result)});
+      toast(`Imported ${r.added} of ${r.parsed} from ${file.name}`,r.added?'ok':'bad');await refresh();}
+    catch(e){toast('Import failed: '+e.message,'bad');}
+  };
+  rd.readAsText(file);
+}
+$('#upDrop')&&($('#upDrop').onclick=()=>$('#prxFile').click());
+$('#prxFile')&&($('#prxFile').onchange=e=>{if(e.target.files[0])handleProxyFile(e.target.files[0]);e.target.value='';});
+if($('#upDrop')){
+  const dz=$('#upDrop');
+  ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
+  dz.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)handleProxyFile(f);});
+}
 $('#addEndpoint').onclick=async()=>{
   const url=$('#epUrl').value.trim();if(!url){toast('URL required','bad');return;}
   try{await api('/admin/endpoint/add',{url,api_mode:$('#epMode').dataset.val,api_key:$('#epKey').value.trim()});toast('Endpoint added ✓','ok');$('#epUrl').value='';$('#epKey').value='';await refresh();}
@@ -463,6 +723,128 @@ $('#addKw').onclick=async()=>{
 $('#clearLogs').onclick=async()=>{await api('/admin/logs/clear');toast('Logs cleared','ok');await refresh();};
 
 setInterval(()=>{if(!$('#app').classList.contains('hidden'))refresh();},12000);
+
+// ============ MODALS ============
+function closeModal(id){$('#'+id).classList.remove('show');}
+$('#logModalX').onclick=()=>closeModal('logModal');
+$('#chatModalX').onclick=()=>closeModal('chatModal');
+$$('.modal').forEach(m=>m.onclick=e=>{if(e.target===m)m.classList.remove('show');});
+
+// ---- LOG DETAIL ----
+function openLogDetail(l){
+  const when=l.ts?new Date(l.ts*1000).toLocaleString():'';
+  const rows=[
+    ['Status',l.status],['Time',when],['Method',l.method||'—'],['Path',l.path||'—'],
+    ['Model',l.model||'—'],['Client IP',l.ip||'—'],['Endpoint',l.endpoint||'—'],
+    ['Proxy (exit)',l.proxy?l.proxy.split('@').pop():'—'],
+    ['Attempts',l.attempts||1],['Latency',l.ms?(l.ms>=1000?(l.ms/1000).toFixed(1)+'s':l.ms+'ms'):'—'],
+    ['Stream',l.stream?'yes':'no'],['Redactions',l.redactions||0],['Note',l.note||'—'],
+  ];
+  let h=rows.map(r=>`<div class="kv"><span class="k">${r[0]}</span><span class="v">${(''+r[1]).replace(/</g,'&lt;')}</span></div>`).join('');
+  if(l.detail)h+=`<div style="margin-top:12px;font-size:11px;font-weight:700;color:var(--ink-faint)">FULL ERROR / RESPONSE</div><pre style="margin-top:6px;background:#f8fafb;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:11.5px;overflow:auto;white-space:pre-wrap;word-break:break-word;max-height:200px">${(l.detail||'').replace(/</g,'&lt;')}</pre>`;
+  $('#logModalBody').innerHTML=h;
+  $('#logModal').classList.add('show');
+}
+
+// ---- ENDPOINT CHAT (with image upload + short memory) ----
+let CHAT={cfg:null,msgs:[]};
+function openEndpointChat(cfg){
+  CHAT={cfg,msgs:[]};
+  $('#chatTitle').textContent='Chat · '+cfg.name;
+  $('#chatLog').innerHTML='<div class="msg sys">Testing '+(cfg.model||'model')+' · '+(cfg.api_mode==='chat_completions'?'OpenAI':'Anthropic')+' mode. Send a message or image.</div>';
+  $('#chatInput').value='';
+  $('#chatModal').classList.add('show');
+  setTimeout(()=>$('#chatInput').focus(),100);
+}
+function chatBubble(role,text){
+  const d=document.createElement('div');d.className='msg '+role;d.textContent=text;
+  $('#chatLog').appendChild(d);$('#chatLog').scrollTop=$('#chatLog').scrollHeight;return d;
+}
+async function chatSend(){
+  const inp=$('#chatInput'),txt=inp.value.trim();
+  if(!txt||!CHAT.cfg)return;
+  inp.value='';chatBubble('u',txt);
+  CHAT.msgs.push({role:'user',content:txt});
+  const wait=chatBubble('a','…');
+  try{
+    const r=await api('/admin/endpoint/test',{url:CHAT.cfg.url,api_mode:CHAT.cfg.api_mode,api_key:CHAT.cfg.api_key,model:CHAT.cfg.model,message:txt});
+    wait.textContent=r.ok?(r.reply||'(empty)'):('✗ '+(r.detail||'failed'));
+    if(r.ok)CHAT.msgs.push({role:'assistant',content:r.reply});
+  }catch(e){wait.textContent='✗ Error: '+e.message;}
+  $('#chatLog').scrollTop=$('#chatLog').scrollHeight;
+}
+$('#chatSend').onclick=chatSend;
+$('#chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chatSend();}});
+
+// ============ EMBEDDED AGENT ============
+let AG={cfg:JSON.parse(localStorage.getItem('mr_agent')||'{}'),msgs:[],attach:null};
+function agentBrainLabel(){return AG.cfg.mode==='custom'?('Custom · '+(AG.cfg.model||'?')):'Default brain (gateway)';}
+function openAgent(){
+  $('#agentPanel').classList.add('show');$('#agentFab').style.display='none';
+  $('#agentBrain').textContent=agentBrainLabel();
+  if(!AG.msgs.length)agentBubble('a','Hi! I can add/test proxies, add endpoints, set filters, change settings, and diagnose log errors. What do you need?');
+  setTimeout(()=>$('#agentInput').focus(),100);
+}
+function closeAgent(){$('#agentPanel').classList.remove('show');$('#agentFab').style.display='grid';}
+$('#agentFab').onclick=openAgent;$('#agentClose').onclick=closeAgent;
+$('#agentCfgBtn').onclick=()=>$('#agentSettings').classList.toggle('show');
+// settings: mode toggle (off=default, on=custom)
+function syncAgentCfgUI(){
+  const custom=AG.cfg.mode==='custom';
+  $('#agentMode').classList.toggle('on',custom);
+  $('#agentCustom').style.display=custom?'block':'none';
+  if(AG.cfg.endpoint)$('#agentEp').value=AG.cfg.endpoint;
+  if(AG.cfg.model)$('#agentModel').value=AG.cfg.model;
+  if(AG.cfg.api_key)$('#agentKey').value=AG.cfg.api_key;
+  if(AG.cfg.sdk){const c=$('#agentSdk');c.dataset.val=AG.cfg.sdk;c.querySelector('.csel-btn').textContent=AG.cfg.sdk==='anthropic'?'Anthropic':'OpenAI';}
+}
+$('#agentMode').onclick=()=>{AG.cfg.mode=(AG.cfg.mode==='custom')?'default':'custom';syncAgentCfgUI();};
+$('#agentSaveCfg').onclick=()=>{
+  if($('#agentMode').classList.contains('on')){
+    AG.cfg={mode:'custom',sdk:$('#agentSdk').dataset.val,endpoint:$('#agentEp').value.trim(),model:$('#agentModel').value.trim(),api_key:$('#agentKey').value.trim()};
+  }else AG.cfg={mode:'default'};
+  localStorage.setItem('mr_agent',JSON.stringify(AG.cfg));
+  $('#agentBrain').textContent=agentBrainLabel();$('#agentSettings').classList.remove('show');
+  toast('Brain settings saved','ok');
+};
+function agentBubble(role,text){const d=document.createElement('div');d.className='msg '+role;d.textContent=text;$('#agentLog').appendChild(d);$('#agentLog').scrollTop=$('#agentLog').scrollHeight;return d;}
+// attach image/file
+$('#agentAttach').onclick=()=>$('#agentFile').click();
+$('#agentFile').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{AG.attach={name:f.name,type:f.type,data:rd.result};
+    const b=document.createElement('div');b.className='attbadge';b.textContent='📎 '+f.name+' attached';$('#agentLog').appendChild(b);$('#agentLog').scrollTop=$('#agentLog').scrollHeight;};
+  if(f.type.startsWith('image/'))rd.readAsDataURL(f);else rd.readAsText(f);
+  e.target.value='';
+};
+async function agentSend(){
+  const inp=$('#agentInput'),txt=inp.value.trim();
+  if(!txt&&!AG.attach)return;
+  inp.value='';
+  let content=txt;
+  if(AG.attach){
+    if(AG.attach.type.startsWith('image/'))content=txt+'\n[image attached: '+AG.attach.name+']';
+    else content=txt+'\n\n--- file: '+AG.attach.name+' ---\n'+String(AG.attach.data).slice(0,4000);
+    AG.attach=null;
+  }
+  agentBubble('u',txt||'(attachment)');
+  AG.msgs.push({role:'user',content});
+  const wait=agentBubble('a','…');
+  try{
+    const r=await api('/admin/agent/chat',{messages:AG.msgs,config:AG.cfg});
+    wait.textContent=r.reply||'(no reply)';
+    AG.msgs.push({role:'assistant',content:r.reply||''});
+    if(r.actions&&r.actions.length){const b=document.createElement('div');b.className='msg sys';b.textContent='⚙ '+r.actions.map(a=>a.tool).join(', ');$('#agentLog').appendChild(b);}
+    await refresh();  // reflect any changes the agent made
+  }catch(e){wait.textContent='✗ '+e.message;}
+  $('#agentLog').scrollTop=$('#agentLog').scrollHeight;
+}
+$('#agentSend').onclick=agentSend;
+$('#agentInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();agentSend();}});
+syncAgentCfgUI();$$('#agentSettings .csel').forEach(initCsel);
+$('#agentSdk')&&($('#agentSdk')._cb=v=>{AG.cfg.sdk=v;});
+
 boot();
 </script>
 </body></html>

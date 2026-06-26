@@ -394,6 +394,53 @@ async def _consume_assemble(proxy, url, headers, body, timeout, kind):
         return ("retry", f"{type(e).__name__}")
 
 
+async def test_endpoint(url, api_mode, api_key, model, message):
+    """Send ONE small chat through the pinned/first proxy to a specific endpoint.
+    Returns {ok, status, ms, reply, detail}. Token-cheap (max_tokens=20)."""
+    candidates = proxy_pool.ordered_for_request(2)
+    if not candidates:
+        return {"ok": False, "status": 0, "ms": 0, "reply": "", "detail": "no proxies configured"}
+    openai = (api_mode == "chat_completions")
+    if openai:
+        full = url.rstrip("/") + ("/chat/completions" if not url.rstrip("/").endswith("chat/completions") else "")
+        body = {"model": model, "max_tokens": 20,
+                "messages": [{"role": "user", "content": message}]}
+        headers = {"authorization": f"Bearer {api_key}", "content-type": "application/json"}
+    else:
+        full = url.rstrip("/") + ("/v1/messages" if "/v1/messages" not in url else "")
+        body = {"model": model, "max_tokens": 20,
+                "messages": [{"role": "user", "content": message}]}
+        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01",
+                   "content-type": "application/json",
+                   "user-agent": "claude-cli/2.1.177 (external, cli)"}
+    payload = json.dumps(body).encode()
+    t0 = time.time()
+    detail = ""
+    for p in candidates:
+        try:
+            async with httpx.AsyncClient(proxy=p["url"], timeout=httpx.Timeout(45.0)) as client:
+                r = await client.post(full, headers=headers, content=payload)
+                ms = int((time.time() - t0) * 1000)
+                raw = r.text[:1500]
+                if r.status_code < 300:
+                    reply = ""
+                    try:
+                        d = r.json()
+                        if openai:
+                            reply = d["choices"][0]["message"]["content"]
+                        else:
+                            reply = "".join(b.get("text", "") for b in d.get("content", []))
+                    except Exception:
+                        reply = raw[:200]
+                    return {"ok": True, "status": r.status_code, "ms": ms,
+                            "reply": reply.strip() or "(empty)", "detail": ""}
+                detail = f"HTTP {r.status_code}: {raw}"
+        except Exception as e:
+            detail = f"{type(e).__name__}: {e}"
+    return {"ok": False, "status": 0, "ms": int((time.time() - t0) * 1000),
+            "reply": "", "detail": detail}
+
+
 async def forward(request, path):
     s = db.get_all_settings()
     endpoint = s.get("endpoint", "https://agentrouter.org").rstrip("/")
@@ -410,14 +457,34 @@ async def forward(request, path):
         auth = request.headers.get("authorization", "")
         if not ck and auth.lower().startswith("bearer "):
             ck = auth[7:]
-        if ck != gateway_key:
+        # accept the global gateway key OR any enabled custom key (mugen_*)
+        ok_key = (ck == gateway_key)
+        if not ok_key and ck:
+            krow = db.get_api_key_by_value(ck)
+            if krow:
+                ok_key = True
+                try:
+                    db.touch_api_key(krow["id"])
+                except Exception:
+                    pass
+        if not ok_key:
             return _err("Invalid gateway key.", 401, "authentication_error")
 
+    # client IP (behind Caddy/Railway -> X-Forwarded-For) for the log detail view
+    client_ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                 or (request.client.host if request.client else ""))
+
     body = await request.body()
+    # model name (for logs) — parsed before filters mutate the body
+    try:
+        req_model = (json.loads(body) or {}).get("model", "")
+    except Exception:
+        req_model = ""
     body, blocked_kw, redactions = filters.apply_filters(body)
     if blocked_kw is not None:
         db.add_log(method=request.method, path=path, status=400, proxy="", attempts=0,
-                   stream=0, redactions=0, ms=0, note="blocked by content filter")
+                   stream=0, redactions=0, ms=0, note="blocked by content filter",
+                   ip=client_ip, model=req_model)
         return _err("Request blocked by content filter.", 400, "invalid_request_error")
 
     # Strip echoed thinking blocks from history — agentrouter's schema rejects them
@@ -525,20 +592,24 @@ async def forward(request, path):
                             yield frame
                         db.add_log(method=request.method, path=path, status=200, proxy=p["url"],
                                    attempts=attempts, stream=1, redactions=redactions,
-                                   ms=int((time.time() - t0) * 1000), note="ok(buffered)")
+                                   ms=int((time.time() - t0) * 1000), note="ok(buffered)",
+                                   ip=client_ip, model=req_model, endpoint=endpoint)
                         return
                     if res[0] == "error":
                         _, status, err = res
                         db.add_log(method=request.method, path=path, status=status, proxy=p["url"],
                                    attempts=attempts, stream=1, redactions=redactions,
-                                   ms=int((time.time() - t0) * 1000), note=f"upstream {status}")
+                                   ms=int((time.time() - t0) * 1000), note=f"upstream {status}",
+                                   ip=client_ip, model=req_model, endpoint=endpoint,
+                                   detail=json.dumps(err)[:1500])
                         yield _sse("error", err)
                         return
                     detail = res[1]  # ("retry", reason) -> try next proxy
                     await _retry_backoff(attempts)
                 db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                            stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000),
-                           note=f"all proxies failed: {detail}")
+                           note=f"all proxies failed: {detail}",
+                           ip=client_ip, model=req_model, endpoint=endpoint, detail=str(detail)[:1500])
                 yield _sse("error", {"type": "error", "error": {"type": "api_error",
                           "message": f"All proxies failed. {detail}"}})
 
@@ -586,13 +657,17 @@ async def forward(request, path):
         res = await _consume_assemble(p, url, headers, up_body, timeout, kind)
         if res[0] == "respond":
             _, status, ct, payload = res
+            note = "ok(assembled)" if 200 <= status < 300 else f"upstream {status}"
+            det = "" if 200 <= status < 300 else payload[:1500].decode("utf-8", "replace")
             db.add_log(method=request.method, path=path, status=status, proxy=p["url"],
                        attempts=attempts, stream=0, redactions=redactions,
-                       ms=int((time.time() - t0) * 1000), note="ok(assembled)")
+                       ms=int((time.time() - t0) * 1000), note=note,
+                       ip=client_ip, model=req_model, endpoint=endpoint, detail=det)
             return Response(content=payload, status_code=status, media_type=ct)
         await _retry_backoff(attempts)
         detail = res[1]
     db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                stream=0, redactions=redactions, ms=int((time.time() - t0) * 1000),
-               note=f"all proxies failed: {detail}")
+               note=f"all proxies failed: {detail}",
+               ip=client_ip, model=req_model, endpoint=endpoint, detail=str(detail)[:1500])
     return _err(f"All proxies failed. {detail}", 503)
