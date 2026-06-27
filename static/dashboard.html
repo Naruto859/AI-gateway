@@ -47,7 +47,7 @@ header{display:flex;align-items:center;gap:13px;margin:4px 4px 22px;animation:ri
 .tab[data-t="logs"].active{background:linear-gradient(145deg,var(--c-aqua),var(--c-aqua-d));color:#fff;box-shadow:0 4px 12px rgba(47,158,134,.32)}
 .tab[data-t="filters"].active{background:linear-gradient(145deg,var(--c-pink),var(--c-pink-d));color:#fff;box-shadow:0 4px 12px rgba(195,90,147,.32)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:15px;box-shadow:var(--shadow);animation:rise .5s ease both;transform:translateZ(0)}
-.card:has(.csel.open){z-index:10}
+.card.csel-lift{z-index:10}
 .card h2{margin:0 0 3px;font-size:16px;font-weight:700;display:flex;align-items:center;gap:9px}
 .card h2 .ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;background:var(--g-100)}
 .card h2 .ic svg{width:17px;height:17px;stroke:var(--g-600)}
@@ -475,18 +475,19 @@ $$('.tab').forEach(t=>t.onclick=()=>{
 // custom dropdowns. NOTE: no _i guard — mkCsel() rewrites innerHTML on every
 // render(), creating a fresh .csel-btn each time, so we MUST (re)bind handlers
 // every call or the dedicated-proxy dropdown goes dead after the first paint.
+function _cselLift(cs,on){const card=cs.closest('.card');if(card)card.classList.toggle('csel-lift',on);}
 function initCsel(cs){
   const btn=cs.querySelector('.csel-btn');
   if(!btn)return;
-  btn.onclick=e=>{e.stopPropagation();const o=cs.classList.contains('open');$$('.csel.open').forEach(c=>c.classList.remove('open'));if(!o)cs.classList.add('open');};
+  btn.onclick=e=>{e.stopPropagation();const o=cs.classList.contains('open');$$('.csel.open').forEach(c=>{c.classList.remove('open');_cselLift(c,false);});if(!o){cs.classList.add('open');_cselLift(cs,true);}};
   cs.querySelectorAll('.csel-opt').forEach(opt=>opt.onclick=e=>{
     e.stopPropagation();cs.querySelectorAll('.csel-opt').forEach(o=>o.classList.remove('sel'));opt.classList.add('sel');
     btn.innerHTML=opt.childNodes[0].textContent.trim();
     if(opt.dataset.v!==undefined)cs.dataset.val=opt.dataset.v;
-    cs.classList.remove('open');if(cs._cb)cs._cb(opt.dataset.v);
+    cs.classList.remove('open');_cselLift(cs,false);if(cs._cb)cs._cb(opt.dataset.v);
   });
 }
-document.addEventListener('click',()=>$$('.csel.open').forEach(c=>c.classList.remove('open')));
+document.addEventListener('click',()=>$$('.csel.open').forEach(c=>{c.classList.remove('open');_cselLift(c,false);}));
 
 function mkCsel(id,opts,cur,cb){
   const el=$('#'+id);
