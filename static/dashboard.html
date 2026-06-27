@@ -497,7 +497,7 @@ function initCsel(cs){
     _cselClose(cs);if(cs._cb)cs._cb(opt.dataset.v);
   });
 }
-document.addEventListener('click',()=>$$('.csel.open').forEach(_cselClose));
+document.addEventListener('click',e=>$$('.csel.open').forEach(cs=>{if(!cs.contains(e.target))_cselClose(cs);}));
 
 function mkCsel(id,opts,cur,cb){
   const el=$('#'+id);
