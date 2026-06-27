@@ -475,19 +475,29 @@ $$('.tab').forEach(t=>t.onclick=()=>{
 // custom dropdowns. NOTE: no _i guard — mkCsel() rewrites innerHTML on every
 // render(), creating a fresh .csel-btn each time, so we MUST (re)bind handlers
 // every call or the dedicated-proxy dropdown goes dead after the first paint.
-function _cselLift(cs,on){const card=cs.closest('.card');if(card)card.classList.toggle('csel-lift',on);}
+function _cselClose(cs){const pop=cs.querySelector('.csel-pop');cs.classList.remove('open');if(pop)pop.style.cssText='';}
 function initCsel(cs){
   const btn=cs.querySelector('.csel-btn');
-  if(!btn)return;
-  btn.onclick=e=>{e.stopPropagation();const o=cs.classList.contains('open');$$('.csel.open').forEach(c=>{c.classList.remove('open');_cselLift(c,false);});if(!o){cs.classList.add('open');_cselLift(cs,true);}};
+  const pop=cs.querySelector('.csel-pop');
+  if(!btn||!pop)return;
+  btn.onclick=e=>{
+    e.stopPropagation();
+    const o=cs.classList.contains('open');
+    $$('.csel.open').forEach(_cselClose);
+    if(!o){
+      cs.classList.add('open');
+      const r=btn.getBoundingClientRect();
+      pop.style.cssText=`position:fixed;top:${r.bottom+7}px;left:${r.left}px;width:${r.width}px;min-width:200px;right:auto;z-index:9999`;
+    }
+  };
   cs.querySelectorAll('.csel-opt').forEach(opt=>opt.onclick=e=>{
     e.stopPropagation();cs.querySelectorAll('.csel-opt').forEach(o=>o.classList.remove('sel'));opt.classList.add('sel');
     btn.innerHTML=opt.childNodes[0].textContent.trim();
     if(opt.dataset.v!==undefined)cs.dataset.val=opt.dataset.v;
-    cs.classList.remove('open');_cselLift(cs,false);if(cs._cb)cs._cb(opt.dataset.v);
+    _cselClose(cs);if(cs._cb)cs._cb(opt.dataset.v);
   });
 }
-document.addEventListener('click',()=>$$('.csel.open').forEach(c=>{c.classList.remove('open');_cselLift(c,false);}));
+document.addEventListener('click',()=>$$('.csel.open').forEach(_cselClose));
 
 function mkCsel(id,opts,cur,cb){
   const el=$('#'+id);
