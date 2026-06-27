@@ -475,11 +475,16 @@ $$('.tab').forEach(t=>t.onclick=()=>{
 // custom dropdowns. NOTE: no _i guard — mkCsel() rewrites innerHTML on every
 // render(), creating a fresh .csel-btn each time, so we MUST (re)bind handlers
 // every call or the dedicated-proxy dropdown goes dead after the first paint.
-function _cselClose(cs){const pop=cs.querySelector('.csel-pop');cs.classList.remove('open');if(pop)pop.style.cssText='';}
+function _cselClose(cs){
+  cs.classList.remove('open');
+  const pop=cs._pop;
+  if(pop){pop.style.cssText='';if(pop._home&&pop.parentNode!==pop._home)pop._home.appendChild(pop);}
+}
 function initCsel(cs){
   const btn=cs.querySelector('.csel-btn');
   const pop=cs.querySelector('.csel-pop');
   if(!btn||!pop)return;
+  cs._pop=pop;pop._home=cs;
   btn.onclick=e=>{
     e.stopPropagation();
     const o=cs.classList.contains('open');
@@ -487,7 +492,10 @@ function initCsel(cs){
     if(!o){
       cs.classList.add('open');
       const r=btn.getBoundingClientRect();
-      pop.style.cssText=`position:fixed;top:${r.bottom+7}px;left:${r.left}px;width:${r.width}px;min-width:200px;right:auto;z-index:9999`;
+      // portal the popup to <body> so position:fixed is viewport-relative
+      // (a parent .card's transform would otherwise trap fixed + z-index).
+      document.body.appendChild(pop);
+      pop.style.cssText=`position:fixed;top:${r.bottom+7}px;left:${r.left}px;width:${r.width}px;z-index:99999;opacity:1;transform:none;pointer-events:auto`;
     }
   };
   cs.querySelectorAll('.csel-opt').forEach(opt=>opt.onclick=e=>{
@@ -497,7 +505,9 @@ function initCsel(cs){
     _cselClose(cs);if(cs._cb)cs._cb(opt.dataset.v);
   });
 }
-document.addEventListener('click',e=>$$('.csel.open').forEach(cs=>{if(!cs.contains(e.target))_cselClose(cs);}));
+document.addEventListener('click',e=>$$('.csel.open').forEach(cs=>{
+  if(!cs.contains(e.target)&&!(cs._pop&&cs._pop.contains(e.target)))_cselClose(cs);
+}));
 
 function mkCsel(id,opts,cur,cb){
   const el=$('#'+id);
