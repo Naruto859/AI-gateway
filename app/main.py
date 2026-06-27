@@ -2,14 +2,46 @@
 import os
 import time
 import re
+import asyncio
+import logging
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from . import db, proxy_pool, forwarder, agent
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(BASE, "static")
+log = logging.getLogger("gateway")
 
 app = FastAPI(title="AI Gateway", docs_url=None, redoc_url=None)
+
+
+async def _auto_health_loop():
+    """Check all enabled proxies every hour, update status/latency automatically."""
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            proxies = db.list_proxies()
+            endpoint = db.get_setting("endpoint", "https://agentrouter.org")
+            for p in proxies:
+                if not p.get("enabled"):
+                    continue
+                try:
+                    res = await proxy_pool.health_check(p["url"], endpoint)
+                    db.update_proxy(p["id"], status=res["status"],
+                                    exit_ip=res.get("exit_ip", ""),
+                                    latency_ms=res.get("latency_ms", 0),
+                                    last_checked=time.time(),
+                                    note=res.get("detail", ""))
+                except Exception:
+                    pass
+            log.info("auto health check done: %d proxies scanned", len(proxies))
+        except Exception as exc:
+            log.warning("auto health check error: %s", exc)
+
+
+@app.on_event("startup")
+async def _startup():
+    asyncio.create_task(_auto_health_loop())
 
 # warm the DB / defaults at import
 db.conn()

@@ -490,8 +490,8 @@ document.addEventListener('click',()=>$$('.csel.open').forEach(c=>c.classList.re
 function mkCsel(id,opts,cur,cb){
   const el=$('#'+id);
   if(!el)return;
-  // don't rebuild while the user has it open (12s refresh would slam it shut)
   if(el.classList.contains('open')){el._cb=cb;return;}
+  if(!el.classList.contains('csel')){el.classList.add('csel');el.classList.add('wide');}
   const optHtml=opts.map(o=>`<div class="csel-opt${o.v===cur?' sel':''}" data-v="${o.v}">${o.l} <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div>`).join('');
   const curL=(opts.find(o=>o.v===cur)||opts[0]||{}).l||cur;
   el.dataset.val=cur;
