@@ -617,112 +617,129 @@ async def forward(request, path):
                 attempts = 0
                 detail = ""
                 last_err = None  # (status, err, target_name, proxy_url) from an upstream 4xx
-                for tgt in targets:
-                    url = _target_url(tgt["base"], path, tgt["mode"])
-                    theaders = _target_headers(request, tgt)
-                    candidates = proxy_pool.ordered_for_request(max_retries)
-                    upstream_rejected = False
-                    for p in candidates:
-                        attempts += 1
+                logged = False   # ensure we ALWAYS write a log, even if client disconnects
+                last_proxy = ""
+                last_tgt_name = ""
+                try:
+                    for tgt in targets:
+                        url = _target_url(tgt["base"], path, tgt["mode"])
+                        theaders = _target_headers(request, tgt)
+                        candidates = proxy_pool.ordered_for_request(max_retries)
+                        upstream_rejected = False
+                        for p in candidates:
+                            attempts += 1
+                            last_proxy = p["url"]
+                            last_tgt_name = tgt["name"]
 
-                        async def consume(p=p, url=url, theaders=theaders):
-                            try:
-                                async with httpx.AsyncClient(proxy=p["url"], timeout=timeout) as client:
-                                    async with client.stream("POST", url, headers=theaders, content=up_body) as r:
-                                        if _is_waf(r.headers):
-                                            proxy_pool.mark_bad(p["id"], "waf")
-                                            return ("retry", f"WAF via {p['url']}")
-                                        if r.status_code >= 500:
-                                            proxy_pool.mark_bad(p["id"], "5xx")
-                                            return ("retry", f"{r.status_code} via {p['url']}")
-                                        ct = r.headers.get("content-type", "")
-                                        if "text/event-stream" not in ct:
-                                            raw = await r.aread()
-                                            if r.status_code >= 400:
-                                                # genuine upstream rejection — switch to next TARGET
-                                                proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
-                                                try:
-                                                    err = json.loads(raw)
-                                                    if not isinstance(err, dict) or "error" not in err:
-                                                        raise ValueError
-                                                except Exception:
-                                                    err = {"type": "error", "error": {"type": "api_error",
-                                                           "message": f"Upstream HTTP {r.status_code}: "
-                                                                      f"{raw[:300].decode('utf-8', 'replace')}"}}
-                                                return ("error", r.status_code, err)
-                                            proxy_pool.mark_bad(p["id"], "non-sse")
-                                            return ("retry", f"non-SSE {r.status_code} via {p['url']}")
-                                        asm = AnthropicAssembler()
-                                        saw_stop = False
-                                        buf = b""
-                                        async for chunk in r.aiter_bytes():
-                                            buf += chunk
-                                            while b"\n\n" in buf:
-                                                block, buf = buf.split(b"\n\n", 1)
-                                                ev, data = _parse_block(block)
-                                                asm.feed(ev, data)
+                            async def consume(p=p, url=url, theaders=theaders):
+                                try:
+                                    async with httpx.AsyncClient(proxy=p["url"], timeout=timeout) as client:
+                                        async with client.stream("POST", url, headers=theaders, content=up_body) as r:
+                                            if _is_waf(r.headers):
+                                                proxy_pool.mark_bad(p["id"], "waf")
+                                                return ("retry", f"WAF via {p['url']}")
+                                            if r.status_code >= 500:
+                                                proxy_pool.mark_bad(p["id"], "5xx")
+                                                return ("retry", f"{r.status_code} via {p['url']}")
+                                            ct = r.headers.get("content-type", "")
+                                            if "text/event-stream" not in ct:
+                                                raw = await r.aread()
+                                                if r.status_code >= 400:
+                                                    # genuine upstream rejection — switch to next TARGET
+                                                    proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                                                    try:
+                                                        err = json.loads(raw)
+                                                        if not isinstance(err, dict) or "error" not in err:
+                                                            raise ValueError
+                                                    except Exception:
+                                                        err = {"type": "error", "error": {"type": "api_error",
+                                                               "message": f"Upstream HTTP {r.status_code}: "
+                                                                          f"{raw[:300].decode('utf-8', 'replace')}"}}
+                                                    return ("error", r.status_code, err)
+                                                proxy_pool.mark_bad(p["id"], "non-sse")
+                                                return ("retry", f"non-SSE {r.status_code} via {p['url']}")
+                                            asm = AnthropicAssembler()
+                                            saw_stop = False
+                                            buf = b""
+                                            async for chunk in r.aiter_bytes():
+                                                buf += chunk
+                                                while b"\n\n" in buf:
+                                                    block, buf = buf.split(b"\n\n", 1)
+                                                    ev, data = _parse_block(block)
+                                                    asm.feed(ev, data)
+                                                    if ev == "message_stop":
+                                                        saw_stop = True
+                                            if buf.strip():
+                                                ev, data = _parse_block(buf); asm.feed(ev, data)
                                                 if ev == "message_stop":
                                                     saw_stop = True
-                                        if buf.strip():
-                                            ev, data = _parse_block(buf); asm.feed(ev, data)
-                                            if ev == "message_stop":
-                                                saw_stop = True
-                                        obj = asm.result()
-                                        complete = bool(saw_stop and obj and obj.get("stop_reason") and obj.get("content"))
-                                        if complete:
-                                            for b in obj.get("content", []):
-                                                if b.get("type") == "tool_use" and "input" not in b:
-                                                    complete = False; break
-                                        if not complete:
-                                            proxy_pool.mark_bad(p["id"], "truncated")
-                                            return ("retry", f"incomplete via {p['url']}")
-                                        proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
-                                        return ("ok", obj)
-                            except Exception as e:
-                                proxy_pool.mark_bad(p["id"], "conn")
-                                return ("retry", f"{type(e).__name__} via {p['url']}")
+                                            obj = asm.result()
+                                            complete = bool(saw_stop and obj and obj.get("stop_reason") and obj.get("content"))
+                                            if complete:
+                                                for b in obj.get("content", []):
+                                                    if b.get("type") == "tool_use" and "input" not in b:
+                                                        complete = False; break
+                                            if not complete:
+                                                proxy_pool.mark_bad(p["id"], "truncated")
+                                                return ("retry", f"incomplete via {p['url']}")
+                                            proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                                            return ("ok", obj)
+                                except Exception as e:
+                                    proxy_pool.mark_bad(p["id"], "conn")
+                                    return ("retry", f"{type(e).__name__} via {p['url']}")
 
-                        task = asyncio.ensure_future(consume())
-                        # keepalive: ping the client ~every 10s while buffering upstream
-                        while not task.done():
-                            done, _pending = await asyncio.wait({task}, timeout=10.0)
-                            if not done:
-                                yield PING
-                        res = task.result()
-                        if res[0] == "ok":
-                            for frame in _message_to_sse(res[1]):
-                                yield frame
-                            db.add_log(method=request.method, path=path, status=200, proxy=p["url"],
-                                       attempts=attempts, stream=1, redactions=redactions,
-                                       ms=int((time.time() - t0) * 1000), note="ok(buffered)",
-                                       ip=client_ip, model=req_model, endpoint=tgt["name"])
-                            return
-                        if res[0] == "error":
-                            _, status, err = res
-                            last_err = (status, err, tgt["name"], p["url"])
-                            upstream_rejected = True
-                            break  # this target rejected the content — try NEXT target
-                        detail = res[1]  # ("retry", reason) -> next proxy, same target
-                        await _retry_backoff(attempts)
-                    # finished this target (upstream-rejected or all proxies failed) -> next target
-                    if not upstream_rejected:
-                        detail = detail or f"all proxies failed for {tgt['name']}"
-                # all targets exhausted
-                if last_err:
-                    status, err, tname, purl = last_err
-                    db.add_log(method=request.method, path=path, status=status, proxy=purl,
-                               attempts=attempts, stream=1, redactions=redactions,
-                               ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
-                               ip=client_ip, model=req_model, endpoint=tname,
-                               detail=json.dumps(err)[:1500])
-                    yield _sse("error", err)
-                    return
-                db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
-                           stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000),
-                           note=f"all targets failed: {detail}",
-                           ip=client_ip, model=req_model, endpoint="", detail=str(detail)[:1500])
-                yield _sse("error", {"type": "error", "error": {"type": "api_error",
-                          "message": f"All proxies failed. {detail}"}})
+                            task = asyncio.ensure_future(consume())
+                            # keepalive: ping the client ~every 10s while buffering upstream
+                            while not task.done():
+                                done, _pending = await asyncio.wait({task}, timeout=10.0)
+                                if not done:
+                                    yield PING
+                            res = task.result()
+                            if res[0] == "ok":
+                                for frame in _message_to_sse(res[1]):
+                                    yield frame
+                                db.add_log(method=request.method, path=path, status=200, proxy=p["url"],
+                                           attempts=attempts, stream=1, redactions=redactions,
+                                           ms=int((time.time() - t0) * 1000), note="ok(buffered)",
+                                           ip=client_ip, model=req_model, endpoint=tgt["name"])
+                                logged = True
+                                return
+                            if res[0] == "error":
+                                _, status, err = res
+                                last_err = (status, err, tgt["name"], p["url"])
+                                upstream_rejected = True
+                                break  # this target rejected the content — try NEXT target
+                            detail = res[1]  # ("retry", reason) -> next proxy, same target
+                            await _retry_backoff(attempts)
+                        # finished this target (upstream-rejected or all proxies failed) -> next target
+                        if not upstream_rejected:
+                            detail = detail or f"all proxies failed for {tgt['name']}"
+                    # all targets exhausted
+                    if last_err:
+                        status, err, tname, purl = last_err
+                        db.add_log(method=request.method, path=path, status=status, proxy=purl,
+                                   attempts=attempts, stream=1, redactions=redactions,
+                                   ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
+                                   ip=client_ip, model=req_model, endpoint=tname,
+                                   detail=json.dumps(err)[:1500])
+                        logged = True
+                        yield _sse("error", err)
+                        return
+                    db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
+                               stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000),
+                               note=f"all targets failed: {detail}",
+                               ip=client_ip, model=req_model, endpoint="", detail=str(detail)[:1500])
+                    logged = True
+                    yield _sse("error", {"type": "error", "error": {"type": "api_error",
+                              "message": f"All proxies failed. {detail}"}})
+                finally:
+                    # Always log, even if client disconnected mid-retry
+                    if not logged:
+                        db.add_log(method=request.method, path=path, status=499, proxy=last_proxy,
+                                   attempts=attempts, stream=1, redactions=redactions,
+                                   ms=int((time.time() - t0) * 1000),
+                                   note=f"client disconnected: {detail or 'mid-retry'}",
+                                   ip=client_ip, model=req_model, endpoint=last_tgt_name)
 
             return StreamingResponse(gen(), media_type="text/event-stream")
 
