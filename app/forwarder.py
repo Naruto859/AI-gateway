@@ -115,6 +115,86 @@ def _err(message, status=503, etype="api_error"):
                         status_code=status)
 
 
+def _targets(s):
+    """Build the ordered list of upstream targets for ONE request.
+
+    Each request starts fresh from the PRIMARY (no stickiness): primary is always
+    tried first, then the rest in order. If a target returns an upstream error
+    (content-blocked / 4xx after a proxy connected) we fall through to the NEXT
+    target. Order:
+        1. the primary  (custom endpoint flagged is_primary, OR agentrouter if none)
+        2. AgentRouter  (the gateway's built-in upstream) unless disabled / already primary
+        3. remaining enabled custom endpoints, by priority
+
+    A target = {name, base, key, mode, agentrouter}:
+        base       = upstream base URL (path is appended later)
+        key        = api key to send (custom key, else global upstream_key)
+        mode       = 'anthropic' | 'openai'
+        agentrouter= True only for the built-in agentrouter target (claude-cli
+                     fingerprint headers apply only to it)
+    """
+    ar_base = s.get("endpoint", "https://agentrouter.org").rstrip("/")
+    ar_key = s.get("upstream_key") or s.get("gateway_key", "")
+    ar_enabled = s.get("agentrouter_enabled", "1") != "0"
+    ar_target = {"name": "AgentRouter", "base": ar_base, "key": ar_key,
+                 "mode": "anthropic", "agentrouter": True}
+
+    customs = [e for e in db.list_endpoints() if e.get("enabled")]
+    def mk(e):
+        return {
+            "name": e.get("name") or e["url"].replace("https://", "").replace("http://", ""),
+            "base": e["url"].rstrip("/"),
+            "key": e.get("api_key") or ar_key,
+            "mode": "openai" if e.get("api_mode") == "chat_completions" else "anthropic",
+            "agentrouter": False,
+            "id": e.get("id"),
+        }
+    primary_custom = next((e for e in customs if e.get("is_primary")), None)
+
+    out = []
+    if primary_custom:
+        out.append(mk(primary_custom))                       # 1. custom primary
+        if ar_enabled:
+            out.append(ar_target)                            # 2. agentrouter
+    elif ar_enabled:
+        out.append(ar_target)                                # 1. agentrouter primary
+    # 3. remaining enabled customs (skip the primary already added)
+    for e in customs:
+        if primary_custom and e.get("id") == primary_custom.get("id"):
+            continue
+        out.append(mk(e))
+    # safety: never return empty (fall back to agentrouter even if disabled)
+    return out or [ar_target]
+
+
+def _target_url(base, path, mode):
+    """Compose the full upstream URL for a target given the inbound path."""
+    base = base.rstrip("/")
+    if mode == "openai":
+        # OpenAI providers expose /chat/completions; map any messages path to it
+        if base.endswith("/chat/completions"):
+            return base
+        if "/v1" in base:
+            return base.rstrip("/") + "/chat/completions"
+        return base + "/v1/chat/completions"
+    # anthropic: agentrouter & compatibles expose /v1/messages
+    if base.endswith("/v1/messages"):
+        return base
+    return f"{base}/{path}"
+
+
+def _target_headers(request, target):
+    """Headers for a specific target (claude-cli fingerprint only for agentrouter)."""
+    kind = "openai" if target["mode"] == "openai" else "anthropic"
+    headers = _build_upstream_headers(request, target["key"], kind)
+    if not target.get("agentrouter") and kind == "anthropic":
+        # custom anthropic-compatible provider: drop agentrouter-specific fingerprint
+        headers.pop("anthropic-beta", None)
+        headers["user-agent"] = "claude-cli/2.1.177 (external, cli)"
+    return headers
+
+
+
 def _with_stream(body_bytes, want):
     """Return body bytes with the JSON "stream" flag forced to `want`."""
     try:
@@ -416,6 +496,7 @@ async def test_endpoint(url, api_mode, api_key, model, message):
     payload = json.dumps(body).encode()
     t0 = time.time()
     detail = ""
+    ep_name = url.replace("https://", "").replace("http://", "")
     for p in candidates:
         try:
             async with httpx.AsyncClient(proxy=p["url"], timeout=httpx.Timeout(45.0)) as client:
@@ -432,13 +513,19 @@ async def test_endpoint(url, api_mode, api_key, model, message):
                             reply = "".join(b.get("text", "") for b in d.get("content", []))
                     except Exception:
                         reply = raw[:200]
+                    db.add_log(method="POST", path="endpoint/test", status=r.status_code,
+                               proxy=p["url"], attempts=1, stream=0, redactions=0, ms=ms,
+                               note="test ok", model=model, endpoint=ep_name, source="test")
                     return {"ok": True, "status": r.status_code, "ms": ms,
                             "reply": reply.strip() or "(empty)", "detail": ""}
                 detail = f"HTTP {r.status_code}: {raw}"
         except Exception as e:
             detail = f"{type(e).__name__}: {e}"
-    return {"ok": False, "status": 0, "ms": int((time.time() - t0) * 1000),
-            "reply": "", "detail": detail}
+    ms = int((time.time() - t0) * 1000)
+    db.add_log(method="POST", path="endpoint/test", status=0, proxy="", attempts=len(candidates),
+               stream=0, redactions=0, ms=ms, note="test failed", model=model,
+               endpoint=ep_name, source="test", detail=detail[:1500])
+    return {"ok": False, "status": 0, "ms": ms, "reply": "", "detail": detail}
 
 
 async def forward(request, path):
@@ -498,10 +585,9 @@ async def forward(request, path):
         client_wants_stream = "text/event-stream" in request.headers.get("accept", "")
 
     kind = "openai" if "chat/completions" in path else "anthropic"
-    headers = _build_upstream_headers(request, upstream_key, kind)
-    url = f"{endpoint}/{path}"
-    candidates = proxy_pool.ordered_for_request(max_retries)
-    if not candidates:
+    targets = _targets(s)
+    base_candidates = proxy_pool.ordered_for_request(max_retries)
+    if not base_candidates:
         return _err("No usable proxies configured.", 503)
     t0 = time.time()
 
@@ -511,8 +597,12 @@ async def forward(request, path):
     # emit ONE clean reconstructed SSE with a guaranteed message_stop. If the
     # upstream stalls or cuts the stream incomplete (agentrouter does this on slow
     # generations — it closes without message_stop), retry on the next proxy
-    # transparently: the client has only seen pings, so a retry is invisible. This
-    # is what makes it Claude-Code-reliable (most failures recover on attempt 2).
+    # transparently: the client has only seen pings, so a retry is invisible.
+    #
+    # ENDPOINT FAILOVER: every request starts fresh from the PRIMARY target. If a
+    # target returns an upstream rejection (content-blocked / 4xx) OR all its
+    # proxies fail, we fall through to the NEXT target (agentrouter -> custom2 ->
+    # custom3 ...). The client keeps seeing pings, so the switch is invisible.
     if client_wants_stream:
         up_body = _with_stream(body, True)
 
@@ -520,128 +610,155 @@ async def forward(request, path):
             async def gen():
                 attempts = 0
                 detail = ""
-                for p in candidates:
-                    attempts += 1
+                last_err = None  # (status, err, target_name, proxy_url) from an upstream 4xx
+                for tgt in targets:
+                    url = _target_url(tgt["base"], path, tgt["mode"])
+                    theaders = _target_headers(request, tgt)
+                    candidates = proxy_pool.ordered_for_request(max_retries)
+                    upstream_rejected = False
+                    for p in candidates:
+                        attempts += 1
 
-                    async def consume(p=p, attempts=attempts):
-                        try:
-                            async with httpx.AsyncClient(proxy=p["url"], timeout=timeout) as client:
-                                async with client.stream("POST", url, headers=headers, content=up_body) as r:
-                                    if _is_waf(r.headers):
-                                        proxy_pool.mark_bad(p["id"], "waf")
-                                        return ("retry", f"WAF via {p['url']}")
-                                    if r.status_code >= 500:
-                                        proxy_pool.mark_bad(p["id"], "5xx")
-                                        return ("retry", f"{r.status_code} via {p['url']}")
-                                    ct = r.headers.get("content-type", "")
-                                    if "text/event-stream" not in ct:
-                                        raw = await r.aread()
-                                        if r.status_code >= 400:
-                                            # genuine upstream rejection — failover won't help
-                                            proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
-                                            try:
-                                                err = json.loads(raw)
-                                                if not isinstance(err, dict) or "error" not in err:
-                                                    raise ValueError
-                                            except Exception:
-                                                err = {"type": "error", "error": {"type": "api_error",
-                                                       "message": f"Upstream HTTP {r.status_code}: "
-                                                                  f"{raw[:300].decode('utf-8', 'replace')}"}}
-                                            return ("error", r.status_code, err)
-                                        proxy_pool.mark_bad(p["id"], "non-sse")
-                                        return ("retry", f"non-SSE {r.status_code} via {p['url']}")
-                                    asm = AnthropicAssembler()
-                                    saw_stop = False
-                                    buf = b""
-                                    async for chunk in r.aiter_bytes():
-                                        buf += chunk
-                                        while b"\n\n" in buf:
-                                            block, buf = buf.split(b"\n\n", 1)
-                                            ev, data = _parse_block(block)
-                                            asm.feed(ev, data)
+                        async def consume(p=p, url=url, theaders=theaders):
+                            try:
+                                async with httpx.AsyncClient(proxy=p["url"], timeout=timeout) as client:
+                                    async with client.stream("POST", url, headers=theaders, content=up_body) as r:
+                                        if _is_waf(r.headers):
+                                            proxy_pool.mark_bad(p["id"], "waf")
+                                            return ("retry", f"WAF via {p['url']}")
+                                        if r.status_code >= 500:
+                                            proxy_pool.mark_bad(p["id"], "5xx")
+                                            return ("retry", f"{r.status_code} via {p['url']}")
+                                        ct = r.headers.get("content-type", "")
+                                        if "text/event-stream" not in ct:
+                                            raw = await r.aread()
+                                            if r.status_code >= 400:
+                                                # genuine upstream rejection — switch to next TARGET
+                                                proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                                                try:
+                                                    err = json.loads(raw)
+                                                    if not isinstance(err, dict) or "error" not in err:
+                                                        raise ValueError
+                                                except Exception:
+                                                    err = {"type": "error", "error": {"type": "api_error",
+                                                           "message": f"Upstream HTTP {r.status_code}: "
+                                                                      f"{raw[:300].decode('utf-8', 'replace')}"}}
+                                                return ("error", r.status_code, err)
+                                            proxy_pool.mark_bad(p["id"], "non-sse")
+                                            return ("retry", f"non-SSE {r.status_code} via {p['url']}")
+                                        asm = AnthropicAssembler()
+                                        saw_stop = False
+                                        buf = b""
+                                        async for chunk in r.aiter_bytes():
+                                            buf += chunk
+                                            while b"\n\n" in buf:
+                                                block, buf = buf.split(b"\n\n", 1)
+                                                ev, data = _parse_block(block)
+                                                asm.feed(ev, data)
+                                                if ev == "message_stop":
+                                                    saw_stop = True
+                                        if buf.strip():
+                                            ev, data = _parse_block(buf); asm.feed(ev, data)
                                             if ev == "message_stop":
                                                 saw_stop = True
-                                    if buf.strip():
-                                        ev, data = _parse_block(buf); asm.feed(ev, data)
-                                        if ev == "message_stop":
-                                            saw_stop = True
-                                    obj = asm.result()
-                                    complete = bool(saw_stop and obj and obj.get("stop_reason") and obj.get("content"))
-                                    if complete:
-                                        for b in obj.get("content", []):
-                                            if b.get("type") == "tool_use" and "input" not in b:
-                                                complete = False; break
-                                    if not complete:
-                                        proxy_pool.mark_bad(p["id"], "truncated")
-                                        return ("retry", f"incomplete via {p['url']}")
-                                    proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
-                                    return ("ok", obj)
-                        except Exception as e:
-                            proxy_pool.mark_bad(p["id"], "conn")
-                            return ("retry", f"{type(e).__name__} via {p['url']}")
+                                        obj = asm.result()
+                                        complete = bool(saw_stop and obj and obj.get("stop_reason") and obj.get("content"))
+                                        if complete:
+                                            for b in obj.get("content", []):
+                                                if b.get("type") == "tool_use" and "input" not in b:
+                                                    complete = False; break
+                                        if not complete:
+                                            proxy_pool.mark_bad(p["id"], "truncated")
+                                            return ("retry", f"incomplete via {p['url']}")
+                                        proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                                        return ("ok", obj)
+                            except Exception as e:
+                                proxy_pool.mark_bad(p["id"], "conn")
+                                return ("retry", f"{type(e).__name__} via {p['url']}")
 
-                    task = asyncio.ensure_future(consume())
-                    # keepalive: ping the client ~every 10s while buffering upstream
-                    while not task.done():
-                        done, _pending = await asyncio.wait({task}, timeout=10.0)
-                        if not done:
-                            yield PING
-                    res = task.result()
-                    if res[0] == "ok":
-                        for frame in _message_to_sse(res[1]):
-                            yield frame
-                        db.add_log(method=request.method, path=path, status=200, proxy=p["url"],
-                                   attempts=attempts, stream=1, redactions=redactions,
-                                   ms=int((time.time() - t0) * 1000), note="ok(buffered)",
-                                   ip=client_ip, model=req_model, endpoint=endpoint)
-                        return
-                    if res[0] == "error":
-                        _, status, err = res
-                        db.add_log(method=request.method, path=path, status=status, proxy=p["url"],
-                                   attempts=attempts, stream=1, redactions=redactions,
-                                   ms=int((time.time() - t0) * 1000), note=f"upstream {status}",
-                                   ip=client_ip, model=req_model, endpoint=endpoint,
-                                   detail=json.dumps(err)[:1500])
-                        yield _sse("error", err)
-                        return
-                    detail = res[1]  # ("retry", reason) -> try next proxy
-                    await _retry_backoff(attempts)
+                        task = asyncio.ensure_future(consume())
+                        # keepalive: ping the client ~every 10s while buffering upstream
+                        while not task.done():
+                            done, _pending = await asyncio.wait({task}, timeout=10.0)
+                            if not done:
+                                yield PING
+                        res = task.result()
+                        if res[0] == "ok":
+                            for frame in _message_to_sse(res[1]):
+                                yield frame
+                            db.add_log(method=request.method, path=path, status=200, proxy=p["url"],
+                                       attempts=attempts, stream=1, redactions=redactions,
+                                       ms=int((time.time() - t0) * 1000), note="ok(buffered)",
+                                       ip=client_ip, model=req_model, endpoint=tgt["name"])
+                            return
+                        if res[0] == "error":
+                            _, status, err = res
+                            last_err = (status, err, tgt["name"], p["url"])
+                            upstream_rejected = True
+                            break  # this target rejected the content — try NEXT target
+                        detail = res[1]  # ("retry", reason) -> next proxy, same target
+                        await _retry_backoff(attempts)
+                    # finished this target (upstream-rejected or all proxies failed) -> next target
+                    if not upstream_rejected:
+                        detail = detail or f"all proxies failed for {tgt['name']}"
+                # all targets exhausted
+                if last_err:
+                    status, err, tname, purl = last_err
+                    db.add_log(method=request.method, path=path, status=status, proxy=purl,
+                               attempts=attempts, stream=1, redactions=redactions,
+                               ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
+                               ip=client_ip, model=req_model, endpoint=tname,
+                               detail=json.dumps(err)[:1500])
+                    yield _sse("error", err)
+                    return
                 db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                            stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000),
-                           note=f"all proxies failed: {detail}",
-                           ip=client_ip, model=req_model, endpoint=endpoint, detail=str(detail)[:1500])
+                           note=f"all targets failed: {detail}",
+                           ip=client_ip, model=req_model, endpoint="", detail=str(detail)[:1500])
                 yield _sse("error", {"type": "error", "error": {"type": "api_error",
                           "message": f"All proxies failed. {detail}"}})
 
             return StreamingResponse(gen(), media_type="text/event-stream")
 
-        # ---- OpenAI streaming: simple raw relay (rare / account-limited path) ----
+        # ---- OpenAI streaming: raw relay across targets/proxies ----
         async def gen_openai():
             attempts = 0
             forwarded = False
             detail = ""
-            for p in candidates:
-                attempts += 1
-                client = httpx.AsyncClient(proxy=p["url"], timeout=timeout)
-                try:
-                    req = client.build_request("POST", url, headers=headers, content=up_body)
-                    r = await client.send(req, stream=True)
-                    if _is_waf(r.headers) or r.status_code >= 500:
+            for tgt in targets:
+                url = _target_url(tgt["base"], path, tgt["mode"])
+                theaders = _target_headers(request, tgt)
+                for p in proxy_pool.ordered_for_request(max_retries):
+                    attempts += 1
+                    client = httpx.AsyncClient(proxy=p["url"], timeout=timeout)
+                    try:
+                        req = client.build_request("POST", url, headers=theaders, content=up_body)
+                        r = await client.send(req, stream=True)
+                        if _is_waf(r.headers) or r.status_code >= 500:
+                            await r.aclose(); await client.aclose()
+                            proxy_pool.mark_bad(p["id"], "waf/5xx"); detail = f"{r.status_code} via {p['url']}"; await _retry_backoff(attempts); continue
+                        if r.status_code >= 400:
+                            # upstream rejection -> next target
+                            await r.aclose(); await client.aclose()
+                            detail = f"{tgt['name']} {r.status_code}"
+                            break
+                        proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                        async for chunk in r.aiter_raw():
+                            forwarded = True
+                            yield chunk
                         await r.aclose(); await client.aclose()
-                        proxy_pool.mark_bad(p["id"], "waf/5xx"); detail = f"{r.status_code} via {p['url']}"; await _retry_backoff(attempts); continue
-                    proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
-                    async for chunk in r.aiter_raw():
-                        forwarded = True
-                        yield chunk
-                    await r.aclose(); await client.aclose()
-                    return
-                except Exception as e:
-                    try: await client.aclose()
-                    except Exception: pass
-                    detail = f"{type(e).__name__} via {p['url']}"
-                    if forwarded:
+                        db.add_log(method=request.method, path=path, status=200, proxy=p["url"],
+                                   attempts=attempts, stream=1, redactions=redactions,
+                                   ms=int((time.time() - t0) * 1000), note="ok(relay)",
+                                   ip=client_ip, model=req_model, endpoint=tgt["name"])
                         return
-                    proxy_pool.mark_bad(p["id"], "conn"); await _retry_backoff(attempts); continue
+                    except Exception as e:
+                        try: await client.aclose()
+                        except Exception: pass
+                        detail = f"{type(e).__name__} via {p['url']}"
+                        if forwarded:
+                            return
+                        proxy_pool.mark_bad(p["id"], "conn"); await _retry_backoff(attempts); continue
             yield ("event: error\ndata: " + json.dumps(
                 {"type": "error", "error": {"type": "api_error", "message": f"All proxies failed. {detail}"}}
             ) + "\n\n").encode()
@@ -652,22 +769,42 @@ async def forward(request, path):
     up_body = _with_stream(body, True)   # ALWAYS stream upstream — this is the fix
     attempts = 0
     detail = ""
-    for p in candidates:
-        attempts += 1
-        res = await _consume_assemble(p, url, headers, up_body, timeout, kind)
-        if res[0] == "respond":
-            _, status, ct, payload = res
-            note = "ok(assembled)" if 200 <= status < 300 else f"upstream {status}"
-            det = "" if 200 <= status < 300 else payload[:1500].decode("utf-8", "replace")
-            db.add_log(method=request.method, path=path, status=status, proxy=p["url"],
-                       attempts=attempts, stream=0, redactions=redactions,
-                       ms=int((time.time() - t0) * 1000), note=note,
-                       ip=client_ip, model=req_model, endpoint=endpoint, detail=det)
-            return Response(content=payload, status_code=status, media_type=ct)
-        await _retry_backoff(attempts)
-        detail = res[1]
+    last = None  # (status, ct, payload, target_name, proxy_url) from an upstream 4xx
+    for tgt in targets:
+        url = _target_url(tgt["base"], path, tgt["mode"])
+        theaders = _target_headers(request, tgt)
+        tgt_kind = "openai" if tgt["mode"] == "openai" else "anthropic"
+        upstream_rejected = False
+        for p in proxy_pool.ordered_for_request(max_retries):
+            attempts += 1
+            res = await _consume_assemble(p, url, theaders, up_body, timeout, tgt_kind)
+            if res[0] == "respond":
+                _, status, ct, payload = res
+                if 200 <= status < 300:
+                    db.add_log(method=request.method, path=path, status=status, proxy=p["url"],
+                               attempts=attempts, stream=0, redactions=redactions,
+                               ms=int((time.time() - t0) * 1000), note="ok(assembled)",
+                               ip=client_ip, model=req_model, endpoint=tgt["name"])
+                    return Response(content=payload, status_code=status, media_type=ct)
+                # upstream rejection (4xx) -> remember, switch to next TARGET
+                last = (status, ct, payload, tgt["name"], p["url"])
+                upstream_rejected = True
+                break
+            await _retry_backoff(attempts)
+            detail = res[1]
+        if not upstream_rejected:
+            detail = detail or f"all proxies failed for {tgt['name']}"
+    # all targets exhausted
+    if last:
+        status, ct, payload, tname, purl = last
+        db.add_log(method=request.method, path=path, status=status, proxy=purl,
+                   attempts=attempts, stream=0, redactions=redactions,
+                   ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
+                   ip=client_ip, model=req_model, endpoint=tname,
+                   detail=payload[:1500].decode("utf-8", "replace"))
+        return Response(content=payload, status_code=status, media_type=ct)
     db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                stream=0, redactions=redactions, ms=int((time.time() - t0) * 1000),
-               note=f"all proxies failed: {detail}",
-               ip=client_ip, model=req_model, endpoint=endpoint, detail=str(detail)[:1500])
+               note=f"all targets failed: {detail}",
+               ip=client_ip, model=req_model, endpoint="", detail=str(detail)[:1500])
     return _err(f"All proxies failed. {detail}", 503)

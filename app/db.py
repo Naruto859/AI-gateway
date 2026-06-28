@@ -151,6 +151,9 @@ def _init(c):
         c.execute("ALTER TABLE logs ADD COLUMN detail TEXT DEFAULT ''")
     if "endpoint" not in lcols:
         c.execute("ALTER TABLE logs ADD COLUMN endpoint TEXT DEFAULT ''")
+    if "source" not in lcols:
+        # '' = real routed traffic, 'test' = endpoint test/chat, 'agent' = embedded agent
+        c.execute("ALTER TABLE logs ADD COLUMN source TEXT DEFAULT ''")
     c.commit()
 
 
@@ -273,8 +276,8 @@ def add_log(**f):
     with _lock:
         c = conn()
         c.execute(
-            "INSERT INTO logs(ts, method, path, status, proxy, attempts, stream, redactions, ms, note, ip, model, detail, endpoint) "
-            "VALUES (:ts, :method, :path, :status, :proxy, :attempts, :stream, :redactions, :ms, :note, :ip, :model, :detail, :endpoint)",
+            "INSERT INTO logs(ts, method, path, status, proxy, attempts, stream, redactions, ms, note, ip, model, detail, endpoint, source) "
+            "VALUES (:ts, :method, :path, :status, :proxy, :attempts, :stream, :redactions, :ms, :note, :ip, :model, :detail, :endpoint, :source)",
             {
                 "ts": f.get("ts", time.time()),
                 "method": f.get("method", ""),
@@ -290,6 +293,7 @@ def add_log(**f):
                 "model": f.get("model", ""),
                 "detail": f.get("detail", ""),
                 "endpoint": f.get("endpoint", ""),
+                "source": f.get("source", ""),
             },
         )
         # keep last 500
@@ -402,7 +406,7 @@ def stats(window_sec=86400):
     cutoff = _t.time() - window_sec
     with _lock:
         rows = conn().execute(
-            "SELECT status, attempts, ms, stream FROM logs WHERE ts>=?", (cutoff,)).fetchall()
+            "SELECT status, attempts, ms, stream FROM logs WHERE ts>=? AND COALESCE(source,'')=''", (cutoff,)).fetchall()
     # only count real model calls (POST messages -> stream/buffered/assembled), skip 404 probes
     real = [r for r in rows if r["status"] and r["status"] != 404]
     total = len(real)

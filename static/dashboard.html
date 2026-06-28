@@ -105,6 +105,8 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .btn.ghost{background:#fff;color:var(--g-700);border:1px solid var(--g-300);box-shadow:none}
 .log{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:11px;font-size:12.5px;margin-bottom:6px;background:#fff;border:1px solid var(--line)}
 .log .code{font-weight:740;font-family:ui-monospace,monospace;padding:2px 8px;border-radius:6px;font-size:12px;flex:none}
+.ltag{font-size:9.5px;font-weight:800;padding:2px 6px;border-radius:5px;letter-spacing:.5px;flex:none}
+.ltag.route{background:#e0f5ec;color:#1f8a56}.ltag.test{background:#e3f0ff;color:#2b6cb0}.ltag.agent{background:#f0e8ff;color:#7c4dca}
 .code.s2{background:var(--g-100);color:var(--g-700)}.code.s5{background:#fbe4e4;color:#c0392b}.code.s4{background:#fdf0d8;color:#b8841f}
 .log .ld{flex:1;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .copyrow{display:flex;gap:7px;align-items:center}.copyrow input{flex:1}
@@ -688,15 +690,20 @@ function openEndpointSettings(e){
     toast('Endpoint saved','ok');closeModal('epSetModal');await refresh();
   };
 }
+function logTag(src){
+  if(src==='test')return'<span class="ltag test">TEST</span>';
+  if(src==='agent')return'<span class="ltag agent">AGENT</span>';
+  return'<span class="ltag route">ROUTE</span>';
+}
 function renderLogs(){
   const logs=(ST.logs||[]).slice(0,40);
   $('#logList').innerHTML=logs.map((l,i)=>{
     const c=l.status>=500?'s5':l.status>=400?'s4':'s2';
     const t=l.ts?new Date(l.ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
     const ms=l.ms?(l.ms>=1000?(l.ms/1000).toFixed(1)+'s':l.ms+'ms'):'';
-    let note=(l.note||'');if(note.length>34)note=note.slice(0,34)+'…';
-    const ip=l.ip?' · '+l.ip:'';
-    return`<div class="log" data-logi="${i}" style="cursor:pointer"><span class="code ${c}">${l.status}</span><span class="ld">${note}${l.attempts&&l.attempts>1?' · att '+l.attempts:''}${ip} ${ms?'· '+ms:''}</span><span class="lt">${t}</span><span style="color:var(--ink-faint);font-size:14px;margin-left:4px">›</span></div>`;
+    let note=(l.note||'');if(note.length>30)note=note.slice(0,30)+'…';
+    const ep=l.endpoint?' · '+l.endpoint:'';
+    return`<div class="log" data-logi="${i}" style="cursor:pointer">${logTag(l.source)}<span class="code ${c}">${l.status}</span><span class="ld">${note}${l.attempts&&l.attempts>1?' · att '+l.attempts:''}${ep} ${ms?'· '+ms:''}</span><span class="lt">${t}</span><span style="color:var(--ink-faint);font-size:14px;margin-left:4px">›</span></div>`;
   }).join('')||'<div class="muted">No requests yet.</div>';
   $$('#logList [data-logi]').forEach(el=>el.onclick=()=>openLogDetail(logs[+el.dataset.logi]));
 }
@@ -812,8 +819,9 @@ $$('.modal').forEach(m=>m.onclick=e=>{if(e.target===m)m.classList.remove('show')
 // ---- LOG DETAIL ----
 function openLogDetail(l){
   const when=l.ts?new Date(l.ts*1000).toLocaleString():'';
+  const srcLabel={'':'Routed traffic','test':'Endpoint test','agent':'Embedded agent'}[l.source||'']||l.source;
   const rows=[
-    ['Status',l.status],['Time',when],['Method',l.method||'—'],['Path',l.path||'—'],
+    ['Status',l.status],['Source',srcLabel],['Time',when],['Method',l.method||'—'],['Path',l.path||'—'],
     ['Model',l.model||'—'],['Client IP',l.ip||'—'],['Endpoint',l.endpoint||'—'],
     ['Proxy (exit)',l.proxy?l.proxy.split('@').pop():'—'],
     ['Attempts',l.attempts||1],['Latency',l.ms?(l.ms>=1000?(l.ms/1000).toFixed(1)+'s':l.ms+'ms'):'—'],
