@@ -539,6 +539,10 @@ async def forward(request, path):
                             read=float(s.get("read_timeout", "900") or 900),
                             write=120.0, pool=20.0)
 
+    # client IP (behind Caddy/Railway -> X-Forwarded-For) for the log detail view
+    client_ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                 or (request.client.host if request.client else ""))
+
     if require_key and gateway_key:
         ck = request.headers.get("x-api-key", "")
         auth = request.headers.get("authorization", "")
@@ -555,11 +559,10 @@ async def forward(request, path):
                 except Exception:
                     pass
         if not ok_key:
+            db.add_log(method=request.method, path=path, status=401, proxy="", attempts=0,
+                       stream=0, redactions=0, ms=0, note="invalid gateway key",
+                       ip=client_ip, model="")
             return _err("Invalid gateway key.", 401, "authentication_error")
-
-    # client IP (behind Caddy/Railway -> X-Forwarded-For) for the log detail view
-    client_ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-                 or (request.client.host if request.client else ""))
 
     body = await request.body()
     # model name (for logs) — parsed before filters mutate the body
@@ -588,6 +591,9 @@ async def forward(request, path):
     targets = _targets(s)
     base_candidates = proxy_pool.ordered_for_request(max_retries)
     if not base_candidates:
+        db.add_log(method=request.method, path=path, status=503, proxy="", attempts=0,
+                   stream=0, redactions=0, ms=0, note="no usable proxies",
+                   ip=client_ip, model=req_model)
         return _err("No usable proxies configured.", 503)
     t0 = time.time()
 

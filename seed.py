@@ -52,6 +52,17 @@ def main():
     print(f"proxies in file = {len(urls)}  newly added = {added}")
     print(f"total proxies in db = {len(db.list_proxies())}")
 
+    # Auto-pin whitelisted proxy (agentrouter requires a stable exit IP)
+    pin_ip = os.environ.get("DEDICATED_PROXY_IP", "217.181.91.60")
+    if pin_ip:
+        for p in db.list_proxies():
+            if pin_ip in p["url"]:
+                db.set_setting("dedicated_proxy_id", str(p["id"]))
+                print(f"pinned proxy id={p['id']} ({pin_ip})")
+                break
+        else:
+            print(f"WARNING: whitelisted proxy {pin_ip} not found in pool")
+
 
 if __name__ == "__main__":
     main()

@@ -53,7 +53,7 @@ _SCHEME = {"http": "http", "https": "https", "socks5": "socks5", "socks4": "sock
 
 def _require_admin(token):
     pw = db.get_setting("admin_password", "")
-    if pw and token != pw:
+    if not pw or token != pw:
         raise HTTPException(status_code=401, detail="bad admin token")
 
 
@@ -207,13 +207,6 @@ async def endpoint_delete(payload: dict, x_admin_token: str = Header(default="")
     return {"ok": True}
 
 
-@app.post("/admin/endpoint/update")
-async def endpoint_update2(payload: dict, x_admin_token: str = Header(default="")):
-    """Toggle enabled, set name/key/mode, set priority for one endpoint."""
-    _require_admin(x_admin_token)
-    eid = payload.pop("id")
-    db.update_endpoint(eid, **payload)
-    return {"ok": True}
 
 
 @app.post("/admin/endpoint/primary")
@@ -354,6 +347,22 @@ async def logs_clear(x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
     db.clear_logs()
     return {"ok": True}
+
+
+@app.get("/admin/logs")
+async def get_logs(x_admin_token: str = Header(default=""),
+                   source: str = "", limit: int = 100, offset: int = 0):
+    _require_admin(x_admin_token)
+    logs = db.recent_logs(min(limit, 500))
+    if source:
+        logs = [l for l in logs if l.get("source", "") == source]
+    return {"logs": logs[offset:offset+limit], "total": len(logs)}
+
+
+@app.get("/admin/logs/tags")
+async def get_log_tags(x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    return {"tags": ["", "test", "agent"]}
 
 
 # ---------------- the proxy passthrough ----------------
