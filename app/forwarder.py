@@ -543,6 +543,12 @@ async def forward(request, path):
     client_ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
                  or (request.client.host if request.client else ""))
 
+    body = await request.body()
+    req_text = body.decode("utf-8", "replace")[:3000]
+    def _log(**kw):
+        kw.setdefault("req_body", req_text)
+        db.add_log(**kw)
+
     if require_key and gateway_key:
         ck = request.headers.get("x-api-key", "").strip()
         auth = request.headers.get("authorization", "").strip()
@@ -559,12 +565,11 @@ async def forward(request, path):
                 except Exception:
                     pass
         if not ok_key:
-            db.add_log(method=request.method, path=path, status=401, proxy="", attempts=0,
+            _log(method=request.method, path=path, status=401, proxy="", attempts=0,
                        stream=0, redactions=0, ms=0, note="invalid gateway key",
                        ip=client_ip, model="")
             return _err("Invalid gateway key.", 401, "authentication_error")
 
-    body = await request.body()
     # model name (for logs) — parsed before filters mutate the body
     try:
         req_model = (json.loads(body) or {}).get("model", "")
@@ -698,7 +703,7 @@ async def forward(request, path):
                             if res[0] == "ok":
                                 for frame in _message_to_sse(res[1]):
                                     yield frame
-                                db.add_log(method=request.method, path=path, status=200, proxy=p["url"],
+                                _log(method=request.method, path=path, status=200, proxy=p["url"],
                                            attempts=attempts, stream=1, redactions=redactions,
                                            ms=int((time.time() - t0) * 1000), note="ok(buffered)",
                                            ip=client_ip, model=req_model, endpoint=tgt["name"])
@@ -717,7 +722,7 @@ async def forward(request, path):
                     # all targets exhausted
                     if last_err:
                         status, err, tname, purl = last_err
-                        db.add_log(method=request.method, path=path, status=status, proxy=purl,
+                        _log(method=request.method, path=path, status=status, proxy=purl,
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
                                    ip=client_ip, model=req_model, endpoint=tname,
@@ -725,7 +730,7 @@ async def forward(request, path):
                         logged = True
                         yield _sse("error", err)
                         return
-                    db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
+                    _log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                                stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000),
                                note=f"all targets failed: {detail}",
                                ip=client_ip, model=req_model, endpoint="", detail=str(detail)[:1500])
@@ -735,7 +740,7 @@ async def forward(request, path):
                 finally:
                     # Always log, even if client disconnected mid-retry
                     if not logged:
-                        db.add_log(method=request.method, path=path, status=499, proxy=last_proxy,
+                        _log(method=request.method, path=path, status=499, proxy=last_proxy,
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000),
                                    note=f"client disconnected: {detail or 'mid-retry'}",
@@ -770,7 +775,7 @@ async def forward(request, path):
                             forwarded = True
                             yield chunk
                         await r.aclose(); await client.aclose()
-                        db.add_log(method=request.method, path=path, status=200, proxy=p["url"],
+                        _log(method=request.method, path=path, status=200, proxy=p["url"],
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000), note="ok(relay)",
                                    ip=client_ip, model=req_model, endpoint=tgt["name"])
@@ -804,7 +809,7 @@ async def forward(request, path):
             if res[0] == "respond":
                 _, status, ct, payload = res
                 if 200 <= status < 300:
-                    db.add_log(method=request.method, path=path, status=status, proxy=p["url"],
+                    _log(method=request.method, path=path, status=status, proxy=p["url"],
                                attempts=attempts, stream=0, redactions=redactions,
                                ms=int((time.time() - t0) * 1000), note="ok(assembled)",
                                ip=client_ip, model=req_model, endpoint=tgt["name"])
@@ -820,13 +825,13 @@ async def forward(request, path):
     # all targets exhausted
     if last:
         status, ct, payload, tname, purl = last
-        db.add_log(method=request.method, path=path, status=status, proxy=purl,
+        _log(method=request.method, path=path, status=status, proxy=purl,
                    attempts=attempts, stream=0, redactions=redactions,
                    ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
                    ip=client_ip, model=req_model, endpoint=tname,
                    detail=payload[:1500].decode("utf-8", "replace"))
         return Response(content=payload, status_code=status, media_type=ct)
-    db.add_log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
+    _log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                stream=0, redactions=redactions, ms=int((time.time() - t0) * 1000),
                note=f"all targets failed: {detail}",
                ip=client_ip, model=req_model, endpoint="", detail=str(detail)[:1500])

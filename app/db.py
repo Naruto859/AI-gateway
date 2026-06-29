@@ -93,7 +93,8 @@ def _init(c):
             stream     INTEGER,
             redactions INTEGER,
             ms         INTEGER,
-            note       TEXT
+            note       TEXT,
+            req_body   TEXT
         );
         CREATE TABLE IF NOT EXISTS endpoints (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,6 +155,8 @@ def _init(c):
     if "source" not in lcols:
         # '' = real routed traffic, 'test' = endpoint test/chat, 'agent' = embedded agent
         c.execute("ALTER TABLE logs ADD COLUMN source TEXT DEFAULT ''")
+    if "req_body" not in lcols:
+        c.execute("ALTER TABLE logs ADD COLUMN req_body TEXT DEFAULT ''")
     c.commit()
 
 
@@ -276,8 +279,8 @@ def add_log(**f):
     with _lock:
         c = conn()
         c.execute(
-            "INSERT INTO logs(ts, method, path, status, proxy, attempts, stream, redactions, ms, note, ip, model, detail, endpoint, source) "
-            "VALUES (:ts, :method, :path, :status, :proxy, :attempts, :stream, :redactions, :ms, :note, :ip, :model, :detail, :endpoint, :source)",
+            "INSERT INTO logs(ts, method, path, status, proxy, attempts, stream, redactions, ms, note, ip, model, detail, endpoint, source, req_body) "
+            "VALUES (:ts, :method, :path, :status, :proxy, :attempts, :stream, :redactions, :ms, :note, :ip, :model, :detail, :endpoint, :source, :req_body)",
             {
                 "ts": f.get("ts", time.time()),
                 "method": f.get("method", ""),
@@ -294,6 +297,7 @@ def add_log(**f):
                 "detail": f.get("detail", ""),
                 "endpoint": f.get("endpoint", ""),
                 "source": f.get("source", ""),
+                "req_body": f.get("req_body", ""),
             },
         )
         # keep last 500
