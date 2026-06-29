@@ -1,27 +1,44 @@
-# Mugen Routes
+<div align="center">
+  <h1>🚀 Mugen AI Gateway</h1>
+  <p><strong>Enterprise-Grade LLM Gateway with Intelligent Routing, Proxy Pools, and Failover</strong></p>
+</div>
 
-**Intelligent AI gateway with proxy routing, failover, and a real-time dashboard.**
+<br>
 
-Mugen Routes sits between your AI tools (agents, scripts, apps) and upstream LLM providers. It routes requests through residential proxies, automatically retries on failure, and seamlessly fails over between multiple providers — all invisible to your client.
+Mugen AI Gateway is a highly resilient, high-performance reverse proxy for your AI infrastructure. It sits transparently between your applications (agents, CLIs, web apps) and upstream LLM providers (Anthropic, OpenAI, custom endpoints).
 
----
-
-## Features
-
-- **Multi-provider failover** — set a primary endpoint and add fallbacks. If the primary returns an error (content-blocked, rate-limited, 4xx/5xx), the request automatically switches to the next provider
-- **Proxy pool** — route through residential proxies with health tracking, auto-rotation, and dedicated pinning
-- **WAF bypass** — detects Aliyun/Cloudflare WAF challenges and retries on a clean proxy
-- **Buffered streaming** — assembles upstream SSE into a complete response before forwarding, preventing truncation and mid-stream drops
-- **Custom API keys** — create `mugen_*` keys for your clients; each is tracked with hit counts
-- **Content filters** — keyword redaction or blocking before requests leave the gateway
-- **Live dashboard** — real-time stats, proxy management, endpoint management, logs with detail view, and an embedded AI assistant
-- **Format translation** — Anthropic ↔ OpenAI format auto-conversion when endpoints use different APIs
+By intelligently handling API routing, residential proxy rotation, rate limits, and structural API errors, it ensures that your AI agents never stall and your upstream connections remain robust.
 
 ---
 
-## Quick Start
+## ✨ Enterprise Features
 
-### 1. Clone & install
+- **🌐 Provider Agnostic Routing**
+  Seamlessly route traffic to ANY OpenAI or Anthropic compatible API endpoint. Mix and match providers effortlessly.
+  
+- **🔄 Intelligent Endpoint Failover**
+  Configure a primary endpoint with multiple fallbacks. If an endpoint returns a rate-limit, 4xx, 5xx, or content-block error, the gateway invisibly reroutes the request to the next healthy provider.
+
+- **🛡️ Residential Proxy Pool & WAF Bypass**
+  Route upstream connections through a dynamic pool of residential proxies. Built-in health tracking, automatic proxy rotation, and dedicated IP pinning to bypass strict Cloudflare or Aliyun WAF challenges.
+
+- **⚡ Buffered Stream Assembly**
+  Assembles raw SSE (Server-Sent Events) from upstream providers into a complete, uninterrupted response before delivering it to the client, preventing mid-generation crashes.
+
+- **🔑 API Key Management**
+  Issue custom `mugen_*` API keys for your developers or applications. Track hit counts, restrict access, and monitor usage per key.
+
+- **📊 Real-time Operations Dashboard**
+  A beautiful, live web interface to monitor request logs, manage endpoints, configure proxy pools, adjust retry timers, and configure keyword redaction filters on the fly.
+
+- **🔄 Format Auto-Translation**
+  Natively translates payloads between OpenAI and Anthropic schemas depending on the upstream target's requirements.
+
+---
+
+## 🛠️ Installation & Setup
+
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/Naruto859/AI-gateway.git
@@ -29,144 +46,90 @@ cd AI-gateway
 pip install -r requirements.txt
 ```
 
-### 2. Configure
+### 2. Configuration (Optional)
 
-Create a `.env` file (optional — you can configure everything from the dashboard):
+You can configure everything from the Web Dashboard. If you prefer environment variables, create a `.env` file:
 
 ```env
 ADMIN_PASSWORD=your-secure-password
 GATEWAY_KEY=your-upstream-api-key
-GATEWAY_ENDPOINT=https://your-llm-provider.com
+GATEWAY_ENDPOINT=https://your-primary-llm-provider.com
+PROXIES=http://user:pass@1.2.3.4:8080,http://user:pass@5.6.7.8:8080
 ```
 
-Or just start the server and configure from the web dashboard.
-
-### 3. Start
+### 3. Launch the Gateway
 
 ```bash
-# Quick start
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8787
-
-# Or use the start script (auto-seeds DB from env)
+# Start using the auto-seed script
 bash start.sh
+
+# Or start manually via Uvicorn
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8787
 ```
 
-The dashboard is now live at `http://localhost:8787`.
+**The dashboard is now live at `http://localhost:8787`**
 
-### 4. Connect your tools
+---
 
-Point your AI tools to the gateway:
+## 🔌 Connecting Your AI Applications
 
+Point your agents, CLIs, or SDKs to your Mugen Gateway instance. It works out-of-the-box as a drop-in replacement.
+
+**Example: Anthropic SDK Integration**
 ```bash
-# Example: set as your Anthropic base URL
 export ANTHROPIC_BASE_URL=http://your-server:8787
+export ANTHROPIC_API_KEY=mugen_your_custom_key
+```
 
-# Or use with curl
+**Example: Direct cURL Request**
+```bash
 curl -X POST http://your-server:8787/v1/messages \
   -H "Content-Type: application/json" \
-  -H "x-api-key: YOUR_GATEWAY_KEY" \
+  -H "x-api-key: mugen_your_custom_key" \
   -d '{
-    "model": "claude-sonnet-4-20250514",
+    "model": "claude-3-5-sonnet-20241022",
     "max_tokens": 1024,
-    "messages": [{"role": "user", "content": "Hello!"}]
+    "messages": [{"role": "user", "content": "Explain quantum computing."}]
   }'
 ```
 
-Any Anthropic SDK-compatible tool works out of the box.
+---
+
+## 🖥️ Dashboard Overview
+
+Manage your entire AI infrastructure directly from the web UI:
+
+- **Timers:** Configure connect timeouts, read timeouts, TCP keepalives, and exponential backoff retry formulas.
+- **Proxies:** Bulk add HTTP/Socks5 proxies. Run health checks, set a dedicated exit IP, and monitor success/fail ratios.
+- **Endpoints:** Add any OpenAI/Anthropic compatible upstream URLs. Assign priorities and set your primary routing target.
+- **Keys:** Generate and revoke `mugen_*` access keys for client authentication.
+- **Logs:** View a live feed of all incoming requests, upstream latency, proxy selection, and detailed error JSONs.
 
 ---
 
-## Dashboard Guide
+## 🏗️ System Architecture
 
-Login at `http://your-server:8787` with your admin password.
-
-| Tab | What it does |
-|-----|-------------|
-| **Timers** | Configure read/connect timeouts, retry backoff, TCP keepalive |
-| **Proxies** | Add/remove/test proxies, pin a dedicated exit IP, toggle auto-rotation |
-| **Keys** | Create `mugen_*` API keys for your clients to use |
-| **Endpoints** | Add upstream LLM providers, set primary, test, enable/disable |
-| **Logs** | Live request log with status, latency, attempts, and full error detail |
-| **Filters** | Keyword redaction/blocking before requests leave the gateway |
-
-### Adding proxies
-
-Upload a proxy file or paste them — any format is auto-detected:
-- `IP:PORT`
-- `user:pass@IP:PORT`
-- `IP:PORT:user:pass`
-- `http://user:pass@IP:PORT`
-
-### Endpoint failover
-
-1. Add your primary provider in the **Endpoints** tab
-2. Click **★ Set primary** on it
-3. Add one or more fallback providers
-4. When the primary fails, requests automatically route to the next available endpoint
-
-Each new request always starts at the primary. If it fails, the gateway tries each fallback in order.
-
----
-
-## Architecture
-
-```
-Client → Mugen Routes → [Proxy Pool] → Upstream Provider
-                ↓              ↓
-           Dashboard      Health checks
-           (port 8787)    (WAF detection)
+```text
+Client Application 
+       │
+       ▼
+[ Mugen AI Gateway ] ──(Keyword Filters)──> [ Request Normalization ]
+       │                                            │
+   (Dashboard)                                      ▼
+       │                            [ Failover Routing Engine ]
+       ▼                                            │
+[ SQLite Database ]                                 ▼
+                                        [ Residential Proxy Pool ]
+                                                    │
+                                                    ▼
+                                    [ Upstream LLM Providers ]
+                                     (OpenAI, Anthropic, Custom)
 ```
 
-**Stack:** Python 3.11+ · FastAPI · SQLite · Vanilla JS dashboard
-
-| File | Purpose |
-|------|---------|
-| `app/main.py` | API routes, admin endpoints |
-| `app/forwarder.py` | Core proxy logic, SSE buffering, failover |
-| `app/proxy_pool.py` | Proxy selection, health tracking, rotation |
-| `app/db.py` | SQLite schema and data access |
-| `app/agent.py` | Embedded AI assistant (tool-calling) |
-| `app/filters.py` | Content keyword filtering |
-| `static/dashboard.html` | Single-page dashboard UI |
-| `seed.py` | Database seeder (from env vars or files) |
-| `start.sh` | Entrypoint script (seed + start) |
+**Tech Stack:** Python 3.11+ • FastAPI • SQLite • Vanilla JS • HTTPX
 
 ---
 
-## Environment Variables
+## 📄 License
 
-All optional — configure from the dashboard if you prefer.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ADMIN_PASSWORD` | — | Dashboard login password |
-| `GATEWAY_KEY` | — | Upstream API key (also sets `gateway_key` for client auth) |
-| `GATEWAY_ENDPOINT` | `https://agentrouter.org` | Primary upstream URL |
-| `PROXIES` | — | Comma or newline-separated proxy list |
-| `DEDICATED_PROXY_IP` | — | Auto-pin this exit IP after seeding |
-| `PORT` | `8787` | Server listen port |
-
----
-
-## API Reference
-
-### Proxy passthrough
-- `POST /v1/messages` — Anthropic Messages API (proxied)
-- `POST /v1/chat/completions` — OpenAI Chat API (proxied, with format translation)
-
-### Admin API (requires `x-admin-token` header)
-- `GET /admin/state` — full system state (settings, proxies, endpoints, logs)
-- `GET /admin/logs` — filtered log list (`?source=test&limit=50`)
-- `POST /admin/settings` — update settings
-- `POST /admin/proxy/add` — add proxies
-- `POST /admin/proxy/test` — test a proxy
-- `POST /admin/endpoint/add` — add upstream endpoint
-- `POST /admin/endpoint/test` — test endpoint with a real request
-- `POST /admin/key/create` — create a `mugen_*` API key
-- `POST /admin/agent/chat` — embedded AI assistant
-
----
-
-## License
-
-MIT
+This project is licensed under the MIT License.
