@@ -865,12 +865,12 @@ $('#chatSend').onclick=chatSend;
 $('#chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chatSend();}});
 
 // ============ EMBEDDED AGENT ============
-let AG={cfg:JSON.parse(localStorage.getItem('mr_agent')||'{}'),msgs:[],attach:null};
+let AG={cfg:JSON.parse(localStorage.getItem('mr_agent')||'{}'),msgs:[],attach:null,welcomed:false};
 function agentBrainLabel(){return AG.cfg.mode==='custom'?('Custom · '+(AG.cfg.model||'?')):'Default brain';}
 function openAgent(){
   $('#agentPanel').classList.add('show');$('#agentFab').style.display='none';
   $('#agentBrain').textContent=agentBrainLabel();
-  if(!AG.msgs.length)agentBubble('a','Hi! I can add/test proxies, add endpoints, set filters, change settings, and diagnose log errors. What do you need?');
+  if(!AG.welcomed){AG.welcomed=true;agentBubble('a','Hi! I can manage proxies, endpoints, filters, settings, and diagnose errors. Ask away!');}
   setTimeout(()=>$('#agentInput').focus(),100);
 }
 function closeAgent(){$('#agentPanel').classList.remove('show');$('#agentFab').style.display='grid';}
@@ -895,7 +895,7 @@ $('#agentSaveCfg').onclick=()=>{
   $('#agentBrain').textContent=agentBrainLabel();$('#agentSettings').classList.remove('show');
   toast('Brain settings saved','ok');
 };
-function agentBubble(role,text){const d=document.createElement('div');d.className='msg '+role;d.textContent=text;$('#agentLog').appendChild(d);$('#agentLog').scrollTop=$('#agentLog').scrollHeight;return d;}
+function agentBubble(role,text){const d=document.createElement('div');d.className='msg '+role;d.textContent=text;d.style.maxWidth='85%';d.style.wordBreak='break-word';$('#agentLog').appendChild(d);$('#agentLog').scrollTop=$('#agentLog').scrollHeight;return d;}
 // attach image/file
 $('#agentAttach').onclick=()=>$('#agentFile').click();
 $('#agentFile').onchange=e=>{
@@ -924,8 +924,11 @@ async function agentSend(){
     wait.textContent=r.reply||'(no reply)';
     AG.msgs.push({role:'assistant',content:r.reply||''});
     if(r.actions&&r.actions.length){const b=document.createElement('div');b.className='msg sys';b.textContent='⚙ '+r.actions.map(a=>a.tool).join(', ');$('#agentLog').appendChild(b);}
-    await refresh();  // reflect any changes the agent made
-  }catch(e){wait.textContent='✗ '+e.message;}
+    await refresh();
+  }catch(e){
+    const msg=e.message||'Unknown error';
+    wait.textContent='✗ '+(msg.length>80?msg.slice(0,80)+'…':msg);
+  }
   $('#agentLog').scrollTop=$('#agentLog').scrollHeight;
 }
 $('#agentSend').onclick=agentSend;

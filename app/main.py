@@ -263,13 +263,25 @@ async def agent_chat(payload: dict, x_admin_token: str = Header(default="")):
     if not messages:
         raise HTTPException(400, "no messages")
     t0 = time.time()
-    res = await agent.chat(messages, cfg)
+    try:
+        res = await agent.chat(messages, cfg)
+    except Exception as e:
+        ms = int((time.time() - t0) * 1000)
+        brain = "custom" if (cfg.get("mode") == "custom" and cfg.get("endpoint")) else "default(gateway)"
+        err_msg = f"{type(e).__name__}: {e}"
+        db.add_log(method="POST", path="agent/chat", status=500, proxy="", attempts=1,
+                   stream=0, redactions=0, ms=ms, note=f"agent error: {err_msg[:60]}",
+                   model=cfg.get("model", ""), endpoint=brain, source="agent",
+                   detail=err_msg[:1500])
+        return {"reply": f"Error: {err_msg[:100]}", "actions": []}
     ms = int((time.time() - t0) * 1000)
     brain = "custom" if (cfg.get("mode") == "custom" and cfg.get("endpoint")) else "default(gateway)"
     acts = ",".join(a.get("tool", "") for a in (res.get("actions") or [])) or "chat"
-    db.add_log(method="POST", path="agent/chat", status=200, proxy="", attempts=1,
+    status = 200 if not (res.get("reply", "").startswith("Brain error")) else 502
+    db.add_log(method="POST", path="agent/chat", status=status, proxy="", attempts=1,
                stream=0, redactions=0, ms=ms, note=f"agent: {acts}",
-               model=cfg.get("model", ""), endpoint=brain, source="agent")
+               model=cfg.get("model", ""), endpoint=brain, source="agent",
+               detail=(res.get("reply", "") if status >= 400 else "")[:1500])
     return res
 
 
