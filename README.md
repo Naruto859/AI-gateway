@@ -1,221 +1,172 @@
-# AI Gateway
+# Mugen Routes
 
-A configurable **Anthropic-format reverse proxy** that sits between your AI agents
-(Hermes Agent, Claude Code, any Anthropic-SDK client) and a restrictive LLM
-endpoint, routing every request through a **residential proxy** so it bypasses the
-endpoint's WAF — and keeping the connection alive on long-context requests so
-agents never crash mid-task.
+**Intelligent AI gateway with proxy routing, failover, and a real-time dashboard.**
 
-FastAPI backend + a Claude-style dark Tailwind dashboard. State (endpoint, keys,
-proxies, filters, logs) lives in a local SQLite DB. **No secrets are committed to
-this repo** — see [Security](#security).
+Mugen Routes sits between your AI tools (agents, scripts, apps) and upstream LLM providers. It routes requests through residential proxies, automatically retries on failure, and seamlessly fails over between multiple providers — all invisible to your client.
 
 ---
 
-## Why this exists (root cause)
+## Features
 
-The target endpoint (e.g. `https://agentrouter.org`, Anthropic Messages format)
-sits behind an **Aliyun WAF**. The WAF behaves differently by source IP:
+- **Multi-provider failover** — set a primary endpoint and add fallbacks. If the primary returns an error (content-blocked, rate-limited, 4xx/5xx), the request automatically switches to the next provider
+- **Proxy pool** — route through residential proxies with health tracking, auto-rotation, and dedicated pinning
+- **WAF bypass** — detects Aliyun/Cloudflare WAF challenges and retries on a clean proxy
+- **Buffered streaming** — assembles upstream SSE into a complete response before forwarding, preventing truncation and mid-stream drops
+- **Custom API keys** — create `mugen_*` keys for your clients; each is tracked with hit counts
+- **Content filters** — keyword redaction or blocking before requests leave the gateway
+- **Live dashboard** — real-time stats, proxy management, endpoint management, logs with detail view, and an embedded AI assistant
+- **Format translation** — Anthropic ↔ OpenAI format auto-conversion when endpoints use different APIs
 
-- **Residential / home IP** (e.g. where Claude Code runs on the user's laptop) →
-  requests pass, real model JSON comes back. This is why Claude Code "just works".
-- **Datacenter / VPS IP** (e.g. where Hermes Agent runs on a server) → the WAF
-  serves a **slider-CAPTCHA HTML page**: HTTP `200`, `Content-Type: text/html`,
-  sets an `acw_tc` cookie. The agent gets HTML instead of JSON → garbage →
-  errors like `HTTP 305 / Service Unavailable`, JSON parse failures, crashes.
+---
 
-Things that do **not** bypass it: changing User-Agent, replaying cookies, retries.
-The only reliable fix is sending the request from a **clean residential IP**.
+## Quick Start
 
-**Proven fix:** route the identical request through a residential proxy
-(`http://user:pass@ip:port`). Both non-streaming JSON and streaming SSE then work
-end-to-end with the real model.
+### 1. Clone & install
 
-## The second problem: long-context crashes
+```bash
+git clone https://github.com/Naruto859/AI-gateway.git
+cd AI-gateway
+pip install -r requirements.txt
+```
 
-Agents like Hermes would crash on big/long-running requests even after the WAF was
-solved. Root cause: a **non-streaming** HTTP request to the upstream sits idle
-while the model "thinks", and the connection gets dropped (~10 min idle). Claude
-Code avoids this because it **always streams** — the steady `ping`/`delta` events
-keep the socket warm, and its SDK auto-retries.
+### 2. Configure
 
-**The "always-stream bridge" (this gateway's core trick):** the gateway **always
-streams from the upstream**, even when the downstream client asked for a
-non-streaming response. For a streaming client it relays the SSE as-is. For a
-non-streaming client it consumes the upstream stream, assembles the final JSON
-body, and returns it once complete. Either way the upstream socket is never idle,
-so long-context requests don't drop. This is implemented in
-[`app/forwarder.py`](app/forwarder.py).
+Create a `.env` file (optional — you can configure everything from the dashboard):
+
+```env
+ADMIN_PASSWORD=your-secure-password
+GATEWAY_KEY=your-upstream-api-key
+GATEWAY_ENDPOINT=https://your-llm-provider.com
+```
+
+Or just start the server and configure from the web dashboard.
+
+### 3. Start
+
+```bash
+# Quick start
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8787
+
+# Or use the start script (auto-seeds DB from env)
+bash start.sh
+```
+
+The dashboard is now live at `http://localhost:8787`.
+
+### 4. Connect your tools
+
+Point your AI tools to the gateway:
+
+```bash
+# Example: set as your Anthropic base URL
+export ANTHROPIC_BASE_URL=http://your-server:8787
+
+# Or use with curl
+curl -X POST http://your-server:8787/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_GATEWAY_KEY" \
+  -d '{
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+Any Anthropic SDK-compatible tool works out of the box.
+
+---
+
+## Dashboard Guide
+
+Login at `http://your-server:8787` with your admin password.
+
+| Tab | What it does |
+|-----|-------------|
+| **Timers** | Configure read/connect timeouts, retry backoff, TCP keepalive |
+| **Proxies** | Add/remove/test proxies, pin a dedicated exit IP, toggle auto-rotation |
+| **Keys** | Create `mugen_*` API keys for your clients to use |
+| **Endpoints** | Add upstream LLM providers, set primary, test, enable/disable |
+| **Logs** | Live request log with status, latency, attempts, and full error detail |
+| **Filters** | Keyword redaction/blocking before requests leave the gateway |
+
+### Adding proxies
+
+Upload a proxy file or paste them — any format is auto-detected:
+- `IP:PORT`
+- `user:pass@IP:PORT`
+- `IP:PORT:user:pass`
+- `http://user:pass@IP:PORT`
+
+### Endpoint failover
+
+1. Add your primary provider in the **Endpoints** tab
+2. Click **★ Set primary** on it
+3. Add one or more fallback providers
+4. When the primary fails, requests automatically route to the next available endpoint
+
+Each new request always starts at the primary. If it fails, the gateway tries each fallback in order.
 
 ---
 
 ## Architecture
 
 ```
-  AI agent (Hermes / Claude Code / Anthropic SDK)
-        │  ANTHROPIC_BASE_URL = http://<gateway-host>:<port>
-        │  x-api-key: <gateway key>
-        ▼
-  ┌──────────────────────── AI Gateway (FastAPI) ───────────────────────┐
-  │  main.py        routes: /v1/* catch-all + admin API + dashboard      │
-  │  filters.py     keyword redact / block on system + messages          │
-  │  proxy_pool.py  pick ONE residential proxy, health-check, failover   │
-  │  forwarder.py   always-stream bridge → upstream, assemble if needed  │
-  │  db.py          SQLite: settings, proxies, keywords, logs            │
-  └──────────────────────────────────────────────────────────────────────┘
-        │  via residential proxy  (http://user:pass@ip:port)
-        ▼
-  Upstream LLM endpoint behind Aliyun WAF  (Anthropic Messages API)
+Client → Mugen Routes → [Proxy Pool] → Upstream Provider
+                ↓              ↓
+           Dashboard      Health checks
+           (port 8787)    (WAF detection)
 ```
 
-### Request flow
-1. Client hits the gateway at `/v1/messages` (Anthropic) with the **gateway key**.
-2. Gateway optionally enforces a client key, runs content filters, picks one
-   healthy residential proxy.
-3. Gateway rewrites auth (`x-api-key` for Anthropic, `Bearer` for OpenAI-style),
-   forces a streaming upstream request, and forwards through the proxy.
-4. Streaming client → SSE relayed live. Non-streaming client → stream consumed and
-   assembled into one JSON response.
-5. On a real failure (network error / WAF HTML detected) it fails the proxy over to
-   the next one — **one proxy per request**, never burning many at once.
+**Stack:** Python 3.11+ · FastAPI · SQLite · Vanilla JS dashboard
+
+| File | Purpose |
+|------|---------|
+| `app/main.py` | API routes, admin endpoints |
+| `app/forwarder.py` | Core proxy logic, SSE buffering, failover |
+| `app/proxy_pool.py` | Proxy selection, health tracking, rotation |
+| `app/db.py` | SQLite schema and data access |
+| `app/agent.py` | Embedded AI assistant (tool-calling) |
+| `app/filters.py` | Content keyword filtering |
+| `static/dashboard.html` | Single-page dashboard UI |
+| `seed.py` | Database seeder (from env vars or files) |
+| `start.sh` | Entrypoint script (seed + start) |
 
 ---
 
-## File structure
+## Environment Variables
 
-```
-ai-gateway/
-├── app/
-│   ├── main.py              FastAPI app: /v1/* proxy routes, admin API, dashboard mount
-│   ├── forwarder.py         ACTIVE: the always-stream bridge (relay + assemble)
-│   ├── forwarder_improved.py  preserved copy of the bridge
-│   ├── forwarder_original.py  backup of the original simpler forwarder
-│   ├── db.py                SQLite store: settings, proxies, keywords, logs
-│   ├── proxy_pool.py        proxy selection, mark_good/mark_bad, WAF-aware health check
-│   ├── filters.py           keyword redact / block over system + messages
-│   └── __init__.py
-├── static/
-│   ├── dashboard.html       Claude-style dark dashboard
-│   └── app.js               dashboard logic (tabs, fetch admin API)
-├── seed.py                  seed DB from env vars + proxies.txt (no hard-coded secrets)
-├── run.sh                   start uvicorn (HOST/PORT overridable)
-├── requirements.txt         fastapi, uvicorn[standard], httpx
-├── .gitignore               excludes data.db, proxies.txt, .env, *.log, venv …
-└── README.md
-```
+All optional — configure from the dashboard if you prefer.
 
-**Never committed (gitignored):** `data.db` (all secrets live here), `proxies.txt`
-(proxy credentials), `.env`, `*.log`.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ADMIN_PASSWORD` | — | Dashboard login password |
+| `GATEWAY_KEY` | — | Upstream API key (also sets `gateway_key` for client auth) |
+| `GATEWAY_ENDPOINT` | `https://agentrouter.org` | Primary upstream URL |
+| `PROXIES` | — | Comma or newline-separated proxy list |
+| `DEDICATED_PROXY_IP` | — | Auto-pin this exit IP after seeding |
+| `PORT` | `8787` | Server listen port |
 
 ---
 
-## Setup
+## API Reference
 
-Requires Python 3.11+.
+### Proxy passthrough
+- `POST /v1/messages` — Anthropic Messages API (proxied)
+- `POST /v1/chat/completions` — OpenAI Chat API (proxied, with format translation)
 
-```bash
-cd ai-gateway
-python3 -m venv .venv && . .venv/bin/activate    # or use uv
-pip install -r requirements.txt
-
-# create proxies.txt — one residential proxy per line:
-#   http://user:pass@ip:port
-#   ip:port:user:pass also accepted (seed.py normalizes)
-
-# seed the DB (secrets via env, nothing hard-coded):
-GATEWAY_ENDPOINT=https://your-endpoint.example \
-GATEWAY_KEY=sk-REPLACE_ME \
-ADMIN_PASSWORD=REPLACE_ME \
-python3 seed.py
-
-./run.sh                      # binds 0.0.0.0:8787
-# dashboard: http://localhost:8787/   (login with ADMIN_PASSWORD)
-```
-
-### Configuration (all editable in the dashboard → Settings)
-| Setting | Meaning |
-|---|---|
-| `endpoint` | Upstream base URL (default `https://agentrouter.org`) |
-| `gateway_key` | Key clients must present to the gateway |
-| `upstream_key` | Real key the gateway uses upstream |
-| `require_client_key` | Enforce the gateway key on inbound requests |
-| `admin_password` | Dashboard login |
-| `max_retries` / timeouts | Failover + connection tuning |
-| `user_agent` | UA sent upstream |
+### Admin API (requires `x-admin-token` header)
+- `GET /admin/state` — full system state (settings, proxies, endpoints, logs)
+- `GET /admin/logs` — filtered log list (`?source=test&limit=50`)
+- `POST /admin/settings` — update settings
+- `POST /admin/proxy/add` — add proxies
+- `POST /admin/proxy/test` — test a proxy
+- `POST /admin/endpoint/add` — add upstream endpoint
+- `POST /admin/endpoint/test` — test endpoint with a real request
+- `POST /admin/key/create` — create a `mugen_*` API key
+- `POST /admin/agent/chat` — embedded AI assistant
 
 ---
 
-## Pointing your agents at the gateway
+## License
 
-### Endpoint URLs the gateway exposes
-- **Anthropic (Messages API):** `http://<gateway-host>:<port>/v1/messages`
-- **OpenAI-style:** `http://<gateway-host>:<port>/v1/chat/completions`
-
-> Note: the current upstream only supports the **Anthropic** format. The OpenAI
-> path exists in the gateway but will only work if the upstream account supports
-> chat-completions.
-
-### Claude Code
-```bash
-export ANTHROPIC_BASE_URL=http://<gateway-host>:<port>
-export ANTHROPIC_API_KEY=<gateway key>
-```
-
-### Hermes Agent (`~/.hermes/config.yaml`)
-```yaml
-provider: custom
-model: claude-opus-4-8
-custom_providers:
-  - name: custom
-    base_url: http://<gateway-host>:<port>
-    api_key: <gateway key>
-    api_mode: anthropic_messages   # endpoint speaks Anthropic format
-```
-`display.streaming` only changes terminal rendering — the API always streams
-upstream regardless, which is what keeps long-context requests alive.
-
----
-
-## Dashboard
-
-Claude-style dark UI with tabs:
-- **Connection** — endpoint URL, keys, both exposed endpoint URLs, test button.
-- **Proxies** — add / bulk-add, test (WAF-aware health check), good/bad status.
-- **Filter** — add keyword rules (redact or block) over system + messages.
-- **Logs** — recent requests, status, which proxy was used.
-- **Settings** — admin password, retries, timeouts, user-agent.
-
----
-
-## Deployment notes (NAT VPS)
-
-Deployed on a **NAT VPS** with **no dedicated public IP** — inbound only via
-**port forwarding** (e.g. host port → VPS 80/443/22). Served over plain HTTP on
-the forwarded port via Caddy (`reverse_proxy 127.0.0.1:8787` with
-`flush_interval -1` so SSE isn't buffered). Both `ai-gateway` (uvicorn) and
-`caddy` run as systemd services.
-
-**HTTPS caveat:** automatic Let's Encrypt (HTTP-01 / TLS-ALPN-01) cannot work on a
-NAT VPS because the ACME challenge can't reach standard ports 80/443. Real HTTPS
-would need a manual DNS-01 certificate (≈90-day manual renewal) or owning the
-parent DNS zone for a Cloudflare Tunnel.
-
----
-
-## Security
-
-- **All secrets live only in local SQLite (`data.db`) and `proxies.txt`** — both
-  gitignored. This repo contains **no API keys, no proxy credentials, no
-  passwords**. Use the placeholders above and seed via env vars.
-- Never hit the upstream directly from the VPS IP — always through a residential
-  proxy (direct hits get the IP WAF-flagged).
-- Change the default `admin_password` before exposing the dashboard publicly.
-- Rotate any key/password that was ever pasted into a shared channel.
-
----
-
-## Status
-
-v1 complete and verified end-to-end **through a residential proxy** with model
-`claude-opus-4-8`: non-streaming ✅, streaming SSE ✅, tool-use ✅, content filter
-(redact + block) ✅, and a live Hermes Agent connected through the gateway ✅.
+MIT

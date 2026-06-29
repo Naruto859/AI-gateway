@@ -53,7 +53,7 @@ def main():
     print(f"total proxies in db = {len(db.list_proxies())}")
 
     # Auto-pin whitelisted proxy (agentrouter requires a stable exit IP)
-    pin_ip = os.environ.get("DEDICATED_PROXY_IP", "217.181.91.60")
+    pin_ip = os.environ.get("DEDICATED_PROXY_IP", "45.3.46.48")
     if pin_ip:
         for p in db.list_proxies():
             if pin_ip in p["url"]:
