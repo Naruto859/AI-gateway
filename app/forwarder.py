@@ -565,9 +565,10 @@ async def forward(request, path):
                 except Exception:
                     pass
         if not ok_key:
+            masked_ck = f"{ck[:4]}...{ck[-4:]}" if len(ck) > 8 else (ck or "[empty]")
             _log(method=request.method, path=path, status=401, proxy="", attempts=0,
                        stream=0, redactions=0, ms=0, note="invalid gateway key",
-                       ip=client_ip, model="")
+                       ip=client_ip, model="", detail=f"Expected gateway key, but received invalid key: '{masked_ck}' (length: {len(ck)})")
             return _err("Invalid gateway key.", 401, "authentication_error")
 
     # model name (for logs) — parsed before filters mutate the body
