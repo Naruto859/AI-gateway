@@ -9,7 +9,9 @@ import sqlite3
 import threading
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE, "data.db")
+DATA_DIR = os.path.join(BASE, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "data.db")
 
 _lock = threading.Lock()
 _conn = None

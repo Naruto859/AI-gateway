@@ -8,3 +8,5 @@ __pycache__/
 proxies.txt
 .env
 preview/
+
+data/
