@@ -83,20 +83,27 @@ def _build_upstream_headers(request, upstream_key, kind):
         headers.pop("authorization", None)
         headers["x-api-key"] = upstream_key
         headers.setdefault("anthropic-version", "2023-06-01")
-        # --- Claude Code fingerprint (required by agentrouter) ---
-        # agentrouter rejects "Anthropic/Python 0.87.0" (Hermes' SDK UA) with
-        # 401 "unauthorized client" — it only accepts claude-cli UA.
-        # Hermes already sends correct x-stainless-* headers via the Anthropic
-        # SDK (Lang=python, OS=Linux, Arch=x64, Runtime=CPython,
-        # Runtime-Version=3.x, Package-Version=0.87.0, Retry-Count, Timeout,
-        # Helper-Method, Async, etc.) so we leave those untouched.
-        headers["user-agent"] = "claude-cli/2.1.177 (external, cli)"
-        # Beta features the real Claude Code advertises — upstream may expect them
-        headers.setdefault("anthropic-beta",
-                           "claude-code-20250219,"
-                           "fine-grained-tool-streaming-2025-05-14,"
-                           "prompt-caching-2025-07-21,"
-                           "context-1m-2025-08-07")
+        if db.get_setting("claude_mimicry", "1") == "1":
+            # 100% exact Claude Code mimicry: spoof a nodejs environment and the claude-cli UA.
+            # Strip all client x-stainless headers to hide Hermes/Python fingerprint.
+            for k in list(headers.keys()):
+                if k.lower().startswith("x-stainless-"):
+                    headers.pop(k)
+            headers["user-agent"] = "claude-cli/2.1.177 (external, cli)"
+            headers["x-stainless-lang"] = "node"
+            headers["x-stainless-package-version"] = "0.33.1"
+            headers["x-stainless-os"] = "linux"
+            headers["x-stainless-arch"] = "x64"
+            headers["x-stainless-runtime"] = "node"
+            headers["x-stainless-runtime-version"] = "v22.13.0"
+            headers.setdefault("anthropic-beta",
+                               "claude-code-20250219,"
+                               "fine-grained-tool-streaming-2025-05-14,"
+                               "prompt-caching-2025-07-21,"
+                               "context-1m-2025-08-07")
+        else:
+            # Just the basic UA (required by agentrouter) without wiping client's own SDK headers
+            headers["user-agent"] = "claude-cli/2.1.177 (external, cli)"
     headers["accept-encoding"] = "identity"
     return headers
 
@@ -137,7 +144,7 @@ def _targets(s):
     ar_key = s.get("upstream_key") or s.get("gateway_key", "")
     ar_enabled = s.get("agentrouter_enabled", "1") != "0"
     ar_target = {"name": "AgentRouter", "base": ar_base, "key": ar_key,
-                 "mode": "anthropic", "agentrouter": True}
+                 "mode": "anthropic", "agentrouter": True, "model_override": s.get("global_model_override", "")}
 
     customs = [e for e in db.list_endpoints() if e.get("enabled")]
     def mk(e):
@@ -148,6 +155,7 @@ def _targets(s):
             "mode": "openai" if e.get("api_mode") == "chat_completions" else "anthropic",
             "agentrouter": False,
             "id": e.get("id"),
+            "model_override": e.get("model_override") or s.get("global_model_override", ""),
         }
     primary_custom = next((e for e in customs if e.get("is_primary")), None)
 
@@ -187,21 +195,19 @@ def _target_headers(request, target):
     """Headers for a specific target (claude-cli fingerprint only for agentrouter)."""
     kind = "openai" if target["mode"] == "openai" else "anthropic"
     headers = _build_upstream_headers(request, target["key"], kind)
-    if not target.get("agentrouter") and kind == "anthropic":
-        # custom anthropic-compatible provider: drop agentrouter-specific fingerprint
-        headers.pop("anthropic-beta", None)
-        headers["user-agent"] = "claude-cli/2.1.177 (external, cli)"
     return headers
 
 
 
-def _with_stream(body_bytes, want):
-    """Return body bytes with the JSON "stream" flag forced to `want`."""
+def _mutate_body(body_bytes, want_stream=None, model_override=None):
     try:
         d = json.loads(body_bytes)
     except Exception:
         return body_bytes
-    d["stream"] = want
+    if want_stream is not None:
+        d["stream"] = want_stream
+    if model_override:
+        d["model"] = model_override
     return json.dumps(d, ensure_ascii=False).encode("utf-8")
 
 
@@ -616,7 +622,6 @@ async def forward(request, path):
     # proxies fail, we fall through to the NEXT target (agentrouter -> custom2 ->
     # custom3 ...). The client keeps seeing pings, so the switch is invisible.
     if client_wants_stream:
-        up_body = _with_stream(body, True)
 
         if kind == "anthropic":
             async def gen():
@@ -628,6 +633,7 @@ async def forward(request, path):
                 last_tgt_name = ""
                 try:
                     for tgt in targets:
+                        up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
                         url = _target_url(tgt["base"], path, tgt["mode"])
                         theaders = _target_headers(request, tgt)
                         candidates = proxy_pool.ordered_for_request(max_retries)
@@ -716,6 +722,10 @@ async def forward(request, path):
                                 upstream_rejected = True
                                 break  # this target rejected the content — try NEXT target
                             detail = res[1]  # ("retry", reason) -> next proxy, same target
+                            _log(method=request.method, path=path, status=502, proxy=p["url"],
+                                       attempts=attempts, stream=1, redactions=redactions,
+                                       ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
+                                       ip=client_ip, model=req_model, endpoint=tgt["name"])
                             await _retry_backoff(attempts)
                         # finished this target (upstream-rejected or all proxies failed) -> next target
                         if not upstream_rejected:
@@ -755,6 +765,10 @@ async def forward(request, path):
             forwarded = False
             detail = ""
             for tgt in targets:
+                if client_wants_stream:
+                    up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
+                else:
+                    up_body = _mutate_body(body, want_stream=False, model_override=tgt.get("model_override"))
                 url = _target_url(tgt["base"], path, tgt["mode"])
                 theaders = _target_headers(request, tgt)
                 for p in proxy_pool.ordered_for_request(max_retries):
@@ -795,11 +809,14 @@ async def forward(request, path):
         return StreamingResponse(gen_openai(), media_type="text/event-stream")
 
     # ---------- client wants NON-STREAM: stream upstream, assemble, return JSON ----------
-    up_body = _with_stream(body, True)   # ALWAYS stream upstream — this is the fix
     attempts = 0
     detail = ""
     last = None  # (status, ct, payload, target_name, proxy_url) from an upstream 4xx
     for tgt in targets:
+        if client_wants_stream:
+            up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
+        else:
+            up_body = _mutate_body(body, want_stream=False, model_override=tgt.get("model_override"))
         url = _target_url(tgt["base"], path, tgt["mode"])
         theaders = _target_headers(request, tgt)
         tgt_kind = "openai" if tgt["mode"] == "openai" else "anthropic"
@@ -819,8 +836,12 @@ async def forward(request, path):
                 last = (status, ct, payload, tgt["name"], p["url"])
                 upstream_rejected = True
                 break
-            await _retry_backoff(attempts)
             detail = res[1]
+            _log(method=request.method, path=path, status=502, proxy=p["url"],
+                       attempts=attempts, stream=0, redactions=redactions,
+                       ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
+                       ip=client_ip, model=req_model, endpoint=tgt["name"])
+            await _retry_backoff(attempts)
         if not upstream_rejected:
             detail = detail or f"all proxies failed for {tgt['name']}"
     # all targets exhausted

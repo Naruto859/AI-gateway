@@ -188,7 +188,7 @@ async def endpoint_add(payload: dict, x_admin_token: str = Header(default="")):
     if not url.startswith("http"):
         raise HTTPException(400, "endpoint must be an http(s) URL")
     mode = payload.get("api_mode", "anthropic_messages")
-    added = db.add_endpoint(url, mode, payload.get("api_key", ""))
+    added = db.add_endpoint(url, mode, payload.get("api_key", ""), payload.get("model_override", ""))
     return {"added": added}
 
 

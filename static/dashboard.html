@@ -140,7 +140,8 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .modalhd h3{margin:0;font-size:15px;font-weight:720;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .modalhd .x{width:30px;height:30px;border:none;border-radius:9px;background:#f4f6f9;color:#94a3ad;cursor:pointer;font-size:18px;flex:none}
 .modalbody{padding:16px 18px;overflow:auto;font-size:13px;line-height:1.6}
-.modalbody input[type=text],.modalbody input[type=password]{width:100%;text-align:left}
+.modalbody input{width:100%;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:11px;padding:9px 12px;background:#fff;text-align:left;outline:none;transition:.2s}
+.modalbody input:focus{border-color:var(--c-mint-d);box-shadow:0 0 0 3px rgba(63,158,120,.16)}
 .kv{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}.kv .k{color:var(--ink-faint);font-weight:600;min-width:90px;flex:none}.kv .v{color:var(--ink);word-break:break-word;font-family:ui-monospace,monospace;font-size:12px}
 .chatlog{flex:1;overflow:auto;padding:14px 18px;display:flex;flex-direction:column;gap:10px;min-height:200px;max-height:48vh}
 .msg{padding:9px 13px;border-radius:13px;font-size:13.5px;line-height:1.5;max-width:85%;white-space:pre-wrap;word-break:break-word}
@@ -304,6 +305,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints <span id="epCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
 <p class="sub">Where the gateway forwards. Set one as primary; if it fails all retries the next is tried, then it loops back to primary.</p>
 <div class="field"><div class="meta"><div class="lbl">Format translation</div><div class="desc">Auto-convert between Anthropic ↔ OpenAI format when endpoints use different APIs.</div></div><div class="ctrl"><div class="tg" id="tgTranslate"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Claude Code Mimicry</div><div class="desc">A-to-Z exact mimicry (NodeJS + Claude-CLI). Overwrites client fingerprint headers. Keep ON if upstream strictly checks for real Claude Code.</div></div><div class="ctrl"><div class="tg" id="tgMimicry"></div></div></div>
 <div id="epList" style="margin-top:6px"></div>
 <div class="addbox">
 <label class="fl" style="font-size:13px;margin-bottom:10px">+ Add endpoint</label>
@@ -311,6 +313,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="full"><label class="fl">Base URL</label><input class="wide" id="epUrl" type="text" placeholder="https://api.provider.com/v1"></div>
 <div><label class="fl">API mode</label><div class="csel wide" id="epMode" data-val="anthropic_messages"><button class="csel-btn">Anthropic Messages</button><div class="csel-pop"><div class="csel-opt sel" data-v="anthropic_messages">Anthropic Messages <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="chat_completions">OpenAI Chat</div></div></div></div>
 <div><label class="fl">API key</label><input class="wide" id="epKey" type="password" placeholder="sk-..."></div>
+<div class="full"><label class="fl">Model ID override (optional)</label><input class="wide" id="epModel" type="text" placeholder="claude-3-opus-123"></div>
 </div>
 <button class="btn" id="addEndpoint">Add endpoint</button>
 </div>
@@ -475,13 +478,10 @@ $$('.tab').forEach(t=>t.onclick=()=>{
   window.scrollTo({top:0,behavior:'smooth'});
 });
 
-// custom dropdowns. NOTE: no _i guard — mkCsel() rewrites innerHTML on every
-// render(), creating a fresh .csel-btn each time, so we MUST (re)bind handlers
-// every call or the dedicated-proxy dropdown goes dead after the first paint.
+// custom dropdowns.
 function _cselClose(cs){
   cs.classList.remove('open');
-  const pop=cs._pop;
-  if(pop){pop.style.cssText='';if(pop._home&&pop.parentNode!==pop._home)pop._home.appendChild(pop);}
+  if(cs._pop){cs._pop.style.cssText='';if(cs._pop._home&&cs._pop.parentNode!==cs._pop._home)cs._pop._home.appendChild(cs._pop);}
 }
 function initCsel(cs){
   const btn=cs.querySelector('.csel-btn');
@@ -490,15 +490,13 @@ function initCsel(cs){
   cs._pop=pop;pop._home=cs;
   btn.onclick=e=>{
     e.stopPropagation();
-    const o=cs.classList.contains('open');
+    const isOpen=cs.classList.contains('open');
     $$('.csel.open').forEach(_cselClose);
-    if(!o){
+    if(!isOpen){
       cs.classList.add('open');
       const r=btn.getBoundingClientRect();
-      // portal the popup to <body> so position:fixed is viewport-relative
-      // (a parent .card's transform would otherwise trap fixed + z-index).
       document.body.appendChild(pop);
-      pop.style.cssText=`position:fixed;top:${r.bottom+7}px;left:${r.left}px;width:${r.width}px;z-index:99999;opacity:1;transform:none;pointer-events:auto`;
+      pop.style.cssText=`position:absolute;top:${window.scrollY+r.bottom+7}px;left:${window.scrollX+r.left}px;width:${r.width}px;z-index:99999;opacity:1;transform:none;pointer-events:auto`;
     }
   };
   cs.querySelectorAll('.csel-opt').forEach(opt=>opt.onclick=e=>{
@@ -515,18 +513,18 @@ document.addEventListener('click',e=>$$('.csel.open').forEach(cs=>{
 function mkCsel(id,opts,cur,cb){
   const el=$('#'+id);
   if(!el)return;
-  if(el.classList.contains('open')){el._cb=cb;return;}
-  if(!el.classList.contains('csel')){el.classList.add('csel');el.classList.add('wide');}
+  el._cb=cb;
   const optHtml=opts.map(o=>`<div class="csel-opt${o.v===cur?' sel':''}" data-v="${o.v}">${o.l} <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div>`).join('');
   const curL=(opts.find(o=>o.v===cur)||opts[0]||{}).l||cur;
   el.dataset.val=cur;
   el.innerHTML=`<button class="csel-btn">${curL}</button><div class="csel-pop">${optHtml}</div>`;
-  el._cb=cb;initCsel(el);
+  initCsel(el);
 }
 
 // toggles
 $('#tgRotation').onclick=async()=>{const on=!$('#tgRotation').classList.contains('on');$('#tgRotation').classList.toggle('on',on);await api('/admin/settings',{auto_rotation:on?'1':'0'});ST.settings.auto_rotation=on?'1':'0';render();toast('Auto rotation '+(on?'ON':'OFF'),'ok');};
-$('#tgTranslate').onclick=async()=>{const on=!$('#tgTranslate').classList.contains('on');$('#tgTranslate').classList.toggle('on',on);await api('/admin/settings',{format_translation:on?'1':'0'});toast('Translation '+(on?'ON':'OFF'),'ok');};
+$('#tgTranslate').onclick=async()=>{const on=!$('#tgTranslate').classList.contains('on');$('#tgTranslate').classList.toggle('on',on);await api('/admin/settings',{format_translation:on?'1':'0'});ST.settings.format_translation=on?'1':'0';toast('Translation '+(on?'ON':'OFF'),'ok');};
+$('#tgMimicry').onclick=async()=>{const on=!$('#tgMimicry').classList.contains('on');$('#tgMimicry').classList.toggle('on',on);await api('/admin/settings',{claude_mimicry:on?'1':'0'});ST.settings.claude_mimicry=on?'1':'0';toast('Mimicry '+(on?'ON':'OFF'),'ok');};
 
 function render(){
   const s=ST.settings||{},st=ST.stats||{};
@@ -536,9 +534,7 @@ function render(){
   $('#s_ms').innerHTML=st.avg_ms?(st.avg_ms/1000).toFixed(1)+'<small>s</small>':'—';
   const enp=ST.proxies.filter(p=>p.enabled).length;
   $('#s_px').innerHTML=enp+'<small>/ '+ST.proxies.length+'</small>';
-  // setting inputs — ONLY write on first paint or when the field is NOT being
-  // edited (has no focus). Prevents the 12s refresh from wiping what the user is
-  // typing (the "timer flicker" bug). _inited flag = first render done.
+  // setting inputs
   $$('[data-set]').forEach(el=>{
     if(s[el.dataset.set]===undefined)return;
     if(!render._inited || document.activeElement!==el)el.value=s[el.dataset.set];
@@ -548,24 +544,14 @@ function render(){
   // toggles
   $('#tgRotation').classList.toggle('on',s.auto_rotation==='1');
   $('#tgTranslate').classList.toggle('on',s.format_translation==='1');
+  $('#tgMimicry').classList.toggle('on',s.claude_mimicry==='1');
   // dedicated dropdown
   const pin=s.dedicated_proxy_id;
   const pxOpts=ST.proxies.map(p=>({v:String(p.id),l:'#'+p.id+' · '+p.url.split('@').pop()}));
   mkCsel('dedWrap',[{v:'',l:'(first enabled)'},...pxOpts],String(pin||''),async v=>{await api('/admin/settings',{dedicated_proxy_id:v});toast('Dedicated proxy set','ok');ST.settings.dedicated_proxy_id=v;render();});
-  // rotation info: show exactly what the gateway will do right now
-  const ri=$('#rotInfo');
-  if(ri){
-    const enabled=ST.proxies.filter(p=>p.enabled);
-    const pinned=ST.proxies.find(p=>String(p.id)===String(pin))||enabled[0];
-    const host=pinned?pinned.url.split('@').pop():'none';
-    if(s.auto_rotation==='1')
-      ri.innerHTML=`🔄 <b>Rotation ON</b> — will try ${enabled.length} enabled IPs, starting with <b>${host}</b>, switching on failure.`;
-    else
-      ri.innerHTML=`📌 <b>Rotation OFF</b> — every request uses ONLY <b>${host}</b> (same IP for all retries). No switching.`;
-  }
+  
   renderProxies();renderEndpoints();renderLogs();renderKeywords();renderKeys();
   $$('.csel').forEach(initCsel);
-  // proxy "Show N" dropdown — wire its callback to re-page the list
   const ps=$('#prxShow');if(ps){ps._cb=v=>{PRX.show=v;PRX.page=0;renderProxies();};}
 }
 
@@ -592,7 +578,6 @@ ${isPin?'<span class="badge pin">Pinned</span>':''}
 <button class="xbtn" title="delete" data-del="${p.id}">×</button>
 </div>`;
   }).join('')||'<div class="muted">No proxies match.</div>';
-  // pagination bar
   const pg=$('#prxPage');
   if(pages>1){
     pg.innerHTML=`<button data-pprev ${PRX.page<=0?'disabled':''}>‹ Prev</button><span class="pinfo">${start+1}–${Math.min(start+per,list.length)} of ${list.length}</span><button data-pnext ${PRX.page>=pages-1?'disabled':''}>Next ›</button>`;
@@ -611,10 +596,8 @@ function renderEndpoints(){
   const arPrimary=!eps.some(e=>e.is_primary);
   const arUrl=(ST.settings.endpoint||'https://agentrouter.org').replace(/^https?:\/\//,'');
   $('#epCount').textContent=(eps.length+1)+' total';
-  // active endpoint info line at the top card
   const activePrimary=arPrimary?('AgentRouter · '+arUrl):(()=>{const e=eps.find(x=>x.is_primary);return e?epName(e):arUrl;})();
   const ai=$('#activeEpInfo');if(ai)ai.innerHTML=`⚡ Primary in use: <b>${activePrimary}</b>`;
-  // built-in agentrouter (the gateway's own upstream) — settings + toggle + primary, no delete
   let h=`<div class="ep"><span class="eprank">${arPrimary?'★':'1'}</span>
 <div class="pi"><div class="ip" style="font-family:inherit">${arUrl}</div><div class="tag">AgentRouter (gateway) · ${arPrimary?'primary':'fallback'}</div></div>
 <div class="epacts">
@@ -623,7 +606,6 @@ function renderEndpoints(){
 <button class="sbtn" data-arset="1">⚙ Settings</button>
 <div class="tg ${arEnabled?'on':''}" data-artg="1"></div>
 </div></div>`;
-  // custom endpoints
   h+=eps.map((e)=>{
     const prim=!!e.is_primary;
     return`<div class="ep"><span class="eprank">${prim?'★':e.priority||'·'}</span>
@@ -638,12 +620,10 @@ function renderEndpoints(){
 </div></div>`;
   }).join('');
   $('#epList').innerHTML=h;
-  // agentrouter controls
   $$('#epList [data-artg]').forEach(b=>b.onclick=async()=>{const on=!b.classList.contains('on');await api('/admin/settings',{agentrouter_enabled:on?'1':'0'});ST.settings.agentrouter_enabled=on?'1':'0';toast('AgentRouter '+(on?'ON':'OFF'),'ok');render();});
   $$('#epList [data-arprimary]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/primary',{id:0});toast('AgentRouter is primary','ok');await refresh();});
   $$('#epList [data-archat]').forEach(b=>b.onclick=()=>openEndpointChat({name:'AgentRouter',url:ST.settings.endpoint||'https://agentrouter.org',api_mode:'anthropic_messages',api_key:'',model:ST.settings.model_note||'claude-sonnet-4-6'}));
   $$('#epList [data-arset]').forEach(b=>b.onclick=()=>openAgentRouterSettings());
-  // custom endpoint controls
   $$('#epList [data-eptg]').forEach(b=>b.onclick=async()=>{const e=eps.find(x=>x.id==b.dataset.eptg);await api('/admin/endpoint/update',{id:+b.dataset.eptg,enabled:e.enabled?0:1});toast('Endpoint '+(e.enabled?'OFF':'ON'),'ok');await refresh();});
   $$('#epList [data-epprimary]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/primary',{id:+b.dataset.epprimary});toast('Primary set','ok');await refresh();});
   $$('#epList [data-epdel]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/delete',{id:+b.dataset.epdel});toast('Endpoint removed','ok');await refresh();});
@@ -656,38 +636,33 @@ function renderEndpoints(){
   });
   $$('#epList [data-epchat]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epchat);openEndpointChat({name:epName(e),url:e.url,api_mode:e.api_mode,api_key:e.api_key,model:ST.settings.model_note||'claude-sonnet-4-6'});});
 }
-// AgentRouter settings modal — upstream key + endpoint URL (the gateway's own upstream)
 function openAgentRouterSettings(){
   const s=ST.settings;
   $('#epSetTitle').textContent='AgentRouter settings';
   $('#epSetBody').innerHTML=`
-<label class="fl">Endpoint URL</label><input class="wide" id="arUrl" value="${s.endpoint||'https://agentrouter.org'}" style="margin-bottom:10px">
-<label class="fl">Upstream API key (sent to AgentRouter)</label><div class="copyrow" style="margin-bottom:10px"><input class="wide" id="arKey" type="text" value="${s.upstream_key||''}"><button class="xbtn cp" id="arKeyCopy" title="copy">⧉</button></div>
-<label class="fl">Master gateway key (clients send this)</label><div class="copyrow" style="margin-bottom:14px"><input class="wide" id="arGw" type="text" value="${s.gateway_key||''}"><button class="xbtn cp" id="arGwCopy" title="copy">⧉</button></div>
-<button class="btn" id="arSave">Save AgentRouter settings</button>`;
+<label class="fl">Endpoint URL</label><input id="arUrl" value="${s.endpoint||'https://agentrouter.org'}">
+<label class="fl">Global Model Override</label><input id="arMod" type="text" value="${s.global_model_override||''}" placeholder="e.g. claude-3-opus-123">
+<label class="fl">Upstream API key</label><input id="arKey" type="text" value="${s.upstream_key||''}">
+<label class="fl">Master gateway key</label><input id="arGw" type="text" value="${s.gateway_key||''}">
+<button class="btn" id="arSave" style="margin-top:14px">Save settings</button>`;
   $('#epSetModal').classList.add('show');
-  $('#arKeyCopy').onclick=()=>copyText($('#arKey').value);
-  $('#arGwCopy').onclick=()=>copyText($('#arGw').value);
   $('#arSave').onclick=async()=>{
-    await api('/admin/settings',{endpoint:$('#arUrl').value.trim(),upstream_key:$('#arKey').value.trim(),gateway_key:$('#arGw').value.trim()});
+    await api('/admin/settings',{endpoint:$('#arUrl').value.trim(),upstream_key:$('#arKey').value.trim(),gateway_key:$('#arGw').value.trim(),global_model_override:$('#arMod').value.trim()});
     toast('AgentRouter settings saved','ok');closeModal('epSetModal');await refresh();
   };
 }
-// per-endpoint settings modal — only this endpoint's own details
 function openEndpointSettings(e){
   if(!e)return;
   $('#epSetTitle').textContent='Endpoint settings';
   $('#epSetBody').innerHTML=`
-<label class="fl">Name (optional)</label><input class="wide" id="esName" value="${e.name||''}" placeholder="my provider" style="margin-bottom:10px">
-<label class="fl">Base URL</label><input class="wide" id="esUrl" value="${e.url||''}" style="margin-bottom:10px">
-<label class="fl">API key</label><div class="copyrow" style="margin-bottom:10px"><input class="wide" id="esKey" type="text" value="${e.api_key||''}"><button class="xbtn cp" id="esKeyCopy" title="copy">⧉</button></div>
-<div class="kv"><span class="k">Mode</span><span class="v">${e.api_mode==='chat_completions'?'OpenAI Chat':'Anthropic Messages'}</span></div>
-<div class="kv"><span class="k">Status</span><span class="v">${e.status||'unknown'}</span></div>
+<label class="fl">Name</label><input id="esName" value="${e.name||''}">
+<label class="fl">Base URL</label><input id="esUrl" value="${e.url||''}">
+<label class="fl">API key</label><input id="esKey" type="password" value="${e.api_key||''}">
+<label class="fl">Model ID override</label><input id="esMod" type="text" value="${e.model_override||''}" placeholder="e.g. claude-3-opus-123">
 <button class="btn" id="esSave" style="margin-top:14px">Save endpoint</button>`;
   $('#epSetModal').classList.add('show');
-  $('#esKeyCopy').onclick=()=>copyText($('#esKey').value);
   $('#esSave').onclick=async()=>{
-    await api('/admin/endpoint/update',{id:e.id,name:$('#esName').value.trim(),url:$('#esUrl').value.trim(),api_key:$('#esKey').value.trim()});
+    await api('/admin/endpoint/update',{id:e.id,name:$('#esName').value.trim(),url:$('#esUrl').value.trim(),api_key:$('#esKey').value.trim(),model_override:$('#esMod').value.trim()});
     toast('Endpoint saved','ok');closeModal('epSetModal');await refresh();
   };
 }
@@ -721,18 +696,14 @@ function renderKeywords(){
   $$('[data-kwdel]').forEach(b=>b.onclick=async()=>{await api('/admin/keyword/delete',{id:+b.dataset.kwdel});toast('Filter removed','ok');await refresh();});
 }
 async function refresh(){try{ST=await getState();render();}catch(e){}}
-
-// ---- copy-to-clipboard helper ----
 async function copyText(txt){
   try{await navigator.clipboard.writeText(txt);toast('Copied ✓','ok');}
   catch(e){
-    // fallback for non-secure contexts
     const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);
     ta.select();try{document.execCommand('copy');toast('Copied ✓','ok');}catch(_){toast('Copy failed','bad');}
     document.body.removeChild(ta);
   }
 }
-// ---- API keys ----
 function renderKeys(){
   const ks=ST.api_keys||[];
   $('#keyCount').textContent=ks.length+(ks.length===1?' key':' keys');
@@ -749,22 +720,16 @@ function renderKeys(){
 $('#createKey').onclick=async()=>{
   try{
     const r=await api('/admin/key/create',{});
-    // show the new key prominently with a copy button at the top of the list
     const box=document.createElement('div');box.className='newkey';
-    box.innerHTML=`<div style="font-size:12px;font-weight:700;color:var(--g-700);margin-bottom:6px">✓ New key created — copy it now</div><div class="nk">${r.key}</div><button class="btn" style="margin-top:10px" data-cpnew="${r.key}">⧉ Copy key</button>`;
+    box.innerHTML=`<div style="font-size:12px;font-weight:700;color:var(--g-700);margin-bottom:6px">✓ New key created</div><div class="nk">${r.key}</div>`;
     $('#keyList').prepend(box);
-    box.querySelector('[data-cpnew]').onclick=()=>copyText(r.key);
     await refresh();
-    // re-prepend after refresh wiped it
-    if(!$('#keyList .newkey')){$('#keyList').prepend(box);box.querySelector('[data-cpnew]').onclick=()=>copyText(r.key);}
     toast('Key created ✓','ok');
   }catch(e){toast('Create failed','bad');}
 };
 
-// save buttons
 async function saveSettings(keys,lbl){const body={};keys.forEach(k=>{const el=$('[data-set="'+k+'"]');if(el)body[k]=el.value;});await api('/admin/settings',body);toast((lbl||'Settings')+' saved','ok');}
 $('#saveTimers').onclick=()=>saveSettings(['read_timeout','connect_timeout','max_retries','retry_initial_delay','retry_max_delay','keepalive_idle','keepalive_intvl','keepalive_cnt'],'Timers');
-// public endpoint URL copy (Endpoints tab)
 $('#cpPublic')&&($('#cpPublic').onclick=()=>copyText($('#publicUrl').value));
 
 $('#addProxy').onclick=async()=>{
@@ -783,9 +748,7 @@ $('#addProxy').onclick=async()=>{
     ['newHost','newPort','newUser','newPass'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});await refresh();}
   catch(e){toast('Invalid: '+e.message,'bad');}
 };
-// proxy search + show-N + pagination
 $('#prxSearch')&&$('#prxSearch').addEventListener('input',e=>{PRX.q=e.target.value;PRX.page=0;renderProxies();});
-// file upload (click + drag&drop) — sends raw text, backend auto-detects format
 function handleProxyFile(file){
   const rd=new FileReader();
   rd.onload=async()=>{
@@ -804,8 +767,8 @@ if($('#upDrop')){
   dz.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)handleProxyFile(f);});
 }
 $('#addEndpoint').onclick=async()=>{
-  const url=$('#epUrl').value.trim();if(!url){toast('URL required','bad');return;}
-  try{await api('/admin/endpoint/add',{url,api_mode:$('#epMode').dataset.val,api_key:$('#epKey').value.trim()});toast('Endpoint added ✓','ok');$('#epUrl').value='';$('#epKey').value='';await refresh();}
+  const u=$('#epUrl').value.trim();if(!u){toast('URL required','bad');return;}
+  try{await api('/admin/endpoint/add',{url:u,api_mode:$('#epMode').dataset.val,api_key:$('#epKey').value.trim(),model_override:$('#epModel').value.trim()});toast('Endpoint added ✓','ok');$('#epUrl').value='';$('#epKey').value='';$('#epModel').value='';await refresh();}
   catch(e){toast('Failed: '+e.message,'bad');}
 };
 $('#addKw').onclick=async()=>{

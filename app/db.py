@@ -39,6 +39,8 @@ DEFAULT_SETTINGS = {
     # --- retry backoff (Claude Code SDK formula: min(initial*2^n, max) + jitter) ---
     "retry_initial_delay": "1.0",                 # seconds before first retry
     "retry_max_delay": "8.0",                     # cap on the backoff delay
+    "global_model_override": "",                  # Override model id globally
+    "claude_mimicry": "1",                        # 1 = Full A-to-Z node/claude-cli mimicry
     # --- TCP keepalive on the proxy tunnel (covers slow upstream "thinking") ---
     "keepalive_idle": "30",                       # seconds idle before first probe
     "keepalive_intvl": "5",                       # seconds between probes
@@ -106,7 +108,8 @@ def _init(c):
             enabled   INTEGER DEFAULT 1,
             priority  INTEGER DEFAULT 0,                     -- lower = tried first
             status    TEXT    DEFAULT 'unknown',
-            note      TEXT    DEFAULT ''
+            note      TEXT    DEFAULT '',
+            model_override TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS api_keys (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +147,8 @@ def _init(c):
         c.execute("ALTER TABLE endpoints ADD COLUMN is_primary INTEGER DEFAULT 0")
     if "name" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN name TEXT DEFAULT ''")
+    if "model_override" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN model_override TEXT DEFAULT ''")
     # logs: add ip / model / detail for the log-detail view
     lcols = [r[1] for r in c.execute("PRAGMA table_info(logs)").fetchall()]
     if "ip" not in lcols:
@@ -327,20 +332,20 @@ def list_endpoints():
             "SELECT * FROM endpoints ORDER BY priority, id").fetchall()]
 
 
-def add_endpoint(url, api_mode="anthropic_messages", api_key=""):
+def add_endpoint(url, api_mode="anthropic_messages", api_key="", model_override=""):
     with _lock:
         c = conn()
         # new endpoint goes last in priority
         nxt = c.execute("SELECT COALESCE(MAX(priority),0)+1 FROM endpoints").fetchone()[0]
-        c.execute("INSERT OR IGNORE INTO endpoints(url, api_mode, api_key, priority) VALUES (?,?,?,?)",
-                  (url, api_mode, api_key, nxt))
+        c.execute("INSERT OR IGNORE INTO endpoints(url, api_mode, api_key, model_override, priority) VALUES (?,?,?,?,?)",
+                  (url, api_mode, api_key, model_override, nxt))
         c.commit()
         return c.total_changes
 
 
 def update_endpoint(eid, **fields):
-    allowed = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name"}
-    fields = {k: v for k, v in fields.items() if k in allowed}
+    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override"}
+    fields = {k: v for k, v in fields.items() if k in allowed_ENDPOINT_COLS}
     if not fields:
         return
     cols = ", ".join(f"{k}=?" for k in fields)
