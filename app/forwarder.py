@@ -544,10 +544,10 @@ async def forward(request, path):
                  or (request.client.host if request.client else ""))
 
     if require_key and gateway_key:
-        ck = request.headers.get("x-api-key", "")
-        auth = request.headers.get("authorization", "")
+        ck = request.headers.get("x-api-key", "").strip()
+        auth = request.headers.get("authorization", "").strip()
         if not ck and auth.lower().startswith("bearer "):
-            ck = auth[7:]
+            ck = auth[7:].strip()
         # accept the global gateway key OR any enabled custom key (mugen_*)
         ok_key = (ck == gateway_key)
         if not ok_key and ck:

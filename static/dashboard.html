@@ -704,7 +704,14 @@ function renderLogs(){
     const ms=l.ms?(l.ms>=1000?(l.ms/1000).toFixed(1)+'s':l.ms+'ms'):'';
     let note=(l.note||'');if(note.length>30)note=note.slice(0,30)+'…';
     const ep=l.endpoint?' · '+l.endpoint:'';
-    return`<div class="log" data-logi="${i}" style="cursor:pointer">${logTag(l.source)}<span class="code ${c}">${l.status}</span><span class="ld">${note}${l.attempts&&l.attempts>1?' · att '+l.attempts:''}${ep} ${ms?'· '+ms:''}</span><span class="lt">${t}</span><span style="color:var(--ink-faint);font-size:14px;margin-left:4px">›</span></div>`;
+    let dbox='';
+    if(l.status>=400 && l.detail){
+      dbox=`<div style="margin-top:6px;padding:8px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;color:#991b1b;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;white-space:pre-wrap;word-break:break-word;">${l.detail.replace(/</g,'&lt;')}</div>`;
+    }
+    return`<div class="log" data-logi="${i}" style="cursor:pointer;flex-direction:column;align-items:stretch;">
+      <div style="display:flex;align-items:center;width:100%">${logTag(l.source)}<span class="code ${c}">${l.status}</span><span class="ld">${note}${l.attempts&&l.attempts>1?' · att '+l.attempts:''}${ep} ${ms?'· '+ms:''}</span><span class="lt">${t}</span><span style="color:var(--ink-faint);font-size:14px;margin-left:4px">›</span></div>
+      ${dbox}
+    </div>`;
   }).join('')||'<div class="muted">No requests yet.</div>';
   $$('#logList [data-logi]').forEach(el=>el.onclick=()=>openLogDetail(logs[+el.dataset.logi]));
 }
