@@ -27,7 +27,7 @@ DEFAULT_SETTINGS = {
     "gateway_key": "",                            # key clients must present to THIS gateway
     "upstream_key": "",                           # key the gateway sends upstream (defaults to gateway_key)
     "require_client_key": "1",                    # 1 = clients must send the gateway_key
-    "admin_password": "claude",                   # dashboard password (CHANGE THIS)
+    "admin_password": "12345678",                 # dashboard password (CHANGE THIS)
     "model_note": "claude-opus-4-8",              # informational
     "max_retries": "10",                          # max attempts per request (same proxy or rotation)
     "connect_timeout": "20",                      # seconds to establish the proxy connection

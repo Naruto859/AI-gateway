@@ -66,19 +66,15 @@ def ordered_for_request(max_n):
         return [enabled[0]] * retries
 
     # ---- auto rotation ON: pinned first, then the rest as failover ----
-    # Each distinct proxy is still retried a couple of times before moving on, so a
-    # transient WAF/timeout on the current IP recovers in place; a hard failure rolls
-    # to the next IP. Order: pinned (if any) -> health-sorted rest.
+    # True round-robin: shift the list before stable-sorting by health.
     rest = [p for p in enabled if not (pinned and p["id"] == pinned["id"])]
-    rest.sort(key=lambda p: _RANK.get(p["status"], 3))
+    if rest:
+        idx = _next_start(len(rest))
+        rest = rest[idx:] + rest[:idx]
+        rest.sort(key=lambda p: _RANK.get(p["status"], 3))
+    
     ordered = ([pinned] if pinned else []) + rest
-    # build the attempt list: 2 in-place tries per proxy, capped at `retries`
-    seq = []
-    for p in ordered:
-        seq.append(p); seq.append(p)
-        if len(seq) >= retries:
-            break
-    return seq[:retries] if seq else [enabled[0]] * retries
+    return ordered[:retries] if ordered else [enabled[0]] * retries
 
 
 def mark_good(pid, latency_ms=0):

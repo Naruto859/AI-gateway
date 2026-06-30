@@ -726,7 +726,10 @@ async def forward(request, path):
                                        attempts=attempts, stream=1, redactions=redactions,
                                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                                        ip=client_ip, model=req_model, endpoint=tgt["name"])
-                            await _retry_backoff(attempts)
+                            if "WAF" in detail or "Error" in detail or "Timeout" in detail or "non-SSE" in detail:
+                                pass
+                            else:
+                                await _retry_backoff(attempts)
                         # finished this target (upstream-rejected or all proxies failed) -> next target
                         if not upstream_rejected:
                             detail = detail or f"all proxies failed for {tgt['name']}"
@@ -779,7 +782,10 @@ async def forward(request, path):
                         r = await client.send(req, stream=True)
                         if _is_waf(r.headers) or r.status_code >= 500:
                             await r.aclose(); await client.aclose()
-                            proxy_pool.mark_bad(p["id"], "waf/5xx"); detail = f"{r.status_code} via {p['url']}"; await _retry_backoff(attempts); continue
+                            proxy_pool.mark_bad(p["id"], "waf/5xx"); detail = f"{r.status_code} via {p['url']}"
+                            if _is_waf(r.headers): pass
+                            else: await _retry_backoff(attempts)
+                            continue
                         if r.status_code >= 400:
                             # upstream rejection -> next target
                             await r.aclose(); await client.aclose()
@@ -801,7 +807,7 @@ async def forward(request, path):
                         detail = f"{type(e).__name__} via {p['url']}"
                         if forwarded:
                             return
-                        proxy_pool.mark_bad(p["id"], "conn"); await _retry_backoff(attempts); continue
+                        proxy_pool.mark_bad(p["id"], "conn"); continue
             yield ("event: error\ndata: " + json.dumps(
                 {"type": "error", "error": {"type": "api_error", "message": f"All proxies failed. {detail}"}}
             ) + "\n\n").encode()
@@ -841,7 +847,10 @@ async def forward(request, path):
                        attempts=attempts, stream=0, redactions=redactions,
                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                        ip=client_ip, model=req_model, endpoint=tgt["name"])
-            await _retry_backoff(attempts)
+            if "WAF" in detail or "Error" in detail or "Timeout" in detail or "non-SSE" in detail:
+                pass
+            else:
+                await _retry_backoff(attempts)
         if not upstream_rejected:
             detail = detail or f"all proxies failed for {tgt['name']}"
     # all targets exhausted
