@@ -496,9 +496,18 @@ async def test_endpoint(url, api_mode, api_key, model, message):
         full = url.rstrip("/") + ("/v1/messages" if "/v1/messages" not in url else "")
         body = {"model": model, "max_tokens": 20,
                 "messages": [{"role": "user", "content": message}]}
-        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01",
-                   "content-type": "application/json",
-                   "user-agent": "claude-cli/2.1.177 (external, cli)"}
+        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        if db.get_setting("claude_mimicry", "1") == "1":
+            headers["user-agent"] = "claude-cli/2.1.177 (external, cli)"
+            headers["x-stainless-lang"] = "node"
+            headers["x-stainless-package-version"] = "0.33.1"
+            headers["x-stainless-os"] = "linux"
+            headers["x-stainless-arch"] = "x64"
+            headers["x-stainless-runtime"] = "node"
+            headers["x-stainless-runtime-version"] = "v22.13.0"
+            headers["anthropic-beta"] = "claude-code-20250219,fine-grained-tool-streaming-2025-05-14,prompt-caching-2025-07-21,context-1m-2025-08-07"
+        else:
+            headers["user-agent"] = "claude-cli/2.1.177 (external, cli)"
     payload = json.dumps(body).encode()
     t0 = time.time()
     detail = ""
