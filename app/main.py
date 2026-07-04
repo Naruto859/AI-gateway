@@ -116,11 +116,31 @@ async def health():
 
 
 # ---------------- admin API ----------------
+_failed_logins = {}
+
 @app.post("/admin/login")
-async def login(payload: dict):
+async def login(payload: dict, request: Request):
+    ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or (request.client.host if request.client else "unknown"))
+    now = time.time()
+    
+    record = _failed_logins.get(ip, {"count": 0, "blocked_until": 0})
+    if now < record["blocked_until"]:
+        raise HTTPException(status_code=429, detail="IP blocked for 5 hours due to too many failed attempts")
+        
     pw = db.get_setting("admin_password", "")
     ok = (payload.get("password", "") == pw) or not pw
-    return {"ok": ok}
+    
+    if ok:
+        if ip in _failed_logins:
+            del _failed_logins[ip]
+        return {"ok": True}
+    else:
+        record["count"] += 1
+        if record["count"] >= 5:
+            record["blocked_until"] = now + (5 * 3600)
+        _failed_logins[ip] = record
+        return {"ok": False}
 
 
 @app.get("/admin/state")
