@@ -386,7 +386,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div style="font-size:14px;font-weight:720;color:#1a1c1e">Mugen</div>
 <div style="font-size:11px;color:var(--ink-faint);font-weight:500" id="agentBrain">Default Custom</div>
 </div>
-<button class="apicon" id="apTogBtn" title="Agent settings">⚙</button>
+<button class="apicon" id="apTogBtn" title="Agent settings" style="display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>
 <button class="apicon" id="agentClose" title="Close">✕</button>
 </div>
 <div class="apsettings hidden" id="agentSettings">
@@ -399,12 +399,12 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 </div>
 <button class="btn" id="agentSaveCfg" style="margin-top:4px">Save brain settings</button>
 </div>
-<div class="chatlog" id="agentLog"></div>
-<div class="chatin" style="padding:10px 14px; background:#fff;">
+<div class="chatlog" id="agentLog" style="flex:1 1 auto; overflow-y:auto;"></div>
+<div class="chatin" style="flex:none; padding:10px 14px; background:rgba(255,255,255,0.9);">
 <button class="apicon" id="agentAttach" title="attach image/file" style="margin-bottom:2px">📎</button>
 <input type="file" id="agentFile" accept="image/*,.txt,.md,.json,.csv,.zip" style="display:none">
-<textarea id="agentInput" placeholder="Ask Mugen…" rows="1" style="border-radius:18px; min-height:42px; margin:0; padding:12px 14px"></textarea>
-<button class="send" id="agentSend" style="border-radius:50%;width:42px;height:42px;box-shadow:0 4px 12px rgba(31,138,86,0.3);margin-bottom:2px;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
+<textarea id="agentInput" placeholder="Ask Mugen…" rows="1" style="border-radius:18px; min-height:42px; margin:0; padding:12px 14px; box-sizing:border-box;"></textarea>
+<button class="send" id="agentSend" style="border-radius:50%;width:42px;height:42px;box-shadow:0 4px 12px rgba(31,138,86,0.3);margin-bottom:2px;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
 </div>
 </div>
 <script>
@@ -858,7 +858,7 @@ function openAgent(){
 }
 function closeAgent(){$('#agentPanel').classList.remove('show');$('#agentFab').style.display='grid';}
 $('#agentFab').onclick=openAgent;$('#agentClose').onclick=closeAgent;
-$('#agentCfgBtn').onclick=()=>$('#agentSettings').classList.toggle('show');
+$('#apTogBtn').onclick=()=>$('#agentSettings').classList.toggle('show');
 // settings: mode toggle (off=default, on=custom)
 function syncAgentCfgUI(){
   const custom=AG.cfg.mode==='custom';
