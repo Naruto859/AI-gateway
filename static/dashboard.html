@@ -161,8 +161,8 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .aphd{display:flex;align-items:center;gap:9px;padding:15px 16px;border-bottom:1px solid rgba(0,0,0,0.05);background:transparent}
 .apicon{width:32px;height:32px;border:none;border-radius:10px;background:rgba(255,255,255,0.6);color:var(--ink-soft);cursor:pointer;font-size:16px;flex:none;border:1px solid rgba(0,0,0,0.05);transition:0.2s;box-shadow:0 2px 4px rgba(0,0,0,0.02)}
 .apicon:hover{background:#fff;transform:translateY(-1px);box-shadow:0 4px 8px rgba(0,0,0,0.04);color:var(--ink)}
-.apsettings{padding:12px 14px;border-bottom:1px solid rgba(0,0,0,0.05);background:rgba(255,255,255,0.4);display:none;max-height:50%;overflow:auto}
-.apsettings.show{display:block}
+.apsettings{position:absolute;inset:0;z-index:10;background:rgba(255,255,255,0.95);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);padding:16px;display:none;flex-direction:column;overflow:auto}
+.apsettings.show{display:flex}
 #agentLog{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
 .agentpanel .chatin{border-top:1px solid rgba(0,0,0,0.05);padding:14px 16px}
 .attbadge{align-self:flex-end;font-size:11px;color:var(--g-700);background:var(--g-50);border:1px solid var(--g-300);border-radius:8px;padding:3px 8px}
@@ -384,24 +384,29 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="aphd">
 <div style="flex:1">
 <div style="font-size:14px;font-weight:720;color:#1a1c1e">Mugen</div>
-<div style="font-size:11px;color:var(--ink-faint);font-weight:500" id="agentBrain">Default Custom</div>
+<div style="font-size:11px;color:var(--ink-faint);font-weight:500" id="agentBrain">Default Assistant</div>
 </div>
 <button class="apicon" id="apTogBtn" title="Agent settings" style="display:flex;align-items:center;justify-content:center"><svg style="pointer-events:none;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>
 <button class="apicon" id="agentClose" title="Close">✕</button>
 </div>
 <div class="apsettings" id="agentSettings">
-<div class="field" style="padding:8px 0"><div class="meta"><div class="lbl">Brain</div><div class="desc">Default uses this gateway. Custom uses your own model.</div></div><div class="ctrl"><div class="tg" id="agentMode"></div></div></div>
+<div style="display:flex;align-items:center;margin-bottom:16px;gap:8px;">
+<button class="apicon" id="apSetBack" title="Back" style="border:none;box-shadow:none;background:transparent;margin-left:-8px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></button>
+<h3 style="margin:0;font-size:16px;font-weight:700;">Assistant Settings</h3>
+</div>
+<div class="field" style="padding:8px 0"><div class="meta"><div class="lbl">Brain Mode</div><div class="desc">Default uses gateway. Assistant uses your own model.</div></div><div class="ctrl"><div class="tg" id="agentMode"></div></div></div>
 <div id="agentCustom" style="display:none">
+<div class="field" style="padding:8px 0;border-top:1px solid rgba(0,0,0,0.05)"><div class="meta"><div class="lbl">Direct Connection</div><div class="desc">Bypass proxies and connect from Server IP directly</div></div><div class="ctrl"><div class="tg" id="agentDirect"></div></div></div>
 <label class="fl">SDK</label><div class="csel wide" id="agentSdk" data-val="openai" style="margin-bottom:8px"><button class="csel-btn">OpenAI</button><div class="csel-pop"><div class="csel-opt sel" data-v="openai">OpenAI <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="anthropic">Anthropic</div></div></div>
 <label class="fl">Endpoint</label><input class="wide" id="agentEp" placeholder="https://api.provider.com/v1" style="margin-bottom:8px">
 <label class="fl">Model name</label><input class="wide" id="agentModel" placeholder="qwen-large" style="margin-bottom:8px">
 <label class="fl">API key</label><input class="wide" id="agentKey" type="password" placeholder="sk-..." style="margin-bottom:8px">
 </div>
-<button class="btn" id="agentSaveCfg" style="margin-top:4px">Save brain settings</button>
+<button class="btn" id="agentSaveCfg" style="margin-top:auto">Save settings</button>
 </div>
 <div class="chatlog" id="agentLog" style="flex:1 1 auto; overflow-y:auto;"></div>
 <div class="chatin" style="flex:none; padding:10px 14px; background:rgba(255,255,255,0.9);">
-<button class="apicon" id="agentAttach" title="attach image/file" style="margin-bottom:2px">📎</button>
+<button class="apicon" id="agentAttach" title="attach image/file" style="margin-bottom:3px">📎</button>
 <input type="file" id="agentFile" accept="image/*,.txt,.md,.json,.csv,.zip" style="display:none">
 <textarea id="agentInput" placeholder="Ask Mugen…" rows="1" style="border-radius:18px; min-height:42px; margin:0; padding:12px 14px; box-sizing:border-box;"></textarea>
 <button class="send" id="agentSend" style="border-radius:50%;width:42px;height:42px;box-shadow:0 4px 12px rgba(31,138,86,0.3);margin-bottom:2px;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg style="pointer-events:none;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
@@ -849,7 +854,8 @@ $('#chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){
 
 // ============ EMBEDDED AGENT ============
 let AG={cfg:JSON.parse(localStorage.getItem('mr_agent')||'{}'),msgs:[],attach:null,welcomed:false};
-function agentBrainLabel(){return AG.cfg.mode==='custom'?('Custom · '+(AG.cfg.model||'?')):'Default brain';}
+if(AG.cfg.direct===undefined)AG.cfg.direct=true;
+function agentBrainLabel(){return AG.cfg.mode==='custom'?('Assistant · '+(AG.cfg.model||'?')):'Default brain';}
 function openAgent(){
   $('#agentPanel').classList.add('show');$('#agentFab').style.display='none';
   $('#agentBrain').textContent=agentBrainLabel();
@@ -858,11 +864,13 @@ function openAgent(){
 }
 function closeAgent(){$('#agentPanel').classList.remove('show');$('#agentFab').style.display='grid';}
 $('#agentFab').onclick=openAgent;$('#agentClose').onclick=closeAgent;
-$('#apTogBtn').onclick=()=>$('#agentSettings').classList.toggle('show');
+$('#apTogBtn').onclick=()=>$('#agentSettings').classList.add('show');
+$('#apSetBack').onclick=()=>$('#agentSettings').classList.remove('show');
 // settings: mode toggle (off=default, on=custom)
 function syncAgentCfgUI(){
   const custom=AG.cfg.mode==='custom';
   $('#agentMode').classList.toggle('on',custom);
+  $('#agentDirect').classList.toggle('on',AG.cfg.direct!==false);
   $('#agentCustom').style.display=custom?'block':'none';
   if(AG.cfg.endpoint)$('#agentEp').value=AG.cfg.endpoint;
   if(AG.cfg.model)$('#agentModel').value=AG.cfg.model;
@@ -870,10 +878,11 @@ function syncAgentCfgUI(){
   if(AG.cfg.sdk){const c=$('#agentSdk');c.dataset.val=AG.cfg.sdk;c.querySelector('.csel-btn').textContent=AG.cfg.sdk==='anthropic'?'Anthropic':'OpenAI';}
 }
 $('#agentMode').onclick=()=>{AG.cfg.mode=(AG.cfg.mode==='custom')?'default':'custom';syncAgentCfgUI();};
+$('#agentDirect').onclick=()=>{AG.cfg.direct=!AG.cfg.direct;syncAgentCfgUI();};
 $('#agentSaveCfg').onclick=()=>{
   if($('#agentMode').classList.contains('on')){
-    AG.cfg={mode:'custom',sdk:$('#agentSdk').dataset.val,endpoint:$('#agentEp').value.trim(),model:$('#agentModel').value.trim(),api_key:$('#agentKey').value.trim()};
-  }else AG.cfg={mode:'default'};
+    AG.cfg={mode:'custom',sdk:$('#agentSdk').dataset.val,endpoint:$('#agentEp').value.trim(),model:$('#agentModel').value.trim(),api_key:$('#agentKey').value.trim(),direct:AG.cfg.direct};
+  }else AG.cfg={mode:'default',direct:AG.cfg.direct};
   localStorage.setItem('mr_agent',JSON.stringify(AG.cfg));
   $('#agentBrain').textContent=agentBrainLabel();$('#agentSettings').classList.remove('show');
   toast('Brain settings saved','ok');

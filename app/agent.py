@@ -169,7 +169,16 @@ async def _chat_openai(messages, brain, actions, max_rounds):
     tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
               "parameters": t["parameters"]}} for t in TOOLS]
     msgs = [{"role": "system", "content": _load_prompt()}] + messages
-    async with httpx.AsyncClient(timeout=httpx.Timeout(90.0)) as client:
+    proxy_url = None
+    if not brain.get("direct", True) and "127.0.0.1" not in url and "localhost" not in url:
+        import random
+        px = db.list_proxies()
+        ok_px = [p for p in px if p["status"] == "ok"] or px
+        if ok_px:
+            p = random.choice(ok_px)
+            proxy_url = f"http://{p['user']}:{p['password']}@{p['host']}:{p['port']}"
+            
+    async with httpx.AsyncClient(timeout=httpx.Timeout(90.0), proxy=proxy_url) as client:
         for _ in range(max_rounds):
             body = {"model": brain["model"], "messages": msgs, "tools": tools, "max_tokens": 1024}
             r = await client.post(url, headers=headers, content=json.dumps(body))
@@ -201,7 +210,16 @@ async def _chat_anthropic(messages, brain, actions, max_rounds):
              for t in TOOLS]
     # anthropic content blocks
     conv = [{"role": m["role"], "content": m["content"]} for m in messages]
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+    proxy_url = None
+    if not brain.get("direct", True) and "127.0.0.1" not in url and "localhost" not in url:
+        import random
+        px = db.list_proxies()
+        ok_px = [p for p in px if p["status"] == "ok"] or px
+        if ok_px:
+            p = random.choice(ok_px)
+            proxy_url = f"http://{p['user']}:{p['password']}@{p['host']}:{p['port']}"
+            
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0), proxy=proxy_url) as client:
         for _ in range(max_rounds):
             body = {"model": brain["model"], "system": _load_prompt(), "messages": conv,
                     "tools": tools, "max_tokens": 1024}
