@@ -148,21 +148,23 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .msg.u{align-self:flex-end;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;border-bottom-right-radius:4px}
 .msg.a{align-self:flex-start;background:var(--g-50);color:var(--ink);border:1px solid var(--line);border-bottom-left-radius:4px}
 .msg.sys{align-self:center;background:#fdf0d8;color:#b8841f;font-size:11.5px;font-weight:600;border-radius:8px;padding:5px 10px}
-.chatin{padding:12px 14px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-end}
-.chatin textarea{flex:1;resize:none;font:inherit;font-size:13.5px;border:1px solid var(--line);border-radius:11px;padding:9px 12px;max-height:90px;min-height:40px}
+.chatin{padding:12px 14px;border-top:1px solid rgba(0,0,0,0.05);display:flex;gap:8px;align-items:flex-end;background:rgba(255,255,255,0.5)}
+.chatin textarea{flex:1;resize:none;font:inherit;font-size:13.5px;border:1px solid rgba(0,0,0,0.08);border-radius:14px;padding:11px 14px;max-height:90px;min-height:40px;background:rgba(255,255,255,0.7);transition:all 0.2s;box-shadow:inset 0 1px 3px rgba(0,0,0,0.02)}
+.chatin textarea:focus{background:#fff;border-color:var(--c-mint-d);box-shadow:0 0 0 3px rgba(63,158,120,.12),inset 0 1px 3px rgba(0,0,0,0.02);outline:none}
 .chatin .send{width:40px;height:40px;border:none;border-radius:11px;background:linear-gradient(145deg,var(--g-500),var(--g-600));color:#fff;cursor:pointer;flex:none;font-size:16px}
 /* agent fab + panel */
-.fab{position:fixed;right:18px;bottom:18px;width:56px;height:56px;border-radius:50%;border:none;cursor:pointer;z-index:900;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;box-shadow:0 8px 24px rgba(31,138,86,.4);display:grid;place-items:center;transition:.2s}
-.fab:hover{transform:scale(1.07)}.fab svg{width:24px;height:24px}
-.agentpanel{position:fixed;right:18px;bottom:18px;width:min(380px,calc(100vw - 28px));height:min(560px,calc(100vh - 90px));background:#fff;border-radius:20px;box-shadow:0 24px 70px rgba(20,40,50,.34);z-index:901;display:none;flex-direction:column;overflow:hidden;animation:rise .3s ease both;contain:paint}
+.wide { width: 100%; box-sizing: border-box; }
+.fab{position:fixed;right:18px;bottom:18px;width:56px;height:56px;border-radius:50%;border:none;cursor:pointer;z-index:900;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;box-shadow:0 8px 24px rgba(31,138,86,.4);display:grid;place-items:center;transition:.3s cubic-bezier(0.175,0.885,0.32,1.275)}
+.fab:hover{transform:scale(1.1) rotate(4deg)}.fab svg{width:24px;height:24px}
+.agentpanel{position:fixed;right:18px;bottom:18px;width:min(380px,calc(100vw - 28px));height:min(580px,calc(100vh - 90px));background:rgba(255,255,255,0.85);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.6);border-radius:24px;box-shadow:0 30px 80px rgba(0,0,0,0.2),0 0 0 1px rgba(0,0,0,0.05);z-index:901;display:none;flex-direction:column;overflow:hidden;animation:rise .4s cubic-bezier(0.16,1,0.3,1) both;contain:paint}
 .agentpanel.show{display:flex}
-.aphd{display:flex;align-items:center;gap:9px;padding:13px 14px;border-bottom:1px solid var(--line);background:var(--g-50)}
-.apicon{width:30px;height:30px;border:none;border-radius:9px;background:#fff;color:var(--ink-soft);cursor:pointer;font-size:16px;flex:none;border:1px solid var(--line)}
-.apicon:hover{background:var(--g-100)}
-.apsettings{padding:12px 14px;border-bottom:1px solid var(--line);background:#fbfdfc;display:none;max-height:50%;overflow:auto}
+.aphd{display:flex;align-items:center;gap:9px;padding:15px 16px;border-bottom:1px solid rgba(0,0,0,0.05);background:transparent}
+.apicon{width:32px;height:32px;border:none;border-radius:10px;background:rgba(255,255,255,0.6);color:var(--ink-soft);cursor:pointer;font-size:16px;flex:none;border:1px solid rgba(0,0,0,0.05);transition:0.2s;box-shadow:0 2px 4px rgba(0,0,0,0.02)}
+.apicon:hover{background:#fff;transform:translateY(-1px);box-shadow:0 4px 8px rgba(0,0,0,0.04);color:var(--ink)}
+.apsettings{padding:12px 14px;border-bottom:1px solid rgba(0,0,0,0.05);background:rgba(255,255,255,0.4);display:none;max-height:50%;overflow:auto}
 .apsettings.show{display:block}
-#agentLog{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:9px}
-.agentpanel .chatin{border-top:1px solid var(--line)}
+#agentLog{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.agentpanel .chatin{border-top:1px solid rgba(0,0,0,0.05);padding:14px 16px}
 .attbadge{align-self:flex-end;font-size:11px;color:var(--g-700);background:var(--g-50);border:1px solid var(--g-300);border-radius:8px;padding:3px 8px}
 .apavatar{width:30px;height:30px;border-radius:9px;background:linear-gradient(145deg,var(--g-400),var(--g-600));display:grid;place-items:center;flex:none}
 .apavatar svg{width:17px;height:17px}
@@ -379,11 +381,15 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <!-- AGENT FAB + PANEL -->
 <button class="fab" id="agentFab" title="Mugen assistant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></button>
 <div class="agentpanel" id="agentPanel">
-<div class="aphd"><div class="apavatar"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
-<div style="flex:1"><div style="font-size:13.5px;font-weight:720">Mugen Assistant</div><div style="font-size:10.5px;color:var(--ink-faint)" id="agentBrain">Default brain</div></div>
-<button class="apicon" id="agentCfgBtn" title="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
-<button class="apicon" id="agentClose" title="close">×</button></div>
-<div class="apsettings" id="agentSettings">
+<div class="aphd">
+<div style="flex:1">
+<div style="font-size:14px;font-weight:720;color:#1a1c1e">Mugen</div>
+<div style="font-size:11px;color:var(--ink-faint);font-weight:500" id="agentBrain">Default Custom</div>
+</div>
+<button class="apicon" id="apTogBtn" title="Agent settings">⚙</button>
+<button class="apicon" onclick="$('#agentPanel').classList.remove('show')" title="Close">✕</button>
+</div>
+<div class="apsettings hidden" id="agentSettings">
 <div class="field" style="padding:8px 0"><div class="meta"><div class="lbl">Brain</div><div class="desc">Default uses this gateway. Custom uses your own model.</div></div><div class="ctrl"><div class="tg" id="agentMode"></div></div></div>
 <div id="agentCustom" style="display:none">
 <label class="fl">SDK</label><div class="csel wide" id="agentSdk" data-val="openai" style="margin-bottom:8px"><button class="csel-btn">OpenAI</button><div class="csel-pop"><div class="csel-opt sel" data-v="openai">OpenAI <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="anthropic">Anthropic</div></div></div>
@@ -397,8 +403,8 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="chatin">
 <button class="apicon" id="agentAttach" title="attach image/file">📎</button>
 <input type="file" id="agentFile" accept="image/*,.txt,.md,.json,.csv,.zip" style="display:none">
-<textarea id="agentInput" placeholder="Ask Mugen… (add proxies, diagnose errors)" rows="1"></textarea>
-<button class="send" id="agentSend">↑</button>
+<textarea id="agentInput" placeholder="Ask Mugen…" rows="1" style="border-radius:18px"></textarea>
+<button class="send" id="agentSend" style="border-radius:50%;width:42px;height:42px;box-shadow:0 4px 12px rgba(31,138,86,0.3)">↑</button>
 </div>
 </div>
 <script>

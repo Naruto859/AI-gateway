@@ -595,7 +595,7 @@ async def forward(request, path):
     if blocked_kw is not None:
         db.add_log(method=request.method, path=path, status=400, proxy="", attempts=0,
                    stream=0, redactions=0, ms=0, note="blocked by content filter",
-                   ip=client_ip, model=req_model)
+                   ip=client_ip, model=tgt.get("model_override") or req_model)
         return _err("Request blocked by content filter.", 400, "invalid_request_error")
 
     # Strip echoed thinking blocks from history — agentrouter's schema rejects them
@@ -614,7 +614,7 @@ async def forward(request, path):
     if not base_candidates:
         db.add_log(method=request.method, path=path, status=503, proxy="", attempts=0,
                    stream=0, redactions=0, ms=0, note="no usable proxies",
-                   ip=client_ip, model=req_model)
+                   ip=client_ip, model=tgt.get("model_override") or req_model)
         return _err("No usable proxies configured.", 503)
     t0 = time.time()
 
@@ -722,7 +722,7 @@ async def forward(request, path):
                                 _log(method=request.method, path=path, status=200, proxy=p["url"],
                                            attempts=attempts, stream=1, redactions=redactions,
                                            ms=int((time.time() - t0) * 1000), note="ok(buffered)",
-                                           ip=client_ip, model=req_model, endpoint=tgt["name"])
+                                           ip=client_ip, model=tgt.get("model_override") or req_model, endpoint=tgt["name"])
                                 logged = True
                                 return
                             if res[0] == "error":
@@ -734,7 +734,7 @@ async def forward(request, path):
                             _log(method=request.method, path=path, status=502, proxy=p["url"],
                                        attempts=attempts, stream=1, redactions=redactions,
                                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
-                                       ip=client_ip, model=req_model, endpoint=tgt["name"])
+                                       ip=client_ip, model=tgt.get("model_override") or req_model, endpoint=tgt["name"])
                             if "WAF" in detail or "Error" in detail or "Timeout" in detail or "non-SSE" in detail:
                                 pass
                             else:
@@ -748,7 +748,7 @@ async def forward(request, path):
                         _log(method=request.method, path=path, status=status, proxy=purl,
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
-                                   ip=client_ip, model=req_model, endpoint=tname,
+                                   ip=client_ip, model=tgt.get("model_override") or req_model, endpoint=tname,
                                    detail=json.dumps(err)[:1500])
                         logged = True
                         yield _sse("error", err)
@@ -756,7 +756,7 @@ async def forward(request, path):
                     _log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                                stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000),
                                note=f"all targets failed: {detail}",
-                               ip=client_ip, model=req_model, endpoint="", detail=str(detail)[:1500])
+                               ip=client_ip, model=tgt.get("model_override") or req_model, endpoint="", detail=str(detail)[:1500])
                     logged = True
                     yield _sse("error", {"type": "error", "error": {"type": "api_error",
                               "message": f"All proxies failed. {detail}"}})
@@ -767,7 +767,7 @@ async def forward(request, path):
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000),
                                    note=f"client disconnected: {detail or 'mid-retry'}",
-                                   ip=client_ip, model=req_model, endpoint=last_tgt_name)
+                                   ip=client_ip, model=tgt.get("model_override") or req_model, endpoint=last_tgt_name)
 
             return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -808,7 +808,7 @@ async def forward(request, path):
                         _log(method=request.method, path=path, status=200, proxy=p["url"],
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000), note="ok(relay)",
-                                   ip=client_ip, model=req_model, endpoint=tgt["name"])
+                                   ip=client_ip, model=tgt.get("model_override") or req_model, endpoint=tgt["name"])
                         return
                     except Exception as e:
                         try: await client.aclose()
@@ -845,7 +845,7 @@ async def forward(request, path):
                     _log(method=request.method, path=path, status=status, proxy=p["url"],
                                attempts=attempts, stream=0, redactions=redactions,
                                ms=int((time.time() - t0) * 1000), note="ok(assembled)",
-                               ip=client_ip, model=req_model, endpoint=tgt["name"])
+                               ip=client_ip, model=tgt.get("model_override") or req_model, endpoint=tgt["name"])
                     return Response(content=payload, status_code=status, media_type=ct)
                 # upstream rejection (4xx) -> remember, switch to next TARGET
                 last = (status, ct, payload, tgt["name"], p["url"])
@@ -855,7 +855,7 @@ async def forward(request, path):
             _log(method=request.method, path=path, status=502, proxy=p["url"],
                        attempts=attempts, stream=0, redactions=redactions,
                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
-                       ip=client_ip, model=req_model, endpoint=tgt["name"])
+                       ip=client_ip, model=tgt.get("model_override") or req_model, endpoint=tgt["name"])
             if "WAF" in detail or "Error" in detail or "Timeout" in detail or "non-SSE" in detail:
                 pass
             else:
@@ -868,11 +868,11 @@ async def forward(request, path):
         _log(method=request.method, path=path, status=status, proxy=purl,
                    attempts=attempts, stream=0, redactions=redactions,
                    ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
-                   ip=client_ip, model=req_model, endpoint=tname,
+                   ip=client_ip, model=tgt.get("model_override") or req_model, endpoint=tname,
                    detail=payload[:1500].decode("utf-8", "replace"))
         return Response(content=payload, status_code=status, media_type=ct)
     _log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                stream=0, redactions=redactions, ms=int((time.time() - t0) * 1000),
                note=f"all targets failed: {detail}",
-               ip=client_ip, model=req_model, endpoint="", detail=str(detail)[:1500])
+               ip=client_ip, model=tgt.get("model_override") or req_model, endpoint="", detail=str(detail)[:1500])
     return _err(f"All proxies failed. {detail}", 503)

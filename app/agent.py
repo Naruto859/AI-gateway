@@ -49,10 +49,14 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "api_mode": {"type": "string"}, "api_key": {"type": "string"}}, "required": ["url"]}},
     {"name": "add_filter", "description": "Add a content filter keyword. mode is 'redact' or 'block'.",
      "parameters": {"type": "object", "properties": {"value": {"type": "string"}, "mode": {"type": "string"}}, "required": ["value"]}},
-    {"name": "set_setting", "description": "Change a gateway setting (e.g. auto_rotation, read_timeout, max_retries).",
+    {"name": "set_setting", "description": "Change a gateway setting (e.g. auto_rotation, read_timeout, max_retries, claude_mimicry).",
      "parameters": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}},
     {"name": "recent_logs", "description": "Read the most recent request logs to diagnose errors.",
      "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
+    {"name": "delete_all_proxies", "description": "Delete ALL proxies from the database.",
+     "parameters": {"type": "object", "properties": {}}},
+    {"name": "process_file_link", "description": "Download a file from a URL, extract IPs, and add them.",
+     "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
 ]
 
 
@@ -108,6 +112,18 @@ async def _run_tool(name, args):
             return {"logs": [{"status": l["status"], "note": l["note"], "model": l.get("model"),
                               "ip": l.get("ip"), "detail": (l.get("detail") or "")[:300],
                               "ms": l["ms"]} for l in logs]}
+        if name == "delete_all_proxies":
+            with db.get_db() as conn:
+                conn.execute("DELETE FROM proxies")
+                conn.commit()
+            return {"ok": True, "message": "All proxies deleted"}
+        if name == "process_file_link":
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get(args["url"])
+                text = r.text
+            urls = [u for u in (_normalize_proxy(l) for l in text.splitlines()) if u]
+            added = db.bulk_add(urls)
+            return {"added": added, "parsed": len(urls)}
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
     return {"error": "unknown tool"}
@@ -125,9 +141,10 @@ def _brain_config(cfg):
         }
     # default: go through THIS gateway (localhost) using the gateway key
     gk = db.get_setting("gateway_key", "")
+    port = os.environ.get("PORT", "8000")
     return {
         "sdk": "anthropic",
-        "endpoint": "http://127.0.0.1:8787",
+        "endpoint": f"http://127.0.0.1:{port}",
         "api_key": gk,
         "model": db.get_setting("model_note", "claude-sonnet-4-6"),
         "direct": False,
