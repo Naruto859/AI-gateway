@@ -10,6 +10,7 @@ Design goals (per user):
 import time
 import threading
 import httpx
+import asyncio
 from . import db
 
 _rr = {"i": 0}
@@ -17,6 +18,48 @@ _rr_lock = threading.Lock()
 
 _RANK = {"ok": 0, "unknown": 1, "unhealthy": 2}
 
+
+async def neutral_ping(proxy_url, timeout=5.0):
+    """Fast, token-free test against Google to check basic connectivity and latency."""
+    t0 = time.time()
+    try:
+        async with httpx.AsyncClient(proxy=proxy_url, verify=False, timeout=timeout) as client:
+            res = await client.get("http://www.google.com/generate_204")
+            if res.status_code == 204:
+                return {"ok": True, "latency_ms": int((time.time() - t0) * 1000)}
+    except Exception:
+        pass
+    return {"ok": False, "latency_ms": 0}
+
+
+async def race_proxies(proxies, timeout=5.0):
+    """Parallel race: Ping all proxies, return the FIRST one that succeeds."""
+    if not proxies:
+        return None
+        
+    pending = []
+    # Create tasks for all proxies
+    for p in proxies:
+        async def _check(px=p):
+            res = await neutral_ping(px["url"], timeout=timeout)
+            if res["ok"]:
+                return (px, res["latency_ms"])
+            raise ValueError("failed ping")
+        pending.append(asyncio.create_task(_check()))
+        
+    while pending:
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            try:
+                px, lat = task.result()
+                # Cancel the rest immediately
+                for p_task in pending:
+                    p_task.cancel()
+                return {"proxy": px, "latency_ms": lat}
+            except Exception:
+                pass
+                
+    return None
 
 def _next_start(n):
     with _rr_lock:

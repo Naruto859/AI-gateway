@@ -158,21 +158,35 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .fab:hover{transform:scale(1.1) rotate(4deg)}.fab svg{width:24px;height:24px}
 .agentpanel{position:fixed;right:24px;bottom:0;width:min(380px,calc(100vw - 28px));height:min(580px,calc(100vh - 90px));background:rgba(255,255,255,0.85);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.6);border-bottom:none;border-radius:24px 24px 0 0;box-shadow:0 10px 80px rgba(0,0,0,0.2),0 0 0 1px rgba(0,0,0,0.05);z-index:901;display:none;flex-direction:column;overflow:hidden;animation:rise .4s cubic-bezier(0.16,1,0.3,1) both;contain:paint}
 .agentpanel.show{display:flex}
-.aphd{display:flex;align-items:center;gap:9px;padding:15px 16px;border-bottom:1px solid rgba(0,0,0,0.05);background:transparent}
+.aphd{display:flex;align-items:center;gap:9px;padding:15px 16px;border-bottom:1px solid rgba(0,0,0,0.05);background:var(--glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 20px 40px -10px rgba(0,0,0,0.10),0 8px 16px -8px rgba(0,0,0,0.08),inset 0 3px 6px rgba(255,255,255,0.85),inset 0 -3px 6px rgba(0,0,0,0.04);position:relative;z-index:2;border-radius:24px 24px 0 0;}
+.aphd::before { content:''; position:absolute; inset:0; border-radius:inherit; box-shadow:0 -10px 25px rgba(31,138,86,0.2); animation:glowPulse 4s infinite alternate; pointer-events:none; }
+@keyframes glowPulse { 0% { box-shadow:0 -10px 25px rgba(31,138,86,0.1); } 100% { box-shadow:0 -15px 35px rgba(16,185,129,0.3); } }
 .apicon{width:32px;height:32px;border:none;border-radius:10px;background:rgba(255,255,255,0.6);color:var(--ink-soft);cursor:pointer;font-size:16px;flex:none;border:1px solid rgba(0,0,0,0.05);transition:0.2s;box-shadow:0 2px 4px rgba(0,0,0,0.02)}
 .apicon:hover{background:#fff;transform:translateY(-1px);box-shadow:0 4px 8px rgba(0,0,0,0.04);color:var(--ink)}
 .apsettings{position:absolute;inset:0;z-index:10;background:rgba(255,255,255,0.95);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);padding:16px;display:none;flex-direction:column;overflow:auto}
 .apsettings.show{display:flex}
-#agentLog{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
-.agentpanel .chatin{border-top:1px solid rgba(0,0,0,0.05);padding:14px 16px}
+#agentLog{flex:1;overflow:auto;padding:16px 14px;display:flex;flex-direction:column;gap:12px}
+.agentpanel .chatin{border-top:1px solid rgba(0,0,0,0.05);padding:12px 14px;background:var(--glass);backdrop-filter:blur(28px);-webkit-backdrop-filter:blur(28px);box-shadow:0 -10px 30px rgba(0,0,0,0.03);}
 .attbadge{align-self:flex-end;font-size:11px;color:var(--g-700);background:var(--g-50);border:1px solid var(--g-300);border-radius:8px;padding:3px 8px}
-.apavatar{width:30px;height:30px;border-radius:9px;background:linear-gradient(145deg,var(--g-400),var(--g-600));display:grid;place-items:center;flex:none}
+.chatmsg{display:flex;flex-direction:column;max-width:92%;animation:msgIn .3s cubic-bezier(0.175, 0.885, 0.32, 1.275);line-height:1.45;font-size:14.5px;position:relative}
+.chatmsg.u{align-self:flex-end;background:var(--c-mint);color:#fff;border-radius:18px 18px 2px 18px;padding:10px 14px;box-shadow:0 4px 12px rgba(31,138,86,0.15)}
+.chatmsg.a{align-self:flex-start;background:#fff;color:var(--ink);border-radius:18px 18px 18px 2px;padding:10px 14px;border:1px solid rgba(0,0,0,0.06);box-shadow:0 4px 12px rgba(0,0,0,0.04)}
+.chatmsg.a pre{background:#f4f4f5;padding:8px;border-radius:8px;overflow-x:auto;font-size:12px;margin:8px 0}
+.term-block{background:#1e1e1e;color:#d4d4d4;border-radius:8px;padding:8px 12px;font-family:monospace;font-size:12px;margin-top:6px;border:1px solid #333;box-shadow:inset 0 2px 8px rgba(0,0,0,0.2);display:flex;flex-direction:column;gap:4px}
+.term-block-title{color:#4ec9b0;font-weight:bold;display:flex;align-items:center;gap:6px;cursor:pointer}
+.term-block-title:hover{color:#3dc9b0;}
+.term-block-body{white-space:pre-wrap;word-break:break-all;color:#cecece;display:none;margin-top:4px;border-top:1px solid #333;padding-top:4px}
+.term-block.open .term-block-body{display:block;}
+.thinking-dots{display:flex;align-items:center;gap:4px;padding:8px 4px;}
+.thinking-dots span{width:6px;height:6px;border-radius:50%;background:linear-gradient(135deg, var(--c-mint), #059669);animation:bounce 1.4s infinite ease-in-out both;}
+.thinking-dots span:nth-child(1){animation-delay:-0.32s;}
+.thinking-dots span:nth-child(2){animation-delay:-0.16s;}
+@keyframes bounce { 0%,80%,100%{transform:scale(0)} 40%{transform:scale(1)} }apavatar{width:30px;height:30px;border-radius:9px;background:linear-gradient(145deg,var(--g-400),var(--g-600));display:grid;place-items:center;flex:none}
 .apavatar svg{width:17px;height:17px}
 .apicon svg{width:16px;height:16px}
 .apsettings .fl{margin-top:10px}
 .apsettings input{width:100%;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:11px;padding:9px 12px;background:#fff}
 .apsettings input:focus{outline:none;border-color:var(--g-400);box-shadow:0 0 0 3px rgba(63,158,120,.14)}
-.apsettings .csel-btn{font-size:13px}
 .hidden{display:none!important}
 .muted{text-align:center;color:var(--ink-faint);font-size:13px;padding:18px}
 .login{position:fixed;inset:0;display:grid;place-items:center;z-index:100;padding:20px;background:#f0f6f2}
@@ -259,6 +273,10 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 </div>
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/></svg></span>Proxy pool <span id="prxCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+  <input type="checkbox" id="hotPoolToggle" style="width:16px;height:16px;accent-color:var(--c-mint);">
+  <label for="hotPoolToggle" style="font-size:13px;font-weight:600;color:var(--ink);">Hot Pool Only (hide unhealthy)</label>
+</div>
 <p class="sub">Tap ⟳ to test a proxy against the upstream endpoint.</p>
 <div class="prxbar">
 <input id="prxSearch" type="text" placeholder="🔍 Filter by IP / status…" autocomplete="off">
@@ -321,7 +339,6 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 </div>
 </div>
 </section>
-
 <!-- ENDPOINT SETTINGS MODAL -->
 <div class="modal" id="epSetModal">
 <div class="modalbox">
@@ -419,6 +436,40 @@ const cookieMatch = document.cookie.match(/(?:^|; )mr_tok=([^;]*)/);
 if (cookieMatch) { TOK = decodeURIComponent(cookieMatch[1]); } else { TOK = localStorage.getItem('mr_tok') || ''; }
 let ST=null;
 
+async function askAgent(msg, att){
+  AG.msgs.push({role:'user',content:msg});
+  agentBubble('u',msg + (att?(' 📎 ' + att.name):''));
+  const thkId = agentBubble('a','',true);
+  while(true){
+    try{
+      const res = await api('/admin/agent/chat', {messages:AG.msgs, config:AG.cfg});
+      const rep = res.reply;
+      if(!rep) throw new Error('empty agent response');
+      document.getElementById(thkId)?.remove();
+      if(rep.tool_calls && rep.tool_calls.length > 0){
+        AG.msgs.push(rep.message);
+        for(const t of rep.tool_calls){
+          const tname = t.function.name;
+          const targs = JSON.parse(t.function.arguments||'{}');
+          agentToolBlock(tname, targs, null);
+          const tres = await api('/admin/agent/tool', {name:tname, args:targs});
+          agentToolBlock(tname, targs, tres);
+          AG.msgs.push({role:'tool', tool_call_id:t.id, content:JSON.stringify(tres)});
+        }
+        agentBubble('a','',true);
+        continue;
+      }
+      AG.msgs.push({role:'assistant', content:rep.message.content});
+      if(rep.message.content) agentBubble('a', rep.message.content);
+      break;
+    }catch(err){
+      document.getElementById(thkId)?.remove();
+      agentBubble('a','Error: '+err.message);
+      AG.msgs.pop();
+      break;
+    }
+  }
+}
 function toast(msg,k){const t=$('#toast');t.textContent=msg;t.className='toast '+(k||'')+' show';clearTimeout(t._h);t._h=setTimeout(()=>t.className='toast',2400)}
 async function api(path,body){
   const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','x-admin-token':TOK},body:JSON.stringify(body||{})});
@@ -452,12 +503,11 @@ $('#loginBtn').onclick=async()=>{
     const r=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
     const d=await r.json();
     if(d.ok){
-      // password is correct -> remember it and open the dashboard IMMEDIATELY.
       TOK=pw;
       localStorage.setItem('mr_tok',pw);
       document.cookie = "mr_tok=" + encodeURIComponent(pw) + "; path=/; max-age=31536000; SameSite=Strict";
       showApp();
-      loadState();           // paint data; failures here never bounce us back
+      loadState();
     }else{
       $('#loginErr').textContent='❌ Wrong password';
     }
@@ -471,7 +521,6 @@ async function loadState(){
   try{
     ST=await getState();
   }catch(e){
-    // token rejected -> only NOW go back to login
     localStorage.removeItem('mr_tok');
     document.cookie = "mr_tok=; path=/; max-age=0";
     TOK='';
@@ -547,11 +596,7 @@ $('#tgMimicry').onclick=async()=>{const on=!$('#tgMimicry').classList.contains('
 function render(){
   const s=ST.settings||{},st=ST.stats||{};
   ST.proxies=ST.proxies||[];ST.endpoints=ST.endpoints||[];ST.logs=ST.logs||[];ST.keywords=ST.keywords||[];
-  // stats
-  $('#s_ok').innerHTML=(st.success_pct!=null?st.success_pct:'—')+'<small>%</small>';
-  $('#s_ms').innerHTML=st.avg_ms?(st.avg_ms/1000).toFixed(1)+'<small>s</small>':'—';
-  const enp=ST.proxies.filter(p=>p.enabled).length;
-  $('#s_px').innerHTML=enp+'<small>/ '+ST.proxies.length+'</small>';
+  
   // setting inputs
   $$('[data-set]').forEach(el=>{
     if(s[el.dataset.set]===undefined)return;
@@ -576,9 +621,12 @@ function render(){
 function pst(p){if(p.status==='ok')return'ok';if(p.status==='banned'||p.status==='unhealthy')return'dead';return'warn';}
 let PRX={page:0,show:10,q:''};
 function renderProxies(){
+  const isHot=$('#hotPoolToggle').checked;
   const pin=ST.settings.dedicated_proxy_id;
   let list=ST.proxies;
+  if(isHot) list = list.filter(p=>p.status==='ok');
   if(PRX.q){const q=PRX.q.toLowerCase();list=list.filter(p=>(p.url+' '+(p.status||'')).toLowerCase().includes(q));}
+  
   $('#prxCount').textContent=ST.proxies.length+' total'+(PRX.q?' · '+list.length+' match':'');
   const per=PRX.show==='all'?list.length||1:+PRX.show;
   const pages=Math.max(1,Math.ceil(list.length/per));
@@ -602,11 +650,9 @@ ${isPin?'<span class="badge pin">Pinned</span>':''}
     pg.querySelector('[data-pprev]').onclick=()=>{if(PRX.page>0){PRX.page--;renderProxies();}};
     pg.querySelector('[data-pnext]').onclick=()=>{if(PRX.page<pages-1){PRX.page++;renderProxies();}};
   }else pg.innerHTML='';
-  $$('#prxList [data-test]').forEach(b=>b.onclick=async e=>{e.stopPropagation();b.textContent='…';
-    try{const r=await api('/admin/proxy/test',{id:+b.dataset.test});toast(r.ok?'Clean ✓ '+r.exit_ip:r.detail,r.ok?'ok':'bad');await refresh();}catch(e){toast('Test failed','bad');b.textContent='⟳';}
-  });
   $$('#prxList [data-del]').forEach(b=>b.onclick=async e=>{e.stopPropagation();await api('/admin/proxy/delete',{id:+b.dataset.del});toast('Proxy removed','ok');await refresh();});
 }
+$('#hotPoolToggle').onchange=()=>renderProxies();
 function epName(e){return e.name||e.url.replace(/^https?:\/\//,'');}
 function renderEndpoints(){
   const eps=ST.endpoints||[];
@@ -645,13 +691,7 @@ function renderEndpoints(){
   $$('#epList [data-epprimary]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/primary',{id:+b.dataset.epprimary});toast('Primary set','ok');await refresh();});
   $$('#epList [data-epdel]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/delete',{id:+b.dataset.epdel});toast('Endpoint removed','ok');await refresh();});
   $$('#epList [data-epset]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epset);openEndpointSettings(e);});
-  $$('#epList [data-eptest]').forEach(b=>b.onclick=async()=>{
-    const e=eps.find(x=>x.id==b.dataset.eptest);b.textContent='…';
-    try{const r=await api('/admin/endpoint/test',{url:e.url,api_mode:e.api_mode,api_key:e.api_key,model:ST.settings.model_note});
-      toast(r.ok?('✓ '+r.ms+'ms: '+(r.reply||'').slice(0,30)):('✗ '+(r.detail||'failed').slice(0,40)),r.ok?'ok':'bad');
-    }catch(e){toast('Test error','bad');}b.textContent='🧪 Test';
-  });
-  $$('#epList [data-epchat]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epchat);openEndpointChat({name:epName(e),url:e.url,api_mode:e.api_mode,api_key:e.api_key,model:ST.settings.model_note||'claude-sonnet-4-6'});});
+  $$('#epList [data-epchat]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epchat);openEndpointSettings(e);});
 }
 function openAgentRouterSettings(){
   const s=ST.settings;
@@ -887,7 +927,50 @@ $('#agentSaveCfg').onclick=()=>{
   $('#agentBrain').textContent=agentBrainLabel();$('#agentSettings').classList.remove('show');
   toast('Brain settings saved','ok');
 };
-function agentBubble(role,text){const d=document.createElement('div');d.className='msg '+role;d.textContent=text;d.style.maxWidth='85%';d.style.wordBreak='break-word';$('#agentLog').appendChild(d);$('#agentLog').scrollTop=$('#agentLog').scrollHeight;return d;}
+function agentBubble(role, txt, isThinking=false){
+  if(isThinking){
+    const id = 'thk_' + Date.now();
+    const html=`<div class="chatmsg ${role}" id="${id}">
+      <div class="thinking-dots"><span></span><span></span><span></span></div>
+    </div>`;
+    $('#agentLog').insertAdjacentHTML('beforeend',html);
+    $('#agentLog').scrollTop=$('#agentLog').scrollHeight;
+    return id;
+  }
+  const html=`<div class="chatmsg ${role}">
+    <div style="word-break:break-word;">${txt.replace(/\n/g,'<br>')}</div>
+  </div>`;
+  $('#agentLog').insertAdjacentHTML('beforeend',html);
+  $('#agentLog').scrollTop=$('#agentLog').scrollHeight;
+}
+function agentToolBlock(toolName, args, result) {
+  const isWorking = !result;
+  const argStr = JSON.stringify(args || {}).substring(0,60);
+  const resStr = result ? JSON.stringify(result) : '...';
+  const id = 'tool_' + Date.now() + Math.random().toString(36).substr(2,5);
+  if (isWorking) {
+    const html = `<div class="chatmsg a" style="width:100%;max-width:100%;" id="${id}">
+      <div class="term-block" onclick="this.classList.toggle('open')">
+        <div class="term-block-title">
+          <span>▶ Working [${toolName}]</span>
+        </div>
+        <div class="term-block-body">Args: ${argStr}<br/>Out: ${resStr}</div>
+      </div>
+    </div>`;
+    $('#agentLog').insertAdjacentHTML('beforeend', html);
+  } else {
+    const blocks = $$('.term-block-title span');
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      if (blocks[i].textContent.includes('Working [' + toolName + ']')) {
+        blocks[i].textContent = `▶ Result [${toolName}]`;
+        const body = blocks[i].closest('.term-block').querySelector('.term-block-body');
+        body.innerHTML = `Args: ${argStr}<br/>Out: ${resStr}`;
+        break;
+      }
+    }
+  }
+  $('#agentLog').scrollTop=$('#agentLog').scrollHeight;
+}
 // attach image/file
 $('#agentAttach').onclick=()=>$('#agentFile').click();
 $('#agentFile').onchange=e=>{
@@ -908,20 +991,7 @@ async function agentSend(){
     else content=txt+'\n\n--- file: '+AG.attach.name+' ---\n'+String(AG.attach.data).slice(0,4000);
     AG.attach=null;
   }
-  agentBubble('u',txt||'(attachment)');
-  AG.msgs.push({role:'user',content});
-  const wait=agentBubble('a','…');
-  try{
-    const r=await api('/admin/agent/chat',{messages:AG.msgs,config:AG.cfg});
-    wait.textContent=r.reply||'(no reply)';
-    AG.msgs.push({role:'assistant',content:r.reply||''});
-    if(r.actions&&r.actions.length){const b=document.createElement('div');b.className='msg sys';b.textContent='⚙ '+r.actions.map(a=>a.tool).join(', ');$('#agentLog').appendChild(b);}
-    await refresh();
-  }catch(e){
-    const msg=e.message||'Unknown error';
-    wait.textContent='✗ '+(msg.length>80?msg.slice(0,80)+'…':msg);
-  }
-  $('#agentLog').scrollTop=$('#agentLog').scrollHeight;
+  await askAgent(content, AG.attach);
 }
 $('#agentSend').onclick=agentSend;
 $('#agentInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();agentSend();}});
