@@ -20,13 +20,18 @@ async def _discovery_loop():
     while True:
         try:
             enabled_proxies = [p for p in db.list_proxies() if p["enabled"]]
-            # Find proxies that need testing
+            # Find proxies that need testing (prioritize unknown/unhealthy, then check old banned/failed)
+            now = time.time()
             untested = [p for p in enabled_proxies if p["status"] in ("unknown", "unhealthy")][:10]
+            if not untested:
+                # if no unknown ones, pick some old failed/banned ones that haven't been checked in 10 mins
+                untested = [p for p in enabled_proxies if p["status"] in ("failed", "banned") and (now - p.get("last_checked", 0)) > 600][:5]
+            
             if untested:
                 for p in untested:
-                    res = await proxy_pool.neutral_ping(p["url"], timeout=5.0)
+                    res = await proxy_pool.neutral_ping(p["url"], timeout=8.0)
                     if res["ok"]:
-                        db.update_proxy(p["id"], status="ok", latency_ms=res["latency_ms"], last_checked=time.time())
+                        db.update_proxy(p["id"], status="ok", latency_ms=res["latency_ms"], fail_count=0, last_checked=time.time())
                         log.info(f"Discovery Engine: Added {p['url']} to Hot Pool ({res['latency_ms']}ms)")
                     else:
                         db.update_proxy(p["id"], status="failed", fail_count=p.get("fail_count", 0) + 1, last_checked=time.time())

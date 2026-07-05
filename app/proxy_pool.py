@@ -20,12 +20,12 @@ _RANK = {"ok": 0, "unknown": 1, "unhealthy": 2}
 
 
 async def neutral_ping(proxy_url, timeout=5.0):
-    """Fast, token-free test against Google to check basic connectivity and latency."""
+    """Fast, token-free test against Apple captive portal (unblocked globally)."""
     t0 = time.time()
     try:
         async with httpx.AsyncClient(proxy=proxy_url, verify=False, timeout=timeout) as client:
-            res = await client.get("http://www.google.com/generate_204")
-            if res.status_code == 204:
+            res = await client.get("http://captive.apple.com/hotspot-detect.html")
+            if res.status_code == 200 and "Success" in res.text:
                 return {"ok": True, "latency_ms": int((time.time() - t0) * 1000)}
     except Exception:
         pass

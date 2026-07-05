@@ -440,34 +440,25 @@ async function askAgent(msg, att){
   AG.msgs.push({role:'user',content:msg});
   agentBubble('u',msg + (att?(' 📎 ' + att.name):''));
   const thkId = agentBubble('a','',true);
-  while(true){
-    try{
-      const res = await api('/admin/agent/chat', {messages:AG.msgs, config:AG.cfg});
-      const rep = res.reply;
-      if(!rep) throw new Error('empty agent response');
-      document.getElementById(thkId)?.remove();
-      if(rep.tool_calls && rep.tool_calls.length > 0){
-        AG.msgs.push(rep.message);
-        for(const t of rep.tool_calls){
-          const tname = t.function.name;
-          const targs = JSON.parse(t.function.arguments||'{}');
-          agentToolBlock(tname, targs, null);
-          const tres = await api('/admin/agent/tool', {name:tname, args:targs});
-          agentToolBlock(tname, targs, tres);
-          AG.msgs.push({role:'tool', tool_call_id:t.id, content:JSON.stringify(tres)});
-        }
-        agentBubble('a','',true);
-        continue;
+  try{
+    const res = await api('/admin/agent/chat', {messages:AG.msgs, config:AG.cfg});
+    document.getElementById(thkId)?.remove();
+    
+    // server executes tools and returns {reply: string, actions: [{tool, result}]}
+    if (res.actions && res.actions.length > 0) {
+      for (const act of res.actions) {
+        agentToolBlock(act.tool, act.result ? {status:"done"} : {}, act.result);
       }
-      AG.msgs.push({role:'assistant', content:rep.message.content});
-      if(rep.message.content) agentBubble('a', rep.message.content);
-      break;
-    }catch(err){
-      document.getElementById(thkId)?.remove();
-      agentBubble('a','Error: '+err.message);
-      AG.msgs.pop();
-      break;
     }
+    
+    if(!res.reply) throw new Error('empty agent response');
+    
+    AG.msgs.push({role:'assistant', content:res.reply});
+    agentBubble('a', res.reply);
+  }catch(err){
+    document.getElementById(thkId)?.remove();
+    agentBubble('a','Error: '+err.message);
+    AG.msgs.pop();
   }
 }
 function toast(msg,k){const t=$('#toast');t.textContent=msg;t.className='toast '+(k||'')+' show';clearTimeout(t._h);t._h=setTimeout(()=>t.className='toast',2400)}
