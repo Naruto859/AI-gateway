@@ -18,27 +18,27 @@ app = FastAPI(title="AI Gateway", docs_url=None, redoc_url=None)
 async def _discovery_loop():
     """V9 Discovery Engine: Ping untested proxies slowly and add to Hot Pool."""
     while True:
+        if db.get_setting("enable_discovery_engine", "1") == "0":
+            await asyncio.sleep(10)
+            continue
         try:
             enabled_proxies = [p for p in db.list_proxies() if p["enabled"]]
-            # Find proxies that need testing (prioritize unknown/unhealthy, then check old banned/failed)
             now = time.time()
             untested = [p for p in enabled_proxies if p["status"] in ("unknown", "unhealthy")][:10]
             if not untested:
-                # if no unknown ones, pick some old failed/banned ones that haven't been checked in 10 mins
                 untested = [p for p in enabled_proxies if p["status"] in ("failed", "banned") and (now - p.get("last_checked", 0)) > 600][:5]
             
             if untested:
                 for p in untested:
-                    res = await proxy_pool.neutral_ping(p["url"], timeout=8.0)
+                    res = await proxy_pool.neutral_ping(p["url"], timeout=12.0)
                     if res["ok"]:
                         db.update_proxy(p["id"], status="ok", latency_ms=res["latency_ms"], fail_count=0, last_checked=time.time())
                         log.info(f"Discovery Engine: Added {p['url']} to Hot Pool ({res['latency_ms']}ms)")
                     else:
                         db.update_proxy(p["id"], status="failed", fail_count=p.get("fail_count", 0) + 1, last_checked=time.time())
-                    # Slow, organic pacing (wait between pings to save bandwidth)
                     await asyncio.sleep(2)
             else:
-                await asyncio.sleep(10)  # nothing to do, idle
+                await asyncio.sleep(10)
         except Exception as exc:
             log.warning("Discovery loop error: %s", exc)
             await asyncio.sleep(10)
@@ -48,11 +48,13 @@ async def _hot_pool_maintenance_loop():
     """V9 Hot Pool Maintenance: Re-test Hot Pool proxies every 2 hours."""
     while True:
         await asyncio.sleep(7200)  # 2 hours
+        if db.get_setting("enable_discovery_engine", "1") == "0":
+            continue
         try:
             hot_pool = [p for p in db.list_proxies() if p["enabled"] and p["status"] == "ok"]
             log.info("Hot Pool Maintenance: Testing %d proxies", len(hot_pool))
             for p in hot_pool:
-                res = await proxy_pool.neutral_ping(p["url"], timeout=8.0)
+                res = await proxy_pool.neutral_ping(p["url"], timeout=12.0)
                 if not res["ok"]:
                     db.update_proxy(p["id"], status="failed", last_checked=time.time())
                     log.info(f"Hot Pool Maintenance: Removed {p['url']} from Hot Pool")
