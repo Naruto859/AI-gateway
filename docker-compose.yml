@@ -1,0 +1,14 @@
+services:
+  gateway:
+    build: .
+    container_name: ciel-gateway-v7
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8787:8787"   # Only localhost; Nginx will proxy public traffic
+    volumes:
+      - ./data:/app/data
+    mem_limit: 1g
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true

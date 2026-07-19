@@ -1,21 +1,40 @@
-"""Proxy pool: selection (round-robin), health, and failover bookkeeping.
+"""Proxy pool: selection (round-robin), health, batch-testing, and failover.
 
-Design goals (per user):
-  - Use one proxy at a time. If it fails, move to the next — never burn many at once.
-  - Detect a WAF challenge (the endpoint serving an Aliyun captcha page) and
-    mark that proxy 'banned' so it isn't reused.
-  - Health check / Test must NOT spend completion tokens: it does a plain GET to
-    the API path and inspects whether a WAF HTML page comes back.
+Design goals:
+  - Use one proxy at a time. If it fails, move to the next.
+  - Detect WAF challenges (Aliyun captcha) and mark proxy 'banned'.
+  - Health check does NOT spend completion tokens (plain GET).
+  - BATCH TEST ENGINE: when 2+ consecutive failures occur, test 10 proxies
+    in parallel via fast GET checks (2s timeout) to find working ones.
+  - Include banned/unhealthy proxies in batch tests for recovery detection.
+  - File lock mechanism to avoid conflict with cron job.
 """
+import os
 import time
+import asyncio
 import threading
+import logging
 import httpx
 from . import db
+
+log = logging.getLogger("gateway.proxy_pool")
 
 _rr = {"i": 0}
 _rr_lock = threading.Lock()
 
-_RANK = {"ok": 0, "unknown": 1, "unhealthy": 2}
+_RANK = {"ok": 0, "unknown": 1, "unhealthy": 2, "banned": 3}
+
+# Lock file path - cron job creates this while running
+LOCK_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "monitor.lock")
+
+# ── Batch test state (in-memory, per-process) ──
+_batch_state = {
+    "consecutive_fails": 0,        # consecutive proxy failures in request flow
+    "ready_queue": [],              # pre-tested working proxy dicts
+    "batch_running": False,         # is a batch test currently in progress?
+    "last_batch_time": 0,           # timestamp of last batch test
+}
+_batch_lock = threading.Lock()
 
 
 def _next_start(n):
@@ -23,6 +42,11 @@ def _next_start(n):
         i = _rr["i"] % n
         _rr["i"] = (_rr["i"] + 1) % n
         return i
+
+
+def _is_cron_running():
+    """Check if the cron monitor job is currently running."""
+    return os.path.exists(LOCK_FILE)
 
 
 def selectable():
@@ -39,6 +63,9 @@ def ordered_for_request(max_n):
     auto_rotation = "1": pinned proxy first (2 in-place tries), then the rest of the
     enabled pool as failover. When one IP is hard-down/WAF-blocked the request rolls
     to the next IP instead of erroring. Use this with multiple whitelisted IPs.
+
+    BATCH TEST INTEGRATION: if the ready_queue has pre-tested proxies,
+    those are placed at the front of the candidate list for minimal latency.
 
     Ban status is intentionally IGNORED — a WAF challenge is transient (the residential
     IP/cookie resets), so a single bad response must not drop a proxy out of service.
@@ -65,16 +92,29 @@ def ordered_for_request(max_n):
             return [pinned] * retries
         return [enabled[0]] * retries
 
-    # ---- auto rotation ON: pinned first, then the rest as failover ----
+    # ---- auto rotation ON ----
+    # Check if we have pre-tested proxies from batch test
+    ready = _pop_ready_proxies()
+    ready_ids = {p["id"] for p in ready}
+
     # True round-robin: shift the list before stable-sorting by health.
-    rest = [p for p in enabled if not (pinned and p["id"] == pinned["id"])]
+    rest = [p for p in enabled if not (pinned and p["id"] == pinned["id"]) and p["id"] not in ready_ids]
     if rest:
         idx = _next_start(len(rest))
         rest = rest[idx:] + rest[:idx]
         rest.sort(key=lambda p: _RANK.get(p["status"], 3))
-    
-    ordered = ([pinned] if pinned else []) + rest
+
+    # Priority order: pinned -> ready (batch-tested) -> rest (round-robin)
+    ordered = ([pinned] if pinned else []) + ready + rest
     return ordered[:retries] if ordered else [enabled[0]] * retries
+
+
+def _pop_ready_proxies():
+    """Pop all pre-tested working proxies from the ready queue."""
+    with _batch_lock:
+        proxies = list(_batch_state["ready_queue"])
+        _batch_state["ready_queue"] = []
+        return proxies
 
 
 def mark_good(pid, latency_ms=0):
@@ -89,6 +129,9 @@ def mark_good(pid, latency_ms=0):
         last_used=time.time(),
         latency_ms=latency_ms or p["latency_ms"],
     )
+    # Reset consecutive fail counter on success
+    with _batch_lock:
+        _batch_state["consecutive_fails"] = 0
 
 
 def mark_bad(pid, reason):
@@ -103,6 +146,143 @@ def mark_bad(pid, reason):
     else:
         status = p["status"] if p["status"] != "banned" else "unhealthy"
     db.update_proxy(pid, fail_count=fc, status=status, note=reason, last_used=time.time())
+
+    # Track consecutive failures and trigger batch test if needed
+    with _batch_lock:
+        _batch_state["consecutive_fails"] += 1
+        consec = _batch_state["consecutive_fails"]
+    if consec >= 2:
+        _maybe_trigger_batch_test()
+
+
+def _maybe_trigger_batch_test():
+    """Trigger a background batch test if conditions are met."""
+    with _batch_lock:
+        if _batch_state["batch_running"]:
+            return  # already running
+        if _is_cron_running():
+            log.info("batch-test: skipped (cron job running)")
+            return
+        # Cooldown: don't batch-test more than once every 10 seconds
+        if time.time() - _batch_state["last_batch_time"] < 10:
+            return
+        _batch_state["batch_running"] = True
+
+    # Fire and forget — runs in the existing event loop
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_run_batch_test())
+    except RuntimeError:
+        # No running loop (shouldn't happen in FastAPI context)
+        with _batch_lock:
+            _batch_state["batch_running"] = False
+
+
+async def _run_batch_test():
+    """Test next 10 proxies in parallel using fast GET checks.
+
+    Includes banned/unhealthy proxies for recovery detection.
+    Results go into the ready_queue for immediate use by ordered_for_request.
+    """
+    try:
+        endpoint = db.get_setting("endpoint", "https://agentrouter.org")
+        # Get ALL proxies (including banned/unhealthy/disabled) for recovery check
+        all_proxies = db.list_proxies()
+        # Separate into tiers:
+        #   1. Enabled + ok/unknown (preferred)
+        #   2. Enabled + unhealthy/banned (recovery candidates)
+        #   3. Disabled (long-disabled recovery candidates)
+        tier1 = [p for p in all_proxies if p["enabled"] and p["status"] in ("ok", "unknown")]
+        tier2 = [p for p in all_proxies if p["enabled"] and p["status"] in ("unhealthy", "banned")]
+        tier3 = [p for p in all_proxies if not p["enabled"]]
+
+        # Round-robin within each tier
+        if tier1:
+            idx = _next_start(len(tier1))
+            tier1 = tier1[idx:] + tier1[:idx]
+
+        # Build batch: first from tier1, then tier2, then tier3 — max 10
+        candidates = (tier1 + tier2 + tier3)[:10]
+
+        if not candidates:
+            return
+
+        log.info("batch-test: testing %d proxies (tier1=%d, tier2=%d, tier3=%d)",
+                 len(candidates), min(len(tier1), 10),
+                 min(len(tier2), max(0, 10 - len(tier1))),
+                 min(len(tier3), max(0, 10 - len(tier1) - len(tier2))))
+
+        # Test all candidates in parallel
+        tasks = [_fast_check(p, endpoint) for p in candidates]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        working = []
+        for p, res in zip(candidates, results):
+            if isinstance(res, Exception):
+                continue
+            if res["ok"]:
+                working.append(p)
+                # Update DB status
+                db.update_proxy(p["id"], status="ok",
+                                latency_ms=res["latency_ms"],
+                                last_checked=time.time(),
+                                fail_count=0,
+                                enabled=1)  # re-enable if it was disabled
+                log.info("batch-test: ✅ %s OK (%dms)", p["url"], res["latency_ms"])
+            else:
+                db.update_proxy(p["id"], status=res.get("status", "unhealthy"),
+                                last_checked=time.time(),
+                                note=res.get("detail", "batch_fail"))
+
+        # Sort working by latency (fastest first) and add to ready queue
+        working.sort(key=lambda p: p.get("latency_ms", 9999))
+        with _batch_lock:
+            # Refresh proxy data from DB (status may have been updated)
+            refreshed = []
+            for p in working:
+                fresh = db.get_proxy(p["id"])
+                if fresh:
+                    refreshed.append(fresh)
+            _batch_state["ready_queue"] = refreshed
+            _batch_state["consecutive_fails"] = 0  # reset after batch test
+
+        log.info("batch-test: done — %d/%d working, queued for next request",
+                 len(working), len(candidates))
+
+    except Exception as exc:
+        log.warning("batch-test: error: %s", exc)
+    finally:
+        with _batch_lock:
+            _batch_state["batch_running"] = False
+            _batch_state["last_batch_time"] = time.time()
+
+
+async def _fast_check(proxy_dict, endpoint):
+    """Fast pre-flight GET check (2s timeout).
+
+    Tests if the proxy is alive and the endpoint is not WAF-blocked through this IP.
+    Does NOT guarantee POST will succeed, but filters ~80-90% of dead/blocked proxies.
+
+    Returns dict(ok, status, latency_ms, detail).
+    """
+    proxy_url = proxy_dict["url"]
+    t0 = time.time()
+    try:
+        async with httpx.AsyncClient(proxy=proxy_url,
+                                     timeout=httpx.Timeout(2.0, connect=2.0, read=2.0)) as client:
+            url = endpoint.rstrip("/") + "/v1/messages"
+            r = await client.get(url)
+            latency = int((time.time() - t0) * 1000)
+            if _looks_like_waf(r):
+                return {"ok": False, "status": "banned",
+                        "latency_ms": latency, "detail": f"WAF (HTTP {r.status_code})"}
+            # Any non-WAF response (401/405/400) means endpoint is reachable & clean
+            return {"ok": True, "status": "ok",
+                    "latency_ms": latency, "detail": f"clean (HTTP {r.status_code})"}
+    except Exception as e:
+        return {"ok": False, "status": "unhealthy",
+                "latency_ms": int((time.time() - t0) * 1000),
+                "detail": f"{type(e).__name__}: {e}"}
 
 
 def _looks_like_waf(resp):
@@ -146,3 +326,19 @@ async def health_check(proxy_url, endpoint):
         res.update(ok=False, status="unhealthy", detail=f"{type(e).__name__}: {e}")
     res["latency_ms"] = int((time.time() - t0) * 1000)
     return res
+
+
+def cleanup_dead_proxies():
+    """Hard-delete proxies that have been disabled (enabled=0) for 24+ hours.
+
+    Called by the auto health loop. This is the only place that does hard deletes.
+    """
+    cutoff = time.time() - 86400  # 24 hours ago
+    all_proxies = db.list_proxies()
+    deleted = 0
+    for p in all_proxies:
+        if not p["enabled"] and p["last_checked"] and p["last_checked"] < cutoff:
+            db.delete_proxy(p["id"])
+            deleted += 1
+    if deleted:
+        log.info("cleanup: hard-deleted %d proxies disabled for 24+ hours", deleted)

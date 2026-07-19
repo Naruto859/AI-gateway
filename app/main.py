@@ -35,6 +35,8 @@ async def _auto_health_loop():
                 except Exception:
                     pass
             log.info("auto health check done: %d proxies scanned", len(proxies))
+            # Hard-delete proxies that have been soft-disabled for 24+ hours
+            proxy_pool.cleanup_dead_proxies()
         except Exception as exc:
             log.warning("auto health check error: %s", exc)
 

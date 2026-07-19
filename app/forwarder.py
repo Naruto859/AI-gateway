@@ -645,9 +645,14 @@ async def forward(request, path):
                         up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
                         url = _target_url(tgt["base"], path, tgt["mode"])
                         theaders = _target_headers(request, tgt)
-                        candidates = proxy_pool.ordered_for_request(max_retries)
+                        attempted_pids = set()
                         upstream_rejected = False
-                        for p in candidates:
+                        for _ in range(max_retries):
+                            candidates = [p for p in proxy_pool.ordered_for_request(max_retries) if p["id"] not in attempted_pids]
+                            if not candidates:
+                                break
+                            p = candidates[0]
+                            attempted_pids.add(p["id"])
                             attempts += 1
                             last_proxy = p["url"]
                             last_tgt_name = tgt["name"]
@@ -783,7 +788,13 @@ async def forward(request, path):
                     up_body = _mutate_body(body, want_stream=False, model_override=tgt.get("model_override"))
                 url = _target_url(tgt["base"], path, tgt["mode"])
                 theaders = _target_headers(request, tgt)
-                for p in proxy_pool.ordered_for_request(max_retries):
+                attempted_pids = set()
+                for _ in range(max_retries):
+                    candidates = [p for p in proxy_pool.ordered_for_request(max_retries) if p["id"] not in attempted_pids]
+                    if not candidates:
+                        break
+                    p = candidates[0]
+                    attempted_pids.add(p["id"])
                     attempts += 1
                     client = httpx.AsyncClient(proxy=p["url"], timeout=timeout)
                     try:
@@ -836,7 +847,13 @@ async def forward(request, path):
         theaders = _target_headers(request, tgt)
         tgt_kind = "openai" if tgt["mode"] == "openai" else "anthropic"
         upstream_rejected = False
-        for p in proxy_pool.ordered_for_request(max_retries):
+        attempted_pids = set()
+        for _ in range(max_retries):
+            candidates = [p for p in proxy_pool.ordered_for_request(max_retries) if p["id"] not in attempted_pids]
+            if not candidates:
+                break
+            p = candidates[0]
+            attempted_pids.add(p["id"])
             attempts += 1
             res = await _consume_assemble(p, url, theaders, up_body, timeout, tgt_kind)
             if res[0] == "respond":

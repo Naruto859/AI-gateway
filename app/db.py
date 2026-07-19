@@ -52,6 +52,7 @@ def conn():
     global _conn
     if _conn is None:
         _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        _conn.execute('PRAGMA journal_mode=WAL')
         _conn.row_factory = sqlite3.Row
         _init(_conn)
     return _conn
