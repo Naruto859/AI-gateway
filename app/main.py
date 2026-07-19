@@ -131,12 +131,8 @@ async def state(x_admin_token: str = Header(default="")):
     s = db.get_all_settings()
     # never echo the admin password back to the browser
     safe = {k: v for k, v in s.items() if k != "admin_password"}
-    proxies = db.list_proxies()
-    counts = {"total": len(proxies),
-              "ok": sum(1 for p in proxies if p["status"] == "ok"),
-              "banned": sum(1 for p in proxies if p["status"] == "banned"),
-              "unhealthy": sum(1 for p in proxies if p["status"] == "unhealthy"),
-              "unknown": sum(1 for p in proxies if p["status"] == "unknown")}
+    proxies = db.list_proxies(limit=200)
+    counts = db.proxy_counts()
     return {
         "settings": safe,
         "proxies": proxies,

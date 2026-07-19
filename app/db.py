@@ -193,10 +193,71 @@ def get_all_settings():
 
 
 # ----- proxies -----
-def list_proxies():
+def list_proxies(limit=None):
     with _lock:
+        if limit:
+            return [dict(r) for r in conn().execute("SELECT * FROM proxies ORDER BY id LIMIT ?", (limit,)).fetchall()]
         return [dict(r) for r in conn().execute(
             "SELECT * FROM proxies ORDER BY id").fetchall()]
+
+def count_proxies(enabled_only=False):
+    with _lock:
+        if enabled_only:
+            return conn().execute("SELECT COUNT(*) FROM proxies WHERE enabled=1").fetchone()[0]
+        return conn().execute("SELECT COUNT(*) FROM proxies").fetchone()[0]
+
+def proxy_counts():
+    with _lock:
+        rows = conn().execute("SELECT status, COUNT(*) as cnt FROM proxies GROUP BY status").fetchall()
+        total = conn().execute("SELECT COUNT(*) FROM proxies").fetchone()[0]
+        res = {"total": total, "ok": 0, "banned": 0, "unhealthy": 0, "unknown": 0}
+        for r in rows:
+            if r["status"] in res:
+                res[r["status"]] = r["cnt"]
+        return res
+
+def get_best_proxies(limit=10, exclude_ids=None):
+    if not exclude_ids:
+        exclude_ids = [-1]
+    placeholders = ",".join("?" for _ in exclude_ids)
+    query = f"""
+        SELECT * FROM proxies 
+        WHERE enabled=1 AND status != 'banned' AND id NOT IN ({placeholders})
+        ORDER BY 
+            CASE status
+                WHEN 'ok' THEN 0
+                WHEN 'unknown' THEN 1
+                WHEN 'unhealthy' THEN 2
+                ELSE 3
+            END ASC,
+            last_used ASC
+        LIMIT ?
+    """
+    with _lock:
+        params = tuple(exclude_ids) + (limit,)
+        return [dict(r) for r in conn().execute(query, params).fetchall()]
+
+def get_batch_test_candidates(limit=10):
+    query = """
+        SELECT * FROM proxies
+        ORDER BY 
+            CASE 
+                WHEN enabled=1 AND status IN ('ok', 'unknown') THEN 0
+                WHEN enabled=1 AND status IN ('unhealthy', 'banned') THEN 1
+                ELSE 2
+            END ASC,
+            last_checked ASC
+        LIMIT ?
+    """
+    with _lock:
+        return [dict(r) for r in conn().execute(query, (limit,)).fetchall()]
+
+def delete_old_disabled_proxies(cutoff_time):
+    with _lock:
+        c = conn()
+        cur = c.execute("DELETE FROM proxies WHERE enabled=0 AND last_checked > 0 AND last_checked < ?", (cutoff_time,))
+        c.commit()
+        return cur.rowcount
 
 
 def get_proxy(pid):

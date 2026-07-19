@@ -71,10 +71,6 @@ def ordered_for_request(max_n):
     IP/cookie resets), so a single bad response must not drop a proxy out of service.
     This is what stops the old "every proxy banned -> pool empty -> 503" bug.
     """
-    enabled = [p for p in db.list_proxies() if p["enabled"]]
-    if not enabled:
-        return []
-
     retries = max(1, max_n)
     pin = db.get_setting("dedicated_proxy_id", "")
     auto = db.get_setting("auto_rotation", "0") == "1"
@@ -82,31 +78,36 @@ def ordered_for_request(max_n):
     if pin:
         try:
             pin_id = int(pin)
+            pinned = db.get_proxy(pin_id)
+            if pinned and not pinned["enabled"]:
+                pinned = None
         except (TypeError, ValueError):
-            pin_id = None
-        pinned = next((p for p in enabled if p["id"] == pin_id), None)
+            pass
 
     if not auto:
-        # ---- single dedicated proxy: same IP repeated for transparent retries ----
+        # ---- single dedicated proxy ----
         if pinned:
             return [pinned] * retries
-        return [enabled[0]] * retries
+        best = db.get_best_proxies(limit=1)
+        return [best[0]] * retries if best else []
 
     # ---- auto rotation ON ----
-    # Check if we have pre-tested proxies from batch test
     ready = _pop_ready_proxies()
-    ready_ids = {p["id"] for p in ready}
+    ready_ids = [p["id"] for p in ready]
+    
+    exclude = ready_ids.copy()
+    if pinned:
+        exclude.append(pinned["id"])
+        
+    needed = retries - len(ready) - (1 if pinned else 0)
+    rest = []
+    if needed > 0:
+        rest = db.get_best_proxies(limit=needed, exclude_ids=exclude)
 
-    # True round-robin: shift the list before stable-sorting by health.
-    rest = [p for p in enabled if not (pinned and p["id"] == pinned["id"]) and p["id"] not in ready_ids]
-    if rest:
-        idx = _next_start(len(rest))
-        rest = rest[idx:] + rest[:idx]
-        rest.sort(key=lambda p: _RANK.get(p["status"], 3))
-
-    # Priority order: pinned -> ready (batch-tested) -> rest (round-robin)
     ordered = ([pinned] if pinned else []) + ready + rest
-    return ordered[:retries] if ordered else [enabled[0]] * retries
+    if ordered:
+        return ordered[:retries]
+    return db.get_best_proxies(limit=retries)
 
 
 def _pop_ready_proxies():
@@ -186,31 +187,12 @@ async def _run_batch_test():
     """
     try:
         endpoint = db.get_setting("endpoint", "https://agentrouter.org")
-        # Get ALL proxies (including banned/unhealthy/disabled) for recovery check
-        all_proxies = db.list_proxies()
-        # Separate into tiers:
-        #   1. Enabled + ok/unknown (preferred)
-        #   2. Enabled + unhealthy/banned (recovery candidates)
-        #   3. Disabled (long-disabled recovery candidates)
-        tier1 = [p for p in all_proxies if p["enabled"] and p["status"] in ("ok", "unknown")]
-        tier2 = [p for p in all_proxies if p["enabled"] and p["status"] in ("unhealthy", "banned")]
-        tier3 = [p for p in all_proxies if not p["enabled"]]
-
-        # Round-robin within each tier
-        if tier1:
-            idx = _next_start(len(tier1))
-            tier1 = tier1[idx:] + tier1[:idx]
-
-        # Build batch: first from tier1, then tier2, then tier3 — max 10
-        candidates = (tier1 + tier2 + tier3)[:10]
+        candidates = db.get_batch_test_candidates(limit=10)
 
         if not candidates:
             return
 
-        log.info("batch-test: testing %d proxies (tier1=%d, tier2=%d, tier3=%d)",
-                 len(candidates), min(len(tier1), 10),
-                 min(len(tier2), max(0, 10 - len(tier1))),
-                 min(len(tier3), max(0, 10 - len(tier1) - len(tier2))))
+        log.info("batch-test: testing %d proxies (SQL optimized)", len(candidates))
 
         # Test all candidates in parallel
         tasks = [_fast_check(p, endpoint) for p in candidates]
@@ -334,11 +316,6 @@ def cleanup_dead_proxies():
     Called by the auto health loop. This is the only place that does hard deletes.
     """
     cutoff = time.time() - 86400  # 24 hours ago
-    all_proxies = db.list_proxies()
-    deleted = 0
-    for p in all_proxies:
-        if not p["enabled"] and p["last_checked"] and p["last_checked"] < cutoff:
-            db.delete_proxy(p["id"])
-            deleted += 1
+    deleted = db.delete_old_disabled_proxies(cutoff)
     if deleted:
         log.info("cleanup: hard-deleted %d proxies disabled for 24+ hours", deleted)
