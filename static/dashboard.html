@@ -532,8 +532,9 @@ function render(){
   // stats
   $('#s_ok').innerHTML=(st.success_pct!=null?st.success_pct:'—')+'<small>%</small>';
   $('#s_ms').innerHTML=st.avg_ms?(st.avg_ms/1000).toFixed(1)+'<small>s</small>':'—';
-  const enp=ST.proxies.filter(p=>p.enabled).length;
-  $('#s_px').innerHTML=enp+'<small>/ '+ST.proxies.length+'</small>';
+  const enp=ST.counts ? ST.counts.enabled : ST.proxies.filter(p=>p.enabled).length;
+  const tot=ST.counts ? ST.counts.total : ST.proxies.length;
+  $('#s_px').innerHTML=enp+'<small>/ '+tot+'</small>';
   // setting inputs
   $$('[data-set]').forEach(el=>{
     if(s[el.dataset.set]===undefined)return;
@@ -561,7 +562,8 @@ function renderProxies(){
   const pin=ST.settings.dedicated_proxy_id;
   let list=ST.proxies;
   if(PRX.q){const q=PRX.q.toLowerCase();list=list.filter(p=>(p.url+' '+(p.status||'')).toLowerCase().includes(q));}
-  $('#prxCount').textContent=ST.proxies.length+' total'+(PRX.q?' · '+list.length+' match':'');
+  const tot=ST.counts ? ST.counts.total : ST.proxies.length;
+  $('#prxCount').textContent=tot+' total'+(PRX.q?' · '+list.length+' match':'');
   const per=PRX.show==='all'?list.length||1:+PRX.show;
   const pages=Math.max(1,Math.ceil(list.length/per));
   if(PRX.page>=pages)PRX.page=0;

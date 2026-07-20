@@ -44,7 +44,7 @@ MONITOR_TARGETS = [
 ]
 
 # How many hours back to look for messages
-LOOKBACK_HOURS = 4
+LOOKBACK_HOURS = 12
 
 # Proxy test settings
 CONCURRENCY    = 50
@@ -227,7 +227,7 @@ async def request_bot_proxies(client, bot_entity) -> list[str]:
             if msg.media and hasattr(msg.media, 'document') and msg.media.document:
                 doc_bytes = await client.download_media(msg.media, bytes)
                 doc_text = doc_bytes.decode('utf-8', errors='ignore')
-                extracted = extract_proxies(doc_text)[:300]
+                extracted = extract_proxies(doc_text)[:1500]
                 log.info(f"  🤖 Got SOCKS5 file, keeping top {len(extracted)} proxies")
                 proxies.extend(extracted)
                 break
@@ -249,7 +249,7 @@ async def request_bot_proxies(client, bot_entity) -> list[str]:
             if msg.media and hasattr(msg.media, 'document') and msg.media.document:
                 doc_bytes = await client.download_media(msg.media, bytes)
                 doc_text = doc_bytes.decode('utf-8', errors='ignore')
-                extracted = extract_proxies(doc_text)[:300]
+                extracted = extract_proxies(doc_text)[:1500]
                 log.info(f"  🤖 Got HTTP file, keeping top {len(extracted)} proxies")
                 proxies.extend(extracted)
                 break
@@ -289,11 +289,13 @@ async def run_monitor(setup_mode: bool = False):
 
     async for dialog in client.iter_dialogs():
         name = (dialog.name or "").lower()
+        username = dialog.entity.username.lower() if hasattr(dialog.entity, 'username') and dialog.entity.username else ""
+        is_fast_bot = username == "freeproxyfastbot"
         
-        is_fast_bot = dialog.entity.username.lower() == "freeproxyfastbot" if hasattr(dialog.entity, 'username') and dialog.entity.username else False
+        explicit_targets = {"frprox", "dailyfreeproxies", "letsgetproxy", "mtprotoproxies", "proxylister", "ps_free_proxy_list", "v2rayconfiglist"}
 
-        # Match groups or bots with "proxy" or "proxies" in name, or FreeProxyFastBot
-        if "proxy" not in name and "proxies" not in name and not is_fast_bot:
+        # Match groups or bots with "proxy" or "proxies" in name, or FreeProxyFastBot, or explicit targets
+        if "proxy" not in name and "proxies" not in name and "v2ray" not in name and not is_fast_bot and username not in explicit_targets:
             continue
 
         log.info(f"📡 Found matching dialog: '{dialog.name}' (id={dialog.id})")
@@ -307,7 +309,7 @@ async def run_monitor(setup_mode: bool = False):
         # Get recent messages from groups/channels
         msg_count = 0
         proxy_count = 0
-        async for msg in client.iter_messages(dialog.id, limit=50):
+        async for msg in client.iter_messages(dialog.id, limit=200):
             if not isinstance(msg, Message):
                 continue
             if msg.date < cutoff:
@@ -326,7 +328,7 @@ async def run_monitor(setup_mode: bool = False):
                     try:
                         doc_bytes = await client.download_media(msg.media, bytes)
                         doc_text = doc_bytes.decode('utf-8', errors='ignore')
-                        doc_proxies = extract_proxies(doc_text)[:300]
+                        doc_proxies = extract_proxies(doc_text)[:1500]
                         if doc_proxies:
                             proxies.extend(doc_proxies)
                     except Exception as e:
@@ -360,8 +362,8 @@ async def run_monitor(setup_mode: bool = False):
 
     # ── Step 3: Test & add new proxies ────────────────────────────────────
     # Filter out already-existing ones
-    new_to_test = [p for p in all_new_proxies if not proxy_exists(p)][:200]
-    log.info(f"\n🆕 New proxies to test: {len(new_to_test)} (limited to 200, from Telegram)")
+    new_to_test = [p for p in all_new_proxies if not proxy_exists(p)][:1500]
+    log.info(f"\n🆕 New proxies to test: {len(new_to_test)} (limited to 1500, from Telegram)")
 
     added = 0
     if new_to_test:
