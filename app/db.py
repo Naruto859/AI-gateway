@@ -210,7 +210,8 @@ def proxy_counts():
     with _lock:
         rows = conn().execute("SELECT status, COUNT(*) as cnt FROM proxies GROUP BY status").fetchall()
         total = conn().execute("SELECT COUNT(*) FROM proxies").fetchone()[0]
-        res = {"total": total, "ok": 0, "banned": 0, "unhealthy": 0, "unknown": 0}
+        enabled = conn().execute("SELECT COUNT(*) FROM proxies WHERE enabled=1").fetchone()[0]
+        res = {"total": total, "enabled": enabled, "ok": 0, "banned": 0, "unhealthy": 0, "unknown": 0}
         for r in rows:
             if r["status"] in res:
                 res[r["status"]] = r["cnt"]
