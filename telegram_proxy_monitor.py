@@ -169,6 +169,31 @@ def get_db_proxies() -> list[str]:
     finally:
         conn.close()
 
+def get_enabled_proxies() -> list[str]:
+    """Get only ENABLED proxy URLs from DB (for lightweight health checks)."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        rows = conn.execute("SELECT url FROM proxies WHERE enabled=1").fetchall()
+        return [r[0] for r in rows]
+    finally:
+        conn.close()
+
+def recover_disabled_ok_proxies() -> int:
+    """Re-enable proxies that are disabled but have 'ok' status.
+    
+    This fixes the situation where the old cron logic mass-disabled
+    good proxies due to temporary network issues during testing.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cur = conn.execute(
+            "UPDATE proxies SET enabled=1 WHERE enabled=0 AND status='ok'"
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
 def remove_proxy(url: str):
     """Soft-disable a proxy (enabled=0) instead of hard delete.
     
@@ -346,12 +371,12 @@ async def run_monitor(setup_mode: bool = False):
     await client.disconnect()
     log.info(f"Disconnected from Telegram")
 
-    # ── Step 2: Test existing DB proxies (health check) ───────────────────
-    existing = get_db_proxies()
-    log.info(f"\n🔍 Health check: {len(existing)} existing proxies in DB")
+    # ── Step 2: Health check ONLY enabled proxies (not all 5000+) ────────
+    enabled_proxies = get_enabled_proxies()
+    log.info(f"\n🔍 Health check: {len(enabled_proxies)} enabled proxies (not all DB)")
 
-    if existing:
-        results = await test_all_proxies(existing)
+    if enabled_proxies:
+        results = await test_all_proxies(enabled_proxies)
         removed = 0
         for r in results:
             if not r["ok"] or r["latency_ms"] > MAX_LATENCY_MS:
@@ -359,6 +384,11 @@ async def run_monitor(setup_mode: bool = False):
                 removed += 1
                 log.info(f"  ⏸️ Disabled: {r['url']} ({r.get('detail', 'slow')})")
         log.info(f"  Disabled {removed} unhealthy proxies (soft-delete)")
+    
+    # ── Step 2b: Re-enable disabled proxies that are still 'ok' status ──
+    recovered = recover_disabled_ok_proxies()
+    if recovered:
+        log.info(f"  ♻️ Recovered {recovered} disabled-but-ok proxies")
 
     # ── Step 3: Test & add new proxies ────────────────────────────────────
     # Filter out already-existing ones

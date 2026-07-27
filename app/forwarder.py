@@ -564,7 +564,11 @@ async def forward(request, path):
         kw.setdefault("req_body", req_text)
         db.add_log(**kw)
 
-    if require_key and gateway_key:
+    # Claude CLI issues an unauthenticated handshake/info call to v1/props on
+    # startup (no key header). Exempt such no-key info paths so they don't spam
+    # the log with harmless 401s — they carry no chat payload.
+    _NOKEY_PATHS = {"v1/props"}
+    if require_key and gateway_key and path not in _NOKEY_PATHS:
         ck = request.headers.get("x-api-key", "").strip()
         auth = request.headers.get("authorization", "").strip()
         if not ck and auth.lower().startswith("bearer "):
