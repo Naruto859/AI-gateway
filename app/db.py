@@ -231,7 +231,7 @@ def get_best_proxies(limit=10, exclude_ids=None):
                 WHEN 'unhealthy' THEN 2
                 ELSE 3
             END ASC,
-            last_used ASC
+            latency_ms ASC
         LIMIT ?
     """
     with _lock:
