@@ -84,6 +84,23 @@ input.wide{width:100%;text-align:left}
 .tg{width:48px;height:28px;border-radius:999px;background:#cfe3d6;position:relative;cursor:pointer;transition:.28s;flex:none}
 .tg::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.18);transition:.28s}
 .tg.on{background:linear-gradient(145deg,var(--g-400),var(--g-600))}.tg.on::after{transform:translateX(20px)}
+/* hot pool */
+.hp-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 6px}
+.hp-stat{background:var(--g-50);border:1px solid var(--line);border-radius:11px;padding:10px 12px;text-align:center}
+.hp-stat .hpv{font-size:18px;font-weight:740;color:var(--g-700)}
+.hp-stat .hpk{font-size:10.5px;color:var(--ink-faint);font-weight:600;margin-top:2px}
+.hp-live-btn{font:inherit;font-size:12px;font-weight:700;padding:7px 14px;border-radius:10px;border:1px solid var(--c-sky-d);background:#eef5ff;color:var(--c-sky-d);cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:6px}
+.hp-live-btn:hover{background:var(--c-sky);color:#fff}
+.hp-live-btn .live-dot{width:7px;height:7px;border-radius:50%;background:#e74c3c;animation:pulse 1.5s infinite}
+.hp-log{font-family:ui-monospace,monospace;font-size:12px;line-height:1.7;color:var(--ink-soft);max-height:340px;overflow-y:auto;padding:6px 0}
+.hp-log .hpl{padding:4px 8px;border-radius:7px;margin-bottom:3px}
+.hp-log .hpl:nth-child(odd){background:var(--g-50)}
+.hp-proxy{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;margin-bottom:6px;background:#fff}
+.hp-proxy .hp-url{flex:1;font-size:12.5px;font-family:ui-monospace,monospace;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hp-proxy .hp-lat{font-size:12px;font-weight:740;color:var(--g-700);flex:none}
+.hp-proxy .st{width:8px;height:8px;border-radius:50%;flex:none;background:var(--g-500);box-shadow:0 0 6px rgba(47,165,106,.5)}
+.hp-section-title{font-size:13px;font-weight:700;color:var(--ink-soft);margin:14px 0 8px;display:flex;align-items:center;gap:6px}
+.hp-empty{text-align:center;color:var(--ink-faint);font-size:12.5px;padding:16px;font-style:italic}
 .prx{display:flex;align-items:center;gap:11px;padding:12px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;background:#fff;transition:.2s}
 .prx:hover{border-color:var(--g-300);box-shadow:0 6px 16px rgba(31,138,86,.1)}
 .prx .st{width:9px;height:9px;border-radius:50%;flex:none}
@@ -256,6 +273,18 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="field stack"><div class="meta"><div class="lbl">Dedicated proxy</div><div class="desc">Single IP used when rotation is OFF. Add this exit IP to agentrouter watchlist.</div></div><div class="ctrl" id="dedWrap"></div></div>
 </div>
 <div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></span>Hot Pool Engine <span id="hpStatus" style="margin-left:auto;font-size:11px;font-weight:700;padding:3px 9px;border-radius:7px;background:var(--g-100);color:var(--g-700)"></span></h2>
+<p class="sub">Pre-verified fast proxies kept in memory for instant use. Reduces latency dramatically.</p>
+<div class="field"><div class="meta"><div class="lbl">Hot Pool</div><div class="desc">ON = keep a pool of verified proxies in memory, refresh periodically. OFF = use DB proxies directly (for premium/paid proxies).</div></div><div class="ctrl"><div class="tg" id="tgHotPool"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Pool size</div><div class="desc">Number of verified proxies to keep ready in the hot pool.</div></div><div class="ctrl"><input type="number" data-set="hot_pool_size" min="1" max="50" style="width:70px"></div></div>
+<div class="field"><div class="meta"><div class="lbl">Refresh interval</div><div class="desc">How often to re-test and refresh the hot pool.</div></div><div class="ctrl"><input type="number" data-set="hot_pool_refresh" min="10" max="600" style="width:70px"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Max seconds to wait for a proxy connection. Lower = fail faster, try next.</div></div><div class="ctrl"><input type="number" data-set="connect_timeout" min="1" max="30" style="width:70px"><span class="unit">sec</span></div></div>
+<div style="padding:10px 0 4px;display:flex;gap:9px;align-items:center">
+<button class="btn" id="saveHotPool" style="flex:1">Save hot pool settings</button>
+<button class="hp-live-btn" id="openHotPool"><span class="live-dot"></span> Live View</button>
+</div>
+</div>
+<div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/></svg></span>Proxy pool <span id="prxCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
 <p class="sub">Tap ⟳ to test a proxy against the upstream endpoint.</p>
 <div class="prxbar">
@@ -361,6 +390,24 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="modalbox">
 <div class="modalhd"><h3>Request detail</h3><button class="x" id="logModalX">×</button></div>
 <div class="modalbody" id="logModalBody"></div>
+</div>
+</div>
+
+<!-- HOT POOL LIVE MODAL -->
+<div class="modal" id="hpModal">
+<div class="modalbox" style="max-width:520px">
+<div class="modalhd">
+<h3>🔥 Hot Pool — Live Monitor</h3>
+<span id="hpLiveIndicator" style="font-size:10px;font-weight:700;color:#e74c3c;display:flex;align-items:center;gap:5px"><span class="live-dot"></span> LIVE</span>
+<button class="x" id="hpModalX">×</button>
+</div>
+<div class="modalbody" id="hpModalBody" style="padding:14px 16px">
+<div class="hp-stats" id="hpStats"></div>
+<div class="hp-section-title">⚡ Active Proxies</div>
+<div id="hpProxies"></div>
+<div class="hp-section-title">📋 Activity Log</div>
+<div class="hp-log" id="hpLog"></div>
+</div>
 </div>
 </div>
 
@@ -525,6 +572,50 @@ function mkCsel(id,opts,cur,cb){
 $('#tgRotation').onclick=async()=>{const on=!$('#tgRotation').classList.contains('on');$('#tgRotation').classList.toggle('on',on);await api('/admin/settings',{auto_rotation:on?'1':'0'});ST.settings.auto_rotation=on?'1':'0';render();toast('Auto rotation '+(on?'ON':'OFF'),'ok');};
 $('#tgTranslate').onclick=async()=>{const on=!$('#tgTranslate').classList.contains('on');$('#tgTranslate').classList.toggle('on',on);await api('/admin/settings',{format_translation:on?'1':'0'});ST.settings.format_translation=on?'1':'0';toast('Translation '+(on?'ON':'OFF'),'ok');};
 $('#tgMimicry').onclick=async()=>{const on=!$('#tgMimicry').classList.contains('on');$('#tgMimicry').classList.toggle('on',on);await api('/admin/settings',{claude_mimicry:on?'1':'0'});ST.settings.claude_mimicry=on?'1':'0';toast('Mimicry '+(on?'ON':'OFF'),'ok');};
+$('#tgHotPool').onclick=async()=>{const on=!$('#tgHotPool').classList.contains('on');$('#tgHotPool').classList.toggle('on',on);await api('/admin/settings',{hot_pool_enabled:on?'1':'0'});ST.settings.hot_pool_enabled=on?'1':'0';toast('Hot Pool '+(on?'ON':'OFF'),'ok');};
+$('#saveHotPool').onclick=async()=>{
+  const size=$('input[data-set="hot_pool_size"]').value;
+  const refresh=$('input[data-set="hot_pool_refresh"]').value;
+  const ct=$('input[data-set="connect_timeout"]').value;
+  await api('/admin/settings',{hot_pool_size:size,hot_pool_refresh:refresh,connect_timeout:ct});
+  toast('Hot pool settings saved','ok');
+};
+
+// Hot Pool Live View
+let _hpInterval=null;
+$('#openHotPool').onclick=()=>{$('#hpModal').classList.add('show');document.body.style.overflow='hidden';_hpPoll();_hpInterval=setInterval(_hpPoll,2000);};
+$('#hpModalX').onclick=()=>{$('#hpModal').classList.remove('show');document.body.style.overflow='';if(_hpInterval){clearInterval(_hpInterval);_hpInterval=null;}};
+$('#hpModal').onclick=e=>{if(e.target===$('#hpModal')){$('#hpModalX').click();}};
+async function _hpPoll(){
+  try{
+    const r=await fetch('/admin/hotpool',{headers:{'x-admin-token':TOK}});
+    if(!r.ok)return;
+    const d=await r.json();
+    // Stats
+    const ago=d.last_refresh?Math.round((Date.now()/1000-d.last_refresh))+'s ago':'never';
+    $('#hpStats').innerHTML=`
+      <div class="hp-stat"><div class="hpv">${d.proxies.length}</div><div class="hpk">In Pool</div></div>
+      <div class="hp-stat"><div class="hpv">${d.cycle_tested}</div><div class="hpk">Last Tested</div></div>
+      <div class="hp-stat"><div class="hpv">${d.cycle_passed}</div><div class="hpk">Last Passed</div></div>
+    `;
+    // Update header status
+    const hpS=$('#hpStatus');
+    if(hpS) hpS.textContent=d.refreshing?'⟳ Refreshing...':d.proxies.length+' ready · '+ago;
+    // Proxies
+    if(d.proxies.length){
+      $('#hpProxies').innerHTML=d.proxies.map(p=>`<div class="hp-proxy"><span class="st"></span><span class="hp-url">${p.url.split('@').pop()}</span><span class="hp-lat">${p.latency_ms}ms</span></div>`).join('');
+    }else{
+      $('#hpProxies').innerHTML='<div class="hp-empty">No proxies in hot pool yet. Waiting for next refresh cycle...</div>';
+    }
+    // Log
+    if(d.log.length){
+      $('#hpLog').innerHTML=d.log.slice().reverse().map(l=>`<div class="hpl">${l}</div>`).join('');
+      $('#hpLog').scrollTop=0;
+    }else{
+      $('#hpLog').innerHTML='<div class="hp-empty">No activity yet.</div>';
+    }
+  }catch(e){console.error('hp poll error',e);}
+}
 
 function render(){
   const s=ST.settings||{},st=ST.stats||{};
@@ -546,6 +637,7 @@ function render(){
   $('#tgRotation').classList.toggle('on',s.auto_rotation==='1');
   $('#tgTranslate').classList.toggle('on',s.format_translation==='1');
   $('#tgMimicry').classList.toggle('on',s.claude_mimicry==='1');
+  $('#tgHotPool').classList.toggle('on',s.hot_pool_enabled==='1');
   // dedicated dropdown
   const pin=s.dedicated_proxy_id;
   const pxOpts=ST.proxies.map(p=>({v:String(p.id),l:'#'+p.id+' · '+p.url.split('@').pop()}));

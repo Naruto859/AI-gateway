@@ -44,6 +44,7 @@ async def _auto_health_loop():
 @app.on_event("startup")
 async def _startup():
     asyncio.create_task(_auto_health_loop())
+    asyncio.create_task(proxy_pool.hot_pool_loop())
 
 # warm the DB / defaults at import
 db.conn()
@@ -143,6 +144,12 @@ async def state(x_admin_token: str = Header(default="")):
         "stats": db.stats(),
         "logs": db.recent_logs(80),
     }
+
+
+@app.get("/admin/hotpool")
+async def hotpool_status(x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    return proxy_pool.get_hot_pool_status()
 
 
 @app.post("/admin/settings")

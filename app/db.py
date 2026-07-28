@@ -36,6 +36,9 @@ DEFAULT_SETTINGS = {
     "dedicated_proxy_id": "",                     # pin ALL requests to one proxy ("" = first enabled)
     "dedicated_strict": "0",                      # legacy; unused when auto_rotation drives selection
     "auto_rotation": "0",                         # 1 = rotate across enabled proxies on fail; 0 = single dedicated
+    "hot_pool_enabled": "1",                      # 1 = hot pool engine active; 0 = off (for premium proxies)
+    "hot_pool_size": "10",                         # number of verified proxies to keep in hot pool
+    "hot_pool_refresh": "120",                     # seconds between hot pool refresh cycles
     # --- retry backoff (Claude Code SDK formula: min(initial*2^n, max) + jitter) ---
     "retry_initial_delay": "1.0",                 # seconds before first retry
     "retry_max_delay": "8.0",                     # cap on the backoff delay
@@ -248,6 +251,17 @@ def get_batch_test_candidates(limit=10):
                 ELSE 2
             END ASC,
             last_checked ASC
+        LIMIT ?
+    """
+    with _lock:
+        return [dict(r) for r in conn().execute(query, (limit,)).fetchall()]
+
+def get_hot_pool_candidates(limit=50):
+    """Get top proxy candidates for hot pool testing, sorted by latency."""
+    query = """
+        SELECT * FROM proxies
+        WHERE enabled=1 AND status='ok'
+        ORDER BY latency_ms ASC
         LIMIT ?
     """
     with _lock:

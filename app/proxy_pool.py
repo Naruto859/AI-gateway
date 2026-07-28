@@ -36,6 +36,17 @@ _batch_state = {
 }
 _batch_lock = threading.Lock()
 
+# ── Hot Pool state (in-memory verified proxies) ──
+_hot_pool = {
+    "proxies": [],          # list of verified working proxy dicts
+    "last_refresh": 0,      # timestamp of last refresh
+    "refreshing": False,    # is a refresh currently running?
+    "cycle_tested": 0,      # how many tested in last cycle
+    "cycle_passed": 0,      # how many passed in last cycle
+    "log": [],              # recent log entries for live view (max 50)
+}
+_hot_lock = threading.Lock()
+
 
 def _next_start(n):
     with _rr_lock:
@@ -72,6 +83,21 @@ def ordered_for_request(max_n):
     This is what stops the old "every proxy banned -> pool empty -> 503" bug.
     """
     retries = max(1, max_n)
+
+    # ---- Hot Pool shortcut ----
+    hp_enabled = db.get_setting("hot_pool_enabled", "1") == "1"
+    if hp_enabled:
+        with _hot_lock:
+            hp = list(_hot_pool["proxies"])
+        if hp:
+            # Hot pool proxies first, then fill remaining from DB
+            if len(hp) >= retries:
+                return hp[:retries]
+            # Not enough in hot pool, fill rest from DB
+            hp_ids = [p["id"] for p in hp]
+            rest = db.get_best_proxies(limit=retries - len(hp), exclude_ids=hp_ids)
+            return hp + rest
+
     pin = db.get_setting("dedicated_proxy_id", "")
     auto = db.get_setting("auto_rotation", "0") == "1"
     pinned = None
@@ -319,3 +345,120 @@ def cleanup_dead_proxies():
     deleted = db.delete_old_disabled_proxies(cutoff)
     if deleted:
         log.info("cleanup: hard-deleted %d proxies disabled for 24+ hours", deleted)
+
+
+async def _hot_pool_refresh():
+    """Refresh the hot pool: test top candidates, keep best ones."""
+    with _hot_lock:
+        if _hot_pool["refreshing"]:
+            return
+        _hot_pool["refreshing"] = True
+    
+    try:
+        pool_size = int(db.get_setting("hot_pool_size", "10"))
+        test_count = pool_size * 5  # test 5x pool size to find best
+        endpoint = db.get_setting("endpoint", "https://agentrouter.org")
+        
+        # Get top candidates from DB sorted by latency
+        candidates = db.get_hot_pool_candidates(limit=test_count)
+        if not candidates:
+            _hp_log("⚠️ No candidates found in DB")
+            return
+        
+        _hp_log(f"🔄 Testing {len(candidates)} candidates...")
+        
+        # Test all in parallel with short timeout
+        tasks = [_hot_check(p, endpoint) for p in candidates]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        working = []
+        for p, res in zip(candidates, results):
+            if isinstance(res, Exception):
+                continue
+            if res["ok"]:
+                p["hot_latency"] = res["latency_ms"]
+                working.append(p)
+        
+        # Sort by latency, keep best pool_size
+        working.sort(key=lambda p: p.get("hot_latency", 9999))
+        best = working[:pool_size]
+        
+        with _hot_lock:
+            _hot_pool["proxies"] = best
+            _hot_pool["last_refresh"] = time.time()
+            _hot_pool["cycle_tested"] = len(candidates)
+            _hot_pool["cycle_passed"] = len(working)
+        
+        if best:
+            fastest = best[0].get("hot_latency", "?")
+            slowest = best[-1].get("hot_latency", "?")
+            _hp_log(f"✅ Pool refreshed: {len(best)}/{len(candidates)} passed (fastest: {fastest}ms, slowest: {slowest}ms)")
+        else:
+            _hp_log(f"❌ No working proxies found from {len(candidates)} candidates")
+    
+    except Exception as exc:
+        _hp_log(f"❌ Refresh error: {exc}")
+    finally:
+        with _hot_lock:
+            _hot_pool["refreshing"] = False
+
+
+def _hp_log(msg):
+    """Add a timestamped log entry to hot pool log."""
+    import datetime
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    entry = f"[{ts}] {msg}"
+    with _hot_lock:
+        _hot_pool["log"].append(entry)
+        if len(_hot_pool["log"]) > 50:
+            _hot_pool["log"] = _hot_pool["log"][-50:]
+
+
+async def _hot_check(proxy_dict, endpoint):
+    """Quick 3-second check for hot pool candidates."""
+    proxy_url = proxy_dict["url"]
+    t0 = time.time()
+    try:
+        async with httpx.AsyncClient(proxy=proxy_url,
+                                     timeout=httpx.Timeout(3.0, connect=3.0, read=3.0)) as client:
+            url = endpoint.rstrip("/") + "/v1/messages"
+            r = await client.get(url)
+            latency = int((time.time() - t0) * 1000)
+            if _looks_like_waf(r):
+                return {"ok": False, "latency_ms": latency, "detail": f"WAF ({r.status_code})"}
+            return {"ok": True, "latency_ms": latency, "detail": f"clean ({r.status_code})"}
+    except Exception as e:
+        return {"ok": False, "latency_ms": int((time.time() - t0) * 1000),
+                "detail": str(e)[:60]}
+
+
+async def hot_pool_loop():
+    """Background loop that refreshes the hot pool periodically."""
+    while True:
+        enabled = db.get_setting("hot_pool_enabled", "1") == "1"
+        interval = int(db.get_setting("hot_pool_refresh", "120") or 120)
+        if enabled:
+            await _hot_pool_refresh()
+        await asyncio.sleep(interval)
+
+
+def get_hot_pool_status():
+    """Return current hot pool state for the dashboard API."""
+    with _hot_lock:
+        proxies = []
+        for p in _hot_pool["proxies"]:
+            proxies.append({
+                "id": p.get("id"),
+                "url": p.get("url", ""),
+                "latency_ms": p.get("hot_latency", p.get("latency_ms", 0)),
+                "status": p.get("status", "ok"),
+                "exit_ip": p.get("exit_ip", ""),
+            })
+        return {
+            "proxies": proxies,
+            "last_refresh": _hot_pool["last_refresh"],
+            "refreshing": _hot_pool["refreshing"],
+            "cycle_tested": _hot_pool["cycle_tested"],
+            "cycle_passed": _hot_pool["cycle_passed"],
+            "log": list(_hot_pool["log"]),
+        }
