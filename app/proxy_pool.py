@@ -378,6 +378,10 @@ async def _hot_pool_refresh():
             if res["ok"]:
                 p["hot_latency"] = res["latency_ms"]
                 working.append(p)
+                # Re-enable and update status in DB for recovered proxies
+                db.update_proxy(p["id"], status="ok", enabled=1,
+                                latency_ms=res["latency_ms"],
+                                last_checked=time.time(), fail_count=0)
         
         # Sort by latency, keep best pool_size
         working.sort(key=lambda p: p.get("hot_latency", 9999))

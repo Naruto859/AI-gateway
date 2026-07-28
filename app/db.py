@@ -257,11 +257,21 @@ def get_batch_test_candidates(limit=10):
         return [dict(r) for r in conn().execute(query, (limit,)).fetchall()]
 
 def get_hot_pool_candidates(limit=50):
-    """Get top proxy candidates for hot pool testing, sorted by latency."""
+    """Get top proxy candidates for hot pool testing, sorted by latency.
+    
+    Includes ALL statuses so the hot pool can rediscover recovered proxies.
+    """
     query = """
         SELECT * FROM proxies
-        WHERE enabled=1 AND status='ok'
-        ORDER BY latency_ms ASC
+        ORDER BY 
+            CASE status
+                WHEN 'ok' THEN 0
+                WHEN 'unknown' THEN 1
+                WHEN 'unhealthy' THEN 2
+                WHEN 'banned' THEN 3
+                ELSE 4
+            END ASC,
+            latency_ms ASC
         LIMIT ?
     """
     with _lock:
