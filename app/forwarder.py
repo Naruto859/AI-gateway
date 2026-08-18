@@ -43,9 +43,14 @@ def _keepalive_opts():
     ]
 
 
-def _client(proxy_url, timeout):
-    """httpx.AsyncClient with TCP keepalive on the proxy connection."""
-    transport = httpx.AsyncHTTPTransport(proxy=proxy_url, socket_options=_keepalive_opts())
+def _build_client(candidates, timeout):
+    """httpx.AsyncClient with TCP keepalive and Hedging proxy support."""
+    if len(candidates) > 1:
+        hedge_urls = ",".join(c["url"] for c in candidates)
+        proxy = httpx.Proxy("http://127.0.0.1:9090", headers={"x-hedge-proxies": hedge_urls})
+    else:
+        proxy = candidates[0]["url"]
+    transport = httpx.AsyncHTTPTransport(proxy=proxy, socket_options=_keepalive_opts())
     return httpx.AsyncClient(transport=transport, timeout=timeout)
 
 
@@ -422,22 +427,22 @@ class OpenAIAssembler:
         return self.obj
 
 
-async def _consume_assemble(proxy, url, headers, body, timeout, kind):
+async def _consume_assemble(candidates, url, headers, body, timeout, kind):
     """Open an upstream STREAM through `proxy`, assemble the final object.
 
     Returns ("respond", status, content_type, body_bytes) or ("retry", reason).
     """
     try:
-        async with _client(proxy["url"], timeout) as client:
+        async with _build_client(candidates, timeout) as client:
             async with client.stream("POST", url, headers=headers, content=body) as r:
                 ct = r.headers.get("content-type", "")
                 if _is_waf(r.headers):
-                    proxy_pool.mark_bad(proxy["id"], "waf")
+                    proxy_pool.mark_bad(candidates[0]["id"], "waf")
                     return ("retry", "waf")
                 if r.status_code >= 500:
-                    proxy_pool.mark_bad(proxy["id"], "5xx")
+                    proxy_pool.mark_bad(candidates[0]["id"], "5xx")
                     return ("retry", str(r.status_code))
-                proxy_pool.mark_good(proxy["id"])
+                proxy_pool.mark_good(candidates[0]["id"])
                 # If upstream didn't actually stream (4xx error body, or plain JSON),
                 # pass it straight through.
                 if "text/event-stream" not in ct:
@@ -471,12 +476,12 @@ async def _consume_assemble(proxy, url, headers, body, timeout, kind):
                                 incomplete = True
                                 break
                     if incomplete:
-                        proxy_pool.mark_bad(proxy["id"], "truncated")
+                        proxy_pool.mark_bad(candidates[0]["id"], "truncated")
                         return ("retry", "truncated")
                 return ("respond", 200, "application/json",
                         json.dumps(obj, ensure_ascii=False).encode("utf-8"))
     except Exception as e:
-        proxy_pool.mark_bad(proxy["id"], "conn")
+        proxy_pool.mark_bad(candidates[0]["id"], "conn")
         return ("retry", f"{type(e).__name__}")
 
 
@@ -514,7 +519,7 @@ async def test_endpoint(url, api_mode, api_key, model, message):
     ep_name = url.replace("https://", "").replace("http://", "")
     for p in candidates:
         try:
-            async with httpx.AsyncClient(proxy=p["url"], timeout=httpx.Timeout(45.0)) as client:
+            async with _build_client([p], httpx.Timeout(45.0)) as client:
                 r = await client.post(full, headers=headers, content=payload)
                 ms = int((time.time() - t0) * 1000)
                 raw = r.text[:1500]
@@ -550,7 +555,8 @@ async def forward(request, path):
     upstream_key = s.get("upstream_key") or gateway_key
     require_key = s.get("require_client_key", "1") == "1"
     max_retries = int(s.get("max_retries", "4") or 4)
-    timeout = httpx.Timeout(connect=float(s.get("connect_timeout", "20") or 20),
+    conn_to = float(s.get("connect_timeout", "10") or 10)
+    timeout = httpx.Timeout(connect=conn_to,
                             read=float(s.get("read_timeout", "900") or 900),
                             write=120.0, pool=20.0)
 
@@ -651,19 +657,21 @@ async def forward(request, path):
                         theaders = _target_headers(request, tgt)
                         attempted_pids = set()
                         upstream_rejected = False
+                        consecutive_5xx = 0
                         for _ in range(max_retries):
-                            candidates = [p for p in proxy_pool.ordered_for_request(max_retries) if p["id"] not in attempted_pids]
+                            concurrency = int(db.get_setting("hedging_concurrency", "3"))
+                            candidates = [p for p in proxy_pool.ordered_for_request(max_retries * concurrency) if p["id"] not in attempted_pids][:concurrency]
                             if not candidates:
                                 break
                             p = candidates[0]
-                            attempted_pids.add(p["id"])
+                            attempted_pids.update(c["id"] for c in candidates)
                             attempts += 1
                             last_proxy = p["url"]
                             last_tgt_name = tgt["name"]
 
                             async def consume(p=p, url=url, theaders=theaders):
                                 try:
-                                    async with httpx.AsyncClient(proxy=p["url"], timeout=timeout) as client:
+                                    async with _build_client(candidates, timeout) as client:
                                         async with client.stream("POST", url, headers=theaders, content=up_body) as r:
                                             if _is_waf(r.headers):
                                                 proxy_pool.mark_bad(p["id"], "waf")
@@ -740,10 +748,22 @@ async def forward(request, path):
                                 upstream_rejected = True
                                 break  # this target rejected the content — try NEXT target
                             detail = res[1]  # ("retry", reason) -> next proxy, same target
+                            
+                            if any(x in detail for x in ["500 via", "501 via", "502 via", "503 via", "504 via"]):
+                                consecutive_5xx += 1
+                            else:
+                                consecutive_5xx = 0
+                                
                             _log(method=request.method, path=path, status=502, proxy=p["url"],
                                        attempts=attempts, stream=1, redactions=redactions,
                                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                                        ip=client_ip, model=req_model, endpoint=tgt["name"])
+                                       
+                            if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
+                                last_err = (503, {"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} returned 5xx consecutively. Assuming endpoint down."}}, tgt["name"], p["url"])
+                                upstream_rejected = True
+                                break
+
                             if "WAF" in detail or "Error" in detail or "Timeout" in detail or "non-SSE" in detail:
                                 pass
                             else:
@@ -793,23 +813,33 @@ async def forward(request, path):
                 url = _target_url(tgt["base"], path, tgt["mode"])
                 theaders = _target_headers(request, tgt)
                 attempted_pids = set()
+                consecutive_5xx = 0
                 for _ in range(max_retries):
-                    candidates = [p for p in proxy_pool.ordered_for_request(max_retries) if p["id"] not in attempted_pids]
+                    concurrency = int(db.get_setting("hedging_concurrency", "3"))
+                    candidates = [p for p in proxy_pool.ordered_for_request(max_retries * concurrency) if p["id"] not in attempted_pids][:concurrency]
                     if not candidates:
                         break
                     p = candidates[0]
-                    attempted_pids.add(p["id"])
+                    attempted_pids.update(c["id"] for c in candidates)
                     attempts += 1
-                    client = httpx.AsyncClient(proxy=p["url"], timeout=timeout)
+                    client = _build_client(candidates, timeout)
                     try:
                         req = client.build_request("POST", url, headers=theaders, content=up_body)
                         r = await client.send(req, stream=True)
                         if _is_waf(r.headers) or r.status_code >= 500:
                             await r.aclose(); await client.aclose()
                             proxy_pool.mark_bad(p["id"], "waf/5xx"); detail = f"{r.status_code} via {p['url']}"
+                            _log(method=request.method, path=path, status=502, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=req_model, endpoint=tgt["name"])
                             if _is_waf(r.headers): pass
-                            else: await _retry_backoff(attempts)
+                            else:
+                                consecutive_5xx += 1
+                                if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
+                                    _log(method=request.method, path=path, status=503, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"smart failover: {tgt['name']} returned 5xx 3 times in a row", ip=client_ip, model=req_model, endpoint=tgt["name"])
+                                    detail = f"{tgt['name']} returned 5xx consecutively"
+                                    break
+                                await _retry_backoff(attempts)
                             continue
+                        consecutive_5xx = 0
                         if r.status_code >= 400:
                             # upstream rejection -> next target
                             await r.aclose(); await client.aclose()
@@ -852,14 +882,16 @@ async def forward(request, path):
         tgt_kind = "openai" if tgt["mode"] == "openai" else "anthropic"
         upstream_rejected = False
         attempted_pids = set()
+        consecutive_5xx = 0
         for _ in range(max_retries):
-            candidates = [p for p in proxy_pool.ordered_for_request(max_retries) if p["id"] not in attempted_pids]
+            concurrency = int(db.get_setting("hedging_concurrency", "3"))
+            candidates = [p for p in proxy_pool.ordered_for_request(max_retries * concurrency) if p["id"] not in attempted_pids][:concurrency]
             if not candidates:
                 break
             p = candidates[0]
-            attempted_pids.add(p["id"])
+            attempted_pids.update(c["id"] for c in candidates)
             attempts += 1
-            res = await _consume_assemble(p, url, theaders, up_body, timeout, tgt_kind)
+            res = await _consume_assemble(candidates, url, theaders, up_body, timeout, tgt_kind)
             if res[0] == "respond":
                 _, status, ct, payload = res
                 if 200 <= status < 300:
@@ -873,10 +905,23 @@ async def forward(request, path):
                 upstream_rejected = True
                 break
             detail = res[1]
+            
+            if any(x in detail for x in ["500 via", "501 via", "502 via", "503 via", "504 via"]):
+                consecutive_5xx += 1
+            else:
+                consecutive_5xx = 0
+                
             _log(method=request.method, path=path, status=502, proxy=p["url"],
                        attempts=attempts, stream=0, redactions=redactions,
                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                        ip=client_ip, model=req_model, endpoint=tgt["name"])
+                       
+            if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
+                payload = json.dumps({"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} returned 5xx consecutively. Assuming endpoint down."}}).encode()
+                last = (503, "application/json", payload, tgt["name"], p["url"])
+                upstream_rejected = True
+                break
+
             if "WAF" in detail or "Error" in detail or "Timeout" in detail or "non-SSE" in detail:
                 pass
             else:

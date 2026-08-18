@@ -6,7 +6,7 @@ import asyncio
 import logging
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
-from . import db, proxy_pool, forwarder, agent
+from . import db, proxy_pool, forwarder, agent, github_fetcher, hedger
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(BASE, "static")
@@ -41,10 +41,15 @@ async def _auto_health_loop():
             log.warning("auto health check error: %s", exc)
 
 
+_background_tasks = set()
+
 @app.on_event("startup")
 async def _startup():
-    asyncio.create_task(_auto_health_loop())
-    asyncio.create_task(proxy_pool.hot_pool_loop())
+    t1 = asyncio.create_task(_auto_health_loop())
+    t2 = asyncio.create_task(proxy_pool.hot_pool_loop())
+    asyncio.create_task(hedger.start_server())
+    t3 = asyncio.create_task(github_fetcher.auto_fetch_loop())
+    _background_tasks.update([t1, t2, t3])
 
 # warm the DB / defaults at import
 db.conn()

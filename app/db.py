@@ -37,11 +37,16 @@ DEFAULT_SETTINGS = {
     "dedicated_strict": "0",                      # legacy; unused when auto_rotation drives selection
     "auto_rotation": "0",                         # 1 = rotate across enabled proxies on fail; 0 = single dedicated
     "hot_pool_enabled": "1",                      # 1 = hot pool engine active; 0 = off (for premium proxies)
-    "hot_pool_size": "10",                         # number of verified proxies to keep in hot pool
-    "hot_pool_refresh": "120",                     # seconds between hot pool refresh cycles
+    "hot_pool_api_test": "1",                     # 1 = HTTP API GET test; 0 = simple TCP connection test
+    "hedging_concurrency": "3",                   # Number of proxies to race in parallel for a request
+    "hot_pool_size": "100",                       # number of verified proxies to keep in hot pool
+    "hot_pool_refresh": "5",                      # seconds between hot pool refresh cycles
+    "hot_pool_test_timeout": "3.0",               # timeout in seconds for hot pool tests
+    "hot_pool_concurrency": "20",                 # max concurrent proxy tests during hot pool refresh
     # --- retry backoff (Claude Code SDK formula: min(initial*2^n, max) + jitter) ---
     "retry_initial_delay": "1.0",                 # seconds before first retry
     "retry_max_delay": "8.0",                     # cap on the backoff delay
+    "failover_5xx_threshold": "3",                # consecutive 5xx errors before assuming endpoint is down
     "global_model_override": "",                  # Override model id globally
     "claude_mimicry": "1",                        # 1 = Full A-to-Z node/claude-cli mimicry
     # --- TCP keepalive on the proxy tunnel (covers slow upstream "thinking") ---

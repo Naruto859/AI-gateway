@@ -357,7 +357,16 @@ async def _hot_pool_refresh():
     try:
         pool_size = int(db.get_setting("hot_pool_size", "10"))
         test_count = pool_size * 5  # test 5x pool size to find best
-        endpoint = db.get_setting("endpoint", "https://agentrouter.org")
+        
+        # Get primary endpoint URL
+        endpoints = db.list_endpoints()
+        primary_ep = next((e for e in endpoints if e.get("is_primary")), None)
+        if primary_ep:
+            endpoint = primary_ep["url"]
+        else:
+            endpoint = db.get_setting("endpoint", "https://agentrouter.org")
+            
+        api_test_enabled = db.get_setting("hot_pool_api_test", "1") == "1"
         
         # Get top candidates from DB sorted by latency
         candidates = db.get_hot_pool_candidates(limit=test_count)
@@ -365,10 +374,16 @@ async def _hot_pool_refresh():
             _hp_log("⚠️ No candidates found in DB")
             return
         
-        _hp_log(f"🔄 Testing {len(candidates)} candidates...")
+        _hp_log(f"🔄 Testing {len(candidates)} candidates... (API Test: {'ON' if api_test_enabled else 'OFF'})")
         
-        # Test all in parallel with short timeout
-        tasks = [_hot_check(p, endpoint) for p in candidates]
+        test_concurrency = int(db.get_setting("hot_pool_concurrency", "20") or 20)
+        sem = asyncio.Semaphore(max(1, test_concurrency))
+        async def bounded_check(p):
+            async with sem:
+                return await _hot_check(p, endpoint, api_test_enabled)
+                
+        # Test all in parallel with short timeout, bounded by dynamic concurrency
+        tasks = [bounded_check(p) for p in candidates]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         working = []
@@ -418,19 +433,43 @@ def _hp_log(msg):
             _hot_pool["log"] = _hot_pool["log"][-50:]
 
 
-async def _hot_check(proxy_dict, endpoint):
-    """Quick 3-second check for hot pool candidates."""
+async def _hot_check(proxy_dict, endpoint, api_test_enabled=True):
+    """Quick check for hot pool candidates. Can use HTTP API test or TCP test."""
     proxy_url = proxy_dict["url"]
     t0 = time.time()
+    timeout_sec = float(db.get_setting("hot_pool_test_timeout", "3.0"))
+    
     try:
-        async with httpx.AsyncClient(proxy=proxy_url,
-                                     timeout=httpx.Timeout(3.0, connect=3.0, read=3.0)) as client:
-            url = endpoint.rstrip("/") + "/v1/messages"
-            r = await client.get(url)
+        if not api_test_enabled:
+            # Simple TCP test (fast, skips HTTP WAF checks)
+            # Parse host:port from proxy_url
+            import urllib.parse
+            parsed = urllib.parse.urlparse(proxy_url if "://" in proxy_url else f"http://{proxy_url}")
+            host = parsed.hostname or parsed.path.split(":")[0]
+            port = parsed.port or (1080 if "socks" in parsed.scheme else 3128)
+            
+            _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout_sec)
+            writer.close()
+            await writer.wait_closed()
             latency = int((time.time() - t0) * 1000)
-            if _looks_like_waf(r):
-                return {"ok": False, "latency_ms": latency, "detail": f"WAF ({r.status_code})"}
-            return {"ok": True, "latency_ms": latency, "detail": f"clean ({r.status_code})"}
+            return {"ok": True, "latency_ms": latency, "detail": "TCP OK"}
+        else:
+            # Full API request test (0-token WAF Probe using GET /v1/models)
+            # This doesn't trigger provider rate-limits (no API key sent) but clearly detects Cloudflare/WAF.
+            async with httpx.AsyncClient(proxy=proxy_url,
+                                         timeout=httpx.Timeout(timeout_sec, connect=timeout_sec, read=timeout_sec)) as client:
+                url = endpoint.rstrip("/") + "/v1/models"
+                try:
+                    r = await client.get(url)
+                except Exception:
+                    # Fallback to root path if /v1/models fails unexpectedly (e.g. 404 connection closed)
+                    url = endpoint.rstrip("/") + "/"
+                    r = await client.get(url)
+                
+                latency = int((time.time() - t0) * 1000)
+                if _looks_like_waf(r):
+                    return {"ok": False, "latency_ms": latency, "detail": f"WAF ({r.status_code})"}
+                return {"ok": True, "latency_ms": latency, "detail": f"clean ({r.status_code})"}
     except Exception as e:
         return {"ok": False, "latency_ms": int((time.time() - t0) * 1000),
                 "detail": str(e)[:60]}
@@ -439,10 +478,13 @@ async def _hot_check(proxy_dict, endpoint):
 async def hot_pool_loop():
     """Background loop that refreshes the hot pool periodically."""
     while True:
-        enabled = db.get_setting("hot_pool_enabled", "1") == "1"
-        interval = int(db.get_setting("hot_pool_refresh", "120") or 120)
-        if enabled:
-            await _hot_pool_refresh()
+        try:
+            enabled = db.get_setting("hot_pool_enabled", "1") == "1"
+            interval = int(db.get_setting("hot_pool_refresh", "120") or 120)
+            if enabled:
+                await _hot_pool_refresh()
+        except Exception as e:
+            _hp_log(f"💥 LOOP CRASH: {e}")
         await asyncio.sleep(interval)
 
 
