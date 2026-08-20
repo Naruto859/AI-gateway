@@ -772,10 +772,11 @@ function openEndpointSettings(e){
 <label class="fl">Base URL</label><input id="esUrl" value="${e.url||''}">
 <label class="fl">API key</label><input id="esKey" type="text" value="${e.api_key||''}">
 <label class="fl">Model ID override</label><input id="esMod" type="text" value="${e.model_override||''}" placeholder="e.g. claude-3-opus-123">
+<label class="fl">Smart Failover Keywords (Comma-separated)</label><input id="esKw" type="text" value="${e.failover_trigger_keywords||'500,501,502,503,504,524,RemoteProtocolError'}" placeholder="e.g. 500,503,524">
 <button class="btn" id="esSave" style="margin-top:14px">Save endpoint</button>`;
   $('#epSetModal').classList.add('show');
   $('#esSave').onclick=async()=>{
-    await api('/admin/endpoint/update',{id:e.id,name:$('#esName').value.trim(),url:$('#esUrl').value.trim(),api_key:$('#esKey').value.trim(),model_override:$('#esMod').value.trim()});
+    await api('/admin/endpoint/update',{id:e.id,name:$('#esName').value.trim(),url:$('#esUrl').value.trim(),api_key:$('#esKey').value.trim(),model_override:$('#esMod').value.trim(),failover_trigger_keywords:$('#esKw').value.trim()});
     toast('Endpoint saved','ok');closeModal('epSetModal');await refresh();
   };
 }

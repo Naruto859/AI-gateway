@@ -118,7 +118,8 @@ def _init(c):
             priority  INTEGER DEFAULT 0,                     -- lower = tried first
             status    TEXT    DEFAULT 'unknown',
             note      TEXT    DEFAULT '',
-            model_override TEXT DEFAULT ''
+            model_override TEXT DEFAULT '',
+            failover_trigger_keywords TEXT DEFAULT '500,501,502,503,504'
         );
         CREATE TABLE IF NOT EXISTS api_keys (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -158,6 +159,8 @@ def _init(c):
         c.execute("ALTER TABLE endpoints ADD COLUMN name TEXT DEFAULT ''")
     if "model_override" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN model_override TEXT DEFAULT ''")
+    if "failover_trigger_keywords" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN failover_trigger_keywords TEXT DEFAULT '500,501,502,503,504'")
     # logs: add ip / model / detail for the log-detail view
     lcols = [r[1] for r in c.execute("PRAGMA table_info(logs)").fetchall()]
     if "ip" not in lcols:
@@ -436,7 +439,7 @@ def add_endpoint(url, api_mode="anthropic_messages", api_key="", model_override=
 
 
 def update_endpoint(eid, **fields):
-    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override"}
+    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords"}
     fields = {k: v for k, v in fields.items() if k in allowed_ENDPOINT_COLS}
     if not fields:
         return

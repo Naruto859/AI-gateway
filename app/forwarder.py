@@ -749,7 +749,8 @@ async def forward(request, path):
                                 break  # this target rejected the content — try NEXT target
                             detail = res[1]  # ("retry", reason) -> next proxy, same target
                             
-                            if any(x in detail for x in ["500 via", "501 via", "502 via", "503 via", "504 via"]):
+                            fail_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,RemoteProtocolError").split(",") if k.strip()]
+                            if any(x in detail for x in fail_kws):
                                 consecutive_5xx += 1
                             else:
                                 consecutive_5xx = 0
@@ -861,7 +862,19 @@ async def forward(request, path):
                         detail = f"{type(e).__name__} via {p['url']}"
                         if forwarded:
                             return
-                        proxy_pool.mark_bad(p["id"], "conn"); continue
+                        proxy_pool.mark_bad(p["id"], "conn")
+                        _log(method=request.method, path=path, status=502, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=req_model, endpoint=tgt["name"])
+                        fail_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,RemoteProtocolError").split(",") if k.strip()]
+                        if any(x in detail for x in fail_kws):
+                            consecutive_5xx += 1
+                            if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
+                                _log(method=request.method, path=path, status=503, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"smart failover: {tgt['name']} returned 5xx 3 times in a row", ip=client_ip, model=req_model, endpoint=tgt["name"])
+                                detail = f"{tgt['name']} returned 5xx consecutively"
+                                break
+                        else:
+                            consecutive_5xx = 0
+                        await _retry_backoff(attempts)
+                        continue
             yield ("event: error\ndata: " + json.dumps(
                 {"type": "error", "error": {"type": "api_error", "message": f"All proxies failed. {detail}"}}
             ) + "\n\n").encode()
@@ -906,7 +919,8 @@ async def forward(request, path):
                 break
             detail = res[1]
             
-            if any(x in detail for x in ["500 via", "501 via", "502 via", "503 via", "504 via"]):
+            fail_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,RemoteProtocolError").split(",") if k.strip()]
+            if any(x in detail for x in fail_kws):
                 consecutive_5xx += 1
             else:
                 consecutive_5xx = 0
