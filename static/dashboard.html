@@ -791,7 +791,7 @@ function renderLogs(){
     const c=l.status>=500?'s5':l.status>=400?'s4':'s2';
     const t=l.ts?new Date(l.ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
     const ms=l.ms?(l.ms>=1000?(l.ms/1000).toFixed(1)+'s':l.ms+'ms'):'';
-    let note=(l.note||'');if(note.length>30)note=note.slice(0,30)+'…';
+    let note=(l.note||'');if(note.length>120)note=note.slice(0,120)+'…';
     const ep=l.endpoint?' · '+l.endpoint:'';
     let dbox='';
     if(l.status>=400 && l.detail){
