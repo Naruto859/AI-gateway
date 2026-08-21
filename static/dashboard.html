@@ -757,6 +757,7 @@ function openAgentRouterSettings(){
 <label class="fl">Endpoint URL</label><input id="arUrl" value="${s.endpoint||'https://agentrouter.org'}">
 <label class="fl">Global Model Override</label><input id="arMod" type="text" value="${s.global_model_override||''}" placeholder="e.g. claude-3-opus-123">
 <label class="fl">API key</label><input id="arKey" type="text" value="${s.upstream_key||s.gateway_key||''}">
+<label class="fl">Smart Failover Keywords (Comma-separated)</label><input id="arKw" type="text" value="${s.agentrouter_failover_keywords||'500,501,502,503,504,524,RemoteProtocolError,ReadError'}" placeholder="e.g. 500,503,524,ReadError">
 <button class="btn" id="arSave" style="margin-top:14px">Save settings</button>`;
   $('#epSetModal').classList.add('show');
   $('#arSave').onclick=async()=>{
@@ -772,7 +773,7 @@ function openEndpointSettings(e){
 <label class="fl">Base URL</label><input id="esUrl" value="${e.url||''}">
 <label class="fl">API key</label><input id="esKey" type="text" value="${e.api_key||''}">
 <label class="fl">Model ID override</label><input id="esMod" type="text" value="${e.model_override||''}" placeholder="e.g. claude-3-opus-123">
-<label class="fl">Smart Failover Keywords (Comma-separated)</label><input id="esKw" type="text" value="${e.failover_trigger_keywords||'500,501,502,503,504,524,RemoteProtocolError'}" placeholder="e.g. 500,503,524">
+<label class="fl">Smart Failover Keywords (Comma-separated)</label><input id="esKw" type="text" value="${e.failover_trigger_keywords||'500,501,502,503,504,524,RemoteProtocolError,ReadError'}" placeholder="e.g. 500,503,524">
 <button class="btn" id="esSave" style="margin-top:14px">Save endpoint</button>`;
   $('#epSetModal').classList.add('show');
   $('#esSave').onclick=async()=>{

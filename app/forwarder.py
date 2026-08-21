@@ -148,8 +148,9 @@ def _targets(s):
     ar_base = s.get("endpoint", "https://agentrouter.org").rstrip("/")
     ar_key = s.get("upstream_key") or s.get("gateway_key", "")
     ar_enabled = s.get("agentrouter_enabled", "1") != "0"
-    ar_target = {"name": "AgentRouter", "base": ar_base, "key": ar_key,
-                 "mode": "anthropic", "agentrouter": True, "model_override": s.get("global_model_override", "")}
+    ar_target = {"name": "AgentRouter", "base": ar_base, "key": ar_key, "mode": "anthropic",
+                 "agentrouter": True, "model_override": s.get("global_model_override", ""),
+                 "failover_trigger_keywords": s.get("agentrouter_failover_keywords", "500,501,502,503,504,524,RemoteProtocolError,ReadError")}
 
     customs = [e for e in db.list_endpoints() if e.get("enabled")]
     def mk(e):
