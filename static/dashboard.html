@@ -786,11 +786,16 @@ function openAgentRouterSettings(){
 <label class="fl">Endpoint URL</label><input id="arUrl" value="${s.endpoint||'https://agentrouter.org'}">
 <label class="fl">Global Model Override</label><input id="arMod" type="text" value="${s.global_model_override||''}" placeholder="e.g. claude-3-opus-123">
 <label class="fl">API key</label><input id="arKey" type="text" value="${s.upstream_key||s.gateway_key||''}">
-<label class="fl">Smart Failover Keywords (Comma-separated)</label><input id="arKw" type="text" value="${s.agentrouter_failover_keywords||'500,501,502,503,504,524,RemoteProtocolError,ReadError'}" placeholder="e.g. 500,503,524,ReadError">
+<label class="fl">Proxy Switch Errors (Comma-separated)</label>
+<div style="font-size:11px;color:var(--ink-faint);margin-bottom:4px;line-height:1.2">Errors that will cause the system to drop the current proxy IP and try another proxy.</div>
+<input id="arKw" type="text" value="${s.agentrouter_failover_keywords||'500,501,502,503,504,524,401,403,unauthorized'}" placeholder="e.g. 500,403,unauthorized">
+<label class="fl" style="margin-top:10px">Endpoint Switch Errors (Comma-separated)</label>
+<div style="font-size:11px;color:var(--ink-faint);margin-bottom:4px;line-height:1.2">Errors that will cause the system to abandon this endpoint entirely and switch to the next routing target.</div>
+<input id="arEpKw" type="text" value="${s.agentrouter_endpoint_failover_keywords||'Thinking,model_not_found,invalid_api_key'}" placeholder="e.g. Thinking,model_not_found">
 <button class="btn" id="arSave" style="margin-top:14px">Save settings</button>`;
   $('#epSetModal').classList.add('show');
   $('#arSave').onclick=async()=>{
-    await api('/admin/settings',{endpoint:$('#arUrl').value.trim(),upstream_key:$('#arKey').value.trim(),gateway_key:$('#arKey').value.trim(),global_model_override:$('#arMod').value.trim()});
+    await api('/admin/settings',{endpoint:$('#arUrl').value.trim(),upstream_key:$('#arKey').value.trim(),gateway_key:$('#arKey').value.trim(),global_model_override:$('#arMod').value.trim(),agentrouter_failover_keywords:$('#arKw').value.trim(),agentrouter_endpoint_failover_keywords:$('#arEpKw').value.trim()});
     toast('AgentRouter settings saved','ok');closeModal('epSetModal');await refresh();
   };
 }
