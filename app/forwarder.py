@@ -677,24 +677,30 @@ async def forward(request, path):
                                             if _is_waf(r.headers):
                                                 proxy_pool.mark_bad(p["id"], "waf")
                                                 return ("retry", f"WAF via {p['url']}")
-                                            if r.status_code >= 500:
-                                                proxy_pool.mark_bad(p["id"], "5xx")
-                                                return ("retry", f"{r.status_code} via {p['url']}")
                                             ct = r.headers.get("content-type", "")
-                                            if "text/event-stream" not in ct:
+                                            if r.status_code >= 400 and "text/event-stream" not in ct:
                                                 raw = await r.aread()
-                                                if r.status_code >= 400:
-                                                    # genuine upstream rejection — switch to next TARGET
+                                                err_str = str(r.status_code) + " " + raw[:300].decode('utf-8', 'replace')
+                                                proxy_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,401,403,unauthorized").split(",") if k.strip()]
+                                                ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key").split(",") if k.strip()]
+                                                
+                                                if any(x in err_str for x in ep_kws):
                                                     proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
-                                                    try:
-                                                        err = json.loads(raw)
-                                                        if not isinstance(err, dict) or "error" not in err:
-                                                            raise ValueError
-                                                    except Exception:
-                                                        err = {"type": "error", "error": {"type": "api_error",
-                                                               "message": f"Upstream HTTP {r.status_code}: "
-                                                                          f"{raw[:300].decode('utf-8', 'replace')}"}}
+                                                    try: err = json.loads(raw)
+                                                    except: err = {"type": "error", "error": {"message": err_str}}
                                                     return ("error", r.status_code, err)
+                                                elif any(x in err_str for x in proxy_kws):
+                                                    proxy_pool.mark_bad(p["id"], f"{r.status_code} proxy switch")
+                                                    return ("retry", f"{r.status_code} proxy switch: {err_str[:100]}")
+                                                else:
+                                                    if r.status_code >= 500:
+                                                        proxy_pool.mark_bad(p["id"], "5xx")
+                                                        return ("retry", f"{r.status_code} via {p['url']}")
+                                                    else:
+                                                        proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                                                        try: err = json.loads(raw)
+                                                        except: err = {"type": "error", "error": {"message": err_str}}
+                                                        return ("error", r.status_code, err)
                                                 proxy_pool.mark_bad(p["id"], "non-sse")
                                                 return ("retry", f"non-SSE {r.status_code} via {p['url']}")
                                             asm = AnthropicAssembler()
@@ -750,21 +756,27 @@ async def forward(request, path):
                                 break  # this target rejected the content — try NEXT target
                             detail = res[1]  # ("retry", reason) -> next proxy, same target
                             
-                            fail_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,RemoteProtocolError").split(",") if k.strip()]
-                            if any(x in detail for x in fail_kws):
-                                consecutive_5xx += 1
-                            else:
-                                consecutive_5xx = 0
-                                
+                            proxy_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,401,403,unauthorized").split(",") if k.strip()]
+                            ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key").split(",") if k.strip()]
+                            
                             _log(method=request.method, path=path, status=502, proxy=p["url"],
                                        attempts=attempts, stream=1, redactions=redactions,
                                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                                        ip=client_ip, model=req_model, endpoint=tgt["name"])
-                                       
-                            if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
-                                last_err = (503, {"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} returned 5xx consecutively. Assuming endpoint down."}}, tgt["name"], p["url"])
+                            
+                            if any(x in detail for x in ep_kws):
+                                last_err = (503, {"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover keyword."}}, tgt["name"], p["url"])
                                 upstream_rejected = True
                                 break
+                            elif any(x in detail for x in proxy_kws):
+                                pass # Just retry proxy
+                            else:
+                                # Default counting for consecutive unknown errors
+                                consecutive_5xx += 1
+                                if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
+                                    last_err = (503, {"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} failed consecutively."}}, tgt["name"], p["url"])
+                                    upstream_rejected = True
+                                    break
 
                             if "WAF" in detail or "Error" in detail or "Timeout" in detail or "non-SSE" in detail:
                                 pass
@@ -920,22 +932,28 @@ async def forward(request, path):
                 break
             detail = res[1]
             
-            fail_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,RemoteProtocolError").split(",") if k.strip()]
-            if any(x in detail for x in fail_kws):
-                consecutive_5xx += 1
-            else:
-                consecutive_5xx = 0
-                
+            proxy_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,401,403,unauthorized").split(",") if k.strip()]
+            ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key").split(",") if k.strip()]
+            
             _log(method=request.method, path=path, status=502, proxy=p["url"],
                        attempts=attempts, stream=0, redactions=redactions,
                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                        ip=client_ip, model=req_model, endpoint=tgt["name"])
                        
-            if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
-                payload = json.dumps({"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} returned 5xx consecutively. Assuming endpoint down."}}).encode()
+            if any(x in detail for x in ep_kws):
+                payload = json.dumps({"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover."}}).encode()
                 last = (503, "application/json", payload, tgt["name"], p["url"])
                 upstream_rejected = True
                 break
+            elif any(x in detail for x in proxy_kws):
+                pass
+            else:
+                consecutive_5xx += 1
+                if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
+                    payload = json.dumps({"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} failed consecutively."}}).encode()
+                    last = (503, "application/json", payload, tgt["name"], p["url"])
+                    upstream_rejected = True
+                    break
 
             if "WAF" in detail or "Error" in detail or "Timeout" in detail or "non-SSE" in detail:
                 pass

@@ -119,7 +119,8 @@ def _init(c):
             status    TEXT    DEFAULT 'unknown',
             note      TEXT    DEFAULT '',
             model_override TEXT DEFAULT '',
-            failover_trigger_keywords TEXT DEFAULT '500,501,502,503,504'
+            failover_trigger_keywords TEXT DEFAULT '500,501,502,503,504,524,401,403,unauthorized',
+            endpoint_failover_keywords TEXT DEFAULT 'Thinking,model_not_found,invalid_api_key'
         );
         CREATE TABLE IF NOT EXISTS api_keys (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -160,7 +161,8 @@ def _init(c):
     if "model_override" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN model_override TEXT DEFAULT ''")
     if "failover_trigger_keywords" not in ecols:
-        c.execute("ALTER TABLE endpoints ADD COLUMN failover_trigger_keywords TEXT DEFAULT '500,501,502,503,504'")
+        c.execute("ALTER TABLE endpoints ADD COLUMN failover_trigger_keywords TEXT DEFAULT '500,501,502,503,504,524,401,403,unauthorized',
+            endpoint_failover_keywords TEXT DEFAULT 'Thinking,model_not_found,invalid_api_key'")
     # logs: add ip / model / detail for the log-detail view
     lcols = [r[1] for r in c.execute("PRAGMA table_info(logs)").fetchall()]
     if "ip" not in lcols:
