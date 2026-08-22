@@ -228,6 +228,11 @@ def proxy_counts():
                 res[r["status"]] = r["cnt"]
         return res
 
+def get_untested_proxies(limit=50):
+    query = "SELECT * FROM proxies WHERE status = 'unknown' AND enabled = 1 ORDER BY RANDOM() LIMIT ?"
+    with _lock:
+        return [dict(r) for r in conn().execute(query, (limit,)).fetchall()]
+
 def get_best_proxies(limit=10, exclude_ids=None):
     if not exclude_ids:
         exclude_ids = [-1]
@@ -284,6 +289,16 @@ def get_hot_pool_candidates(limit=50):
     """
     with _lock:
         return [dict(r) for r in conn().execute(query, (limit,)).fetchall()]
+
+def delete_dead_proxies(cutoff_time):
+    with _lock:
+        c = conn()
+        # Delete banned/unhealthy outright
+        cur = c.execute("DELETE FROM proxies WHERE status IN ('banned', 'unhealthy')")
+        # Delete stale 'ok' proxies (not checked in last 24h)
+        c.execute("DELETE FROM proxies WHERE status = 'ok' AND last_checked > 0 AND last_checked < ?", (cutoff_time,))
+        c.commit()
+        return cur.rowcount
 
 def delete_old_disabled_proxies(cutoff_time):
     with _lock:

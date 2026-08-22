@@ -508,3 +508,57 @@ def get_hot_pool_status():
             "cycle_passed": _hot_pool["cycle_passed"],
             "log": list(_hot_pool["log"]),
         }
+
+async def background_proxy_checker_loop():
+    """Background loop that actively TCP tests unknown proxies to find good ones."""
+    import urllib.parse
+    
+    async def fast_tcp_check(proxy_dict):
+        proxy_url = proxy_dict["url"]
+        t0 = time.time()
+        try:
+            parsed = urllib.parse.urlparse(proxy_url if "://" in proxy_url else f"http://{proxy_url}")
+            host = parsed.hostname or parsed.path.split(":")[0]
+            port = parsed.port or (1080 if "socks" in parsed.scheme else 3128)
+            
+            _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=3.0)
+            writer.close()
+            await writer.wait_closed()
+            latency = int((time.time() - t0) * 1000)
+            return proxy_dict["id"], True, latency
+        except Exception:
+            return proxy_dict["id"], False, 0
+
+    while True:
+        try:
+            enabled = db.get_setting("proxy_scanner_enabled", "1") == "1"
+            interval = int(db.get_setting("proxy_scanner_interval", "60") or 60)
+            batch = int(db.get_setting("proxy_scanner_batch", "50") or 50)
+            
+            if enabled:
+                candidates = db.get_untested_proxies(limit=batch)
+                if candidates:
+                    tasks = [fast_tcp_check(p) for p in candidates]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    for res in results:
+                        if isinstance(res, Exception): continue
+                        pid, success, lat = res
+                        if success:
+                            db.update_proxy_status(pid, "ok", latency_ms=lat)
+                        else:
+                            db.update_proxy_status(pid, "unhealthy")
+        except Exception as e:
+            print(f"Scanner error: {e}")
+            
+        await asyncio.sleep(interval)
+
+async def background_cleanup_loop():
+    """Background loop to delete dead proxies periodically."""
+    while True:
+        try:
+            # Delete unhealthy/banned and stale ok proxies (>24h old)
+            cutoff = time.time() - 86400
+            db.delete_dead_proxies(cutoff)
+        except Exception:
+            pass
+        await asyncio.sleep(3600)  # run once an hour

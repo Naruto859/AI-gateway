@@ -261,8 +261,10 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M16 3l5 5-5 5M21 8H9a4 4 0 00-4 4v9"/></svg></span>Rotation</h2>
 <p class="sub">Switch IPs when one fails.</p>
 <div class="field"><div class="meta"><div class="lbl">Auto rotation</div><div class="desc">OFF = use one pinned proxy (all retries same IP). ON = rotate across enabled proxies when one fails.</div></div><div class="ctrl"><div class="tg" id="tgRotation"></div></div></div>
+<div id="rotSettingsWrap">
 <div id="rotInfo" style="font-size:12px;color:var(--ink-faint);padding:2px 2px 8px;line-height:1.5"></div>
 <div class="field stack"><div class="meta"><div class="lbl">Dedicated proxy</div><div class="desc">Single IP used when rotation is OFF. Add this exit IP to agentrouter watchlist.</div></div><div class="ctrl" id="dedWrap"></div></div>
+</div>
 </div>
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></span>Hot Pool Engine <span id="hpStatus" style="margin-left:auto;font-size:11px;font-weight:700;padding:3px 9px;border-radius:7px;background:var(--g-100);color:var(--g-700)"></span></h2>
@@ -276,6 +278,18 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div style="padding:10px 0 4px;display:flex;gap:9px;align-items:center">
 <button class="btn" id="saveHotPool" style="flex:1">Save hot pool settings</button>
 <button class="hp-live-btn" id="openHotPool"><span class="live-dot"></span> Live View</button>
+</div>
+</div>
+</div>
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span>Active Proxy Scanner</h2>
+<p class="sub">Fast background TCP tester. Accurately finds live proxies from imported/unknown lists.</p>
+<div class="field"><div class="meta"><div class="lbl">Proxy Scanner</div><div class="desc">ON = constantly test new proxies in the background to build a massive verified pool. Works even if Hot Pool is OFF.</div></div><div class="ctrl"><div class="tg" id="tgScanner"></div></div></div>
+<div id="scanSettingsWrap">
+<div class="field"><div class="meta"><div class="lbl">Scan interval</div><div class="desc">Seconds to wait between testing batches.</div></div><div class="ctrl"><input type="number" data-set="proxy_scanner_interval" style="width:70px"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Batch size</div><div class="desc">Number of unknown proxies to test per batch.</div></div><div class="ctrl"><input type="number" data-set="proxy_scanner_batch" style="width:70px"></div></div>
+<div style="padding:10px 0 4px;display:flex;gap:9px;align-items:center">
+<button class="btn" id="saveScannerBtn" style="flex:1">Save scanner settings</button>
 </div>
 </div>
 </div>
@@ -578,11 +592,22 @@ function mkCsel(id,opts,cur,cb){
 }
 
 // toggles
-$('#tgRotation').onclick=async()=>{const on=!$('#tgRotation').classList.contains('on');$('#tgRotation').classList.toggle('on',on);await api('/admin/settings',{auto_rotation:on?'1':'0'});ST.settings.auto_rotation=on?'1':'0';render();toast('Auto rotation '+(on?'ON':'OFF'),'ok');};
+$('#tgRotation').onclick=async()=>{const on=!$('#tgRotation').classList.contains('on');$('#tgRotation').classList.toggle('on',on);if($('#rotSettingsWrap')) $('#rotSettingsWrap').style.display=on?'none':'block';await api('/admin/settings',{auto_rotation:on?'1':'0'});ST.settings.auto_rotation=on?'1':'0';render();toast('Auto rotation '+(on?'ON':'OFF'),'ok');};
 $('#tgTranslate').onclick=async()=>{const on=!$('#tgTranslate').classList.contains('on');$('#tgTranslate').classList.toggle('on',on);await api('/admin/settings',{format_translation:on?'1':'0'});ST.settings.format_translation=on?'1':'0';toast('Translation '+(on?'ON':'OFF'),'ok');};
 $('#tgMimicry').onclick=async()=>{const on=!$('#tgMimicry').classList.contains('on');$('#tgMimicry').classList.toggle('on',on);await api('/admin/settings',{claude_mimicry:on?'1':'0'});ST.settings.claude_mimicry=on?'1':'0';toast('Mimicry '+(on?'ON':'OFF'),'ok');};
 $('#tgHotPool').onclick=async()=>{const on=!$('#tgHotPool').classList.contains('on');$('#tgHotPool').classList.toggle('on',on);$('#hpSettingsWrap').style.display=on?'block':'none';await api('/admin/settings',{hot_pool_enabled:on?'1':'0'});ST.settings.hot_pool_enabled=on?'1':'0';toast('Hot Pool '+(on?'ON':'OFF'),'ok');};
 $('#tgHotPoolApi').onclick=async()=>{const on=!$('#tgHotPoolApi').classList.contains('on');$('#tgHotPoolApi').classList.toggle('on',on);await api('/admin/settings',{hot_pool_api_test:on?'1':'0'});ST.settings.hot_pool_api_test=on?'1':'0';toast('API testing '+(on?'ON':'OFF'),'ok');};
+
+$('#tgScanner').onclick=async()=>{const on=!$('#tgScanner').classList.contains('on');$('#tgScanner').classList.toggle('on',on);if($('#scanSettingsWrap')) $('#scanSettingsWrap').style.display=on?'block':'none';await api('/admin/settings',{proxy_scanner_enabled:on?'1':'0'});ST.settings.proxy_scanner_enabled=on?'1':'0';toast('Scanner '+(on?'ON':'OFF'),'ok');};
+$('#saveScannerBtn').onclick=async()=>{
+  const interval=$('input[data-set="proxy_scanner_interval"]').value;
+  const batch=$('input[data-set="proxy_scanner_batch"]').value;
+  await api('/admin/settings',{proxy_scanner_interval:interval,proxy_scanner_batch:batch});
+  toast('Scanner settings saved','ok');
+  ['proxy_scanner_interval','proxy_scanner_batch'].forEach(k=>{const el=$('[data-set="'+k+'"]');if(el)el._dirty=false;});
+  ST.settings.proxy_scanner_interval=interval;ST.settings.proxy_scanner_batch=batch;
+  render();
+};
 $('#saveHotPool').onclick=async()=>{
   const size=$('input[data-set="hot_pool_size"]').value;
   const refresh=$('input[data-set="hot_pool_refresh"]').value;
@@ -650,12 +675,16 @@ function render(){
   render._inited=true;
   $('#publicUrl').value=location.origin;
   // toggles
-  $('#tgRotation').classList.toggle('on',s.auto_rotation==='1');
+    $('#tgRotation').classList.toggle('on',s.auto_rotation==='1');
+  if($('#rotSettingsWrap')) $('#rotSettingsWrap').style.display=s.auto_rotation==='1'?'none':'block';
   $('#tgTranslate').classList.toggle('on',s.format_translation==='1');
   $('#tgMimicry').classList.toggle('on',s.claude_mimicry==='1');
   $('#tgHotPool').classList.toggle('on',s.hot_pool_enabled==='1');
   if($('#hpSettingsWrap')) $('#hpSettingsWrap').style.display=s.hot_pool_enabled==='1'?'block':'none';
-  $('#tgHotPoolApi').classList.toggle('on',s.hot_pool_api_test!=='0');
+    $('#tgHotPoolApi').classList.toggle('on',s.hot_pool_api_test!=='0');
+  
+  $('#tgScanner').classList.toggle('on',s.proxy_scanner_enabled!=='0');
+  if($('#scanSettingsWrap')) $('#scanSettingsWrap').style.display=s.proxy_scanner_enabled!=='0'?'block':'none';
   
   const elHc = $('input[data-set="hedging_concurrency"]');
   if(elHc && !elHc._dirty) elHc.value = s.hedging_concurrency || "3";

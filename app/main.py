@@ -47,6 +47,8 @@ _background_tasks = set()
 async def _startup():
     t1 = asyncio.create_task(_auto_health_loop())
     t2 = asyncio.create_task(proxy_pool.hot_pool_loop())
+    t4 = asyncio.create_task(proxy_pool.background_proxy_checker_loop())
+    t5 = asyncio.create_task(proxy_pool.background_cleanup_loop())
     asyncio.create_task(hedger.start_server())
     t3 = asyncio.create_task(github_fetcher.auto_fetch_loop())
     _background_tasks.update([t1, t2, t3])
