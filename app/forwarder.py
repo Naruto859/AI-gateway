@@ -646,6 +646,7 @@ async def forward(request, path):
 
         if kind == "anthropic":
             async def gen():
+                current_model_log = req_model
                 attempts = 0
                 detail = ""
                 last_err = None  # (status, err, target_name, proxy_url) from an upstream 4xx
