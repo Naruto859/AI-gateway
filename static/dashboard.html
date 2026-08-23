@@ -733,21 +733,10 @@ ${isPin?'<span class="badge pin">Pinned</span>':''}
 function epName(e){return e.name||e.url.replace(/^https?:\/\//,'');}
 function renderEndpoints(){
   const eps=ST.endpoints||[];
-  const arEnabled=ST.settings.agentrouter_enabled!=='0';
-  const arPrimary=!eps.some(e=>e.is_primary);
-  const arUrl=(ST.settings.endpoint||'https://agentrouter.org').replace(/^https?:\/\//,'');
-  $('#epCount').textContent=(eps.length+1)+' total';
-  const activePrimary=arPrimary?('AgentRouter · '+arUrl):(()=>{const e=eps.find(x=>x.is_primary);return e?epName(e):arUrl;})();
+  $('#epCount').textContent=eps.length+' total';
+  const activePrimary=()=>{const e=eps.find(x=>x.is_primary);return e?epName(e):'None';}();
   const ai=$('#activeEpInfo');if(ai)ai.innerHTML=`⚡ Primary in use: <b>${activePrimary}</b>`;
-  let h=`<div class="ep"><span class="eprank">${arPrimary?'★':'1'}</span>
-<div class="pi"><div class="ip" style="font-family:inherit">${arUrl}</div><div class="tag">AgentRouter (gateway) · ${arPrimary?'primary':'fallback'}</div></div>
-<div class="epacts">
-<button class="sbtn star${arPrimary?' on':''}" data-arprimary="1">${arPrimary?'★ Primary':'Set primary'}</button>
-<button class="sbtn chat" data-archat="1">💬 Chat</button>
-<button class="sbtn" data-arset="1">⚙ Settings</button>
-<div class="tg ${arEnabled?'on':''}" data-artg="1"></div>
-</div></div>`;
-  h+=eps.map((e)=>{
+  let h=eps.map((e)=>{
     const prim=!!e.is_primary;
     return`<div class="ep"><span class="eprank">${prim?'★':e.priority||'·'}</span>
 <div class="pi"><div class="ip" style="font-family:inherit">${epName(e)}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI':'Anthropic'} · ${prim?'primary':'fallback'}${e.status&&e.status!=='unknown'?' · '+e.status:''}</div></div>
@@ -760,10 +749,7 @@ function renderEndpoints(){
 </div></div>`;
   }).join('');
   $('#epList').innerHTML=h;
-  $$('#epList [data-artg]').forEach(b=>b.onclick=async()=>{const on=!b.classList.contains('on');await api('/admin/settings',{agentrouter_enabled:on?'1':'0'});ST.settings.agentrouter_enabled=on?'1':'0';toast('AgentRouter '+(on?'ON':'OFF'),'ok');render();});
-  $$('#epList [data-arprimary]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/primary',{id:0});toast('AgentRouter is primary','ok');await refresh();});
-  $$('#epList [data-archat]').forEach(b=>b.onclick=()=>openEndpointChat({name:'AgentRouter',url:ST.settings.endpoint||'https://agentrouter.org',api_mode:'anthropic_messages',api_key:'',model:ST.settings.model_note||'claude-sonnet-4-6'}));
-  $$('#epList [data-arset]').forEach(b=>b.onclick=()=>openAgentRouterSettings());
+
   $$('#epList [data-eptg]').forEach(b=>b.onclick=async()=>{const e=eps.find(x=>x.id==b.dataset.eptg);await api('/admin/endpoint/update',{id:+b.dataset.eptg,enabled:e.enabled?0:1});toast('Endpoint '+(e.enabled?'OFF':'ON'),'ok');await refresh();});
   $$('#epList [data-epprimary]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/primary',{id:+b.dataset.epprimary});toast('Primary set','ok');await refresh();});
   $$('#epList [data-epdel]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/delete',{id:+b.dataset.epdel});toast('Endpoint removed','ok');await refresh();});
