@@ -128,57 +128,29 @@ def _err(message, status=503, etype="api_error"):
 
 
 def _targets(s):
-    """Build the ordered list of upstream targets for ONE request.
-
-    Each request starts fresh from the PRIMARY (no stickiness): primary is always
-    tried first, then the rest in order. If a target returns an upstream error
-    (content-blocked / 4xx after a proxy connected) we fall through to the NEXT
-    target. Order:
-        1. the primary  (custom endpoint flagged is_primary, OR agentrouter if none)
-        2. AgentRouter  (the gateway's built-in upstream) unless disabled / already primary
-        3. remaining enabled custom endpoints, by priority
-
-    A target = {name, base, key, mode, agentrouter}:
-        base       = upstream base URL (path is appended later)
-        key        = api key to send (custom key, else global upstream_key)
-        mode       = 'anthropic' | 'openai'
-        agentrouter= True only for the built-in agentrouter target (claude-cli
-                     fingerprint headers apply only to it)
-    """
-    ar_base = s.get("endpoint", "https://agentrouter.org").rstrip("/")
-    ar_key = s.get("upstream_key") or s.get("gateway_key", "")
-    ar_enabled = s.get("agentrouter_enabled", "1") != "0"
-    ar_target = {"name": "AgentRouter", "base": ar_base, "key": ar_key, "mode": "anthropic",
-                 "agentrouter": True, "model_override": s.get("global_model_override", ""),
-                 "failover_trigger_keywords": s.get("agentrouter_failover_keywords", "500,501,502,503,504,524,RemoteProtocolError,ReadError")}
-
     customs = [e for e in db.list_endpoints() if e.get("enabled")]
     def mk(e):
         return {
-            "name": e.get("name") or e["url"].replace("https://", "").replace("http://", ""),
+            "name": e["url"].replace("https://", "").replace("http://", ""),
             "base": e["url"].rstrip("/"),
-            "key": e.get("api_key") or ar_key,
+            "key": e.get("api_key") or s.get("gateway_key", ""),
             "mode": "openai" if e.get("api_mode") == "chat_completions" else "anthropic",
             "agentrouter": False,
             "id": e.get("id"),
             "model_override": e.get("model_override") or s.get("global_model_override", ""),
+            "failover_trigger_keywords": e.get("failover_trigger_keywords", ""),
+            "endpoint_failover_keywords": e.get("endpoint_failover_keywords", "")
         }
+    
     primary_custom = next((e for e in customs if e.get("is_primary")), None)
-
     out = []
     if primary_custom:
-        out.append(mk(primary_custom))                       # 1. custom primary
-        if ar_enabled:
-            out.append(ar_target)                            # 2. agentrouter
-    elif ar_enabled:
-        out.append(ar_target)                                # 1. agentrouter primary
-    # 3. remaining enabled customs (skip the primary already added)
+        out.append(mk(primary_custom))
     for e in customs:
         if primary_custom and e.get("id") == primary_custom.get("id"):
             continue
         out.append(mk(e))
-    # safety: never return empty (fall back to agentrouter even if disabled)
-    return out or [ar_target]
+    return out
 
 
 def _target_url(base, path, mode):

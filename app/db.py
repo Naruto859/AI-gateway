@@ -43,6 +43,14 @@ DEFAULT_SETTINGS = {
     "hot_pool_refresh": "5",                      # seconds between hot pool refresh cycles
     "hot_pool_test_timeout": "3.0",               # timeout in seconds for hot pool tests
     "hot_pool_concurrency": "20",                 # max concurrent proxy tests during hot pool refresh
+    "proxy_scanner_interval": "5",
+    "proxy_scanner_batch": "150",
+    "failover_5xx_threshold": "3",
+    "retry_initial_delay": "0.5",
+    "retry_max_delay": "5.0",
+    "keepalive_idle": "5",
+    "keepalive_intvl": "5",
+    "keepalive_cnt": "180",
     # --- retry backoff (Claude Code SDK formula: min(initial*2^n, max) + jitter) ---
     "retry_initial_delay": "1.0",                 # seconds before first retry
     "retry_max_delay": "8.0",                     # cap on the backoff delay
