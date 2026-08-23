@@ -592,7 +592,6 @@ function mkCsel(id,opts,cur,cb){
 
 // toggles
 $('#tgRotation').onclick=async()=>{const on=!$('#tgRotation').classList.contains('on');$('#tgRotation').classList.toggle('on',on);if($('#rotSettingsWrap')) $('#rotSettingsWrap').style.display=on?'none':'block';await api('/admin/settings',{auto_rotation:on?'1':'0'});ST.settings.auto_rotation=on?'1':'0';render();toast('Auto rotation '+(on?'ON':'OFF'),'ok');};
-$('#tgTranslate').onclick=async()=>{const on=!$('#tgTranslate').classList.contains('on');$('#tgTranslate').classList.toggle('on',on);await api('/admin/settings',{format_translation:on?'1':'0'});ST.settings.format_translation=on?'1':'0';toast('Translation '+(on?'ON':'OFF'),'ok');};
 $('#tgMimicry').onclick=async()=>{const on=!$('#tgMimicry').classList.contains('on');$('#tgMimicry').classList.toggle('on',on);await api('/admin/settings',{claude_mimicry:on?'1':'0'});ST.settings.claude_mimicry=on?'1':'0';toast('Mimicry '+(on?'ON':'OFF'),'ok');};
 $('#tgHotPool').onclick=async()=>{const on=!$('#tgHotPool').classList.contains('on');$('#tgHotPool').classList.toggle('on',on);$('#hpSettingsWrap').style.display=on?'block':'none';await api('/admin/settings',{hot_pool_enabled:on?'1':'0'});ST.settings.hot_pool_enabled=on?'1':'0';toast('Hot Pool '+(on?'ON':'OFF'),'ok');};
 $('#tgHotPoolApi').onclick=async()=>{const on=!$('#tgHotPoolApi').classList.contains('on');$('#tgHotPoolApi').classList.toggle('on',on);await api('/admin/settings',{hot_pool_api_test:on?'1':'0'});ST.settings.hot_pool_api_test=on?'1':'0';toast('API testing '+(on?'ON':'OFF'),'ok');};
@@ -676,8 +675,7 @@ function render(){
   // toggles
     $('#tgRotation').classList.toggle('on',s.auto_rotation==='1');
   if($('#rotSettingsWrap')) $('#rotSettingsWrap').style.display=s.auto_rotation==='1'?'none':'block';
-  $('#tgTranslate').classList.toggle('on',s.format_translation==='1');
-  $('#tgMimicry').classList.toggle('on',s.claude_mimicry==='1');
+    $('#tgMimicry').classList.toggle('on',s.claude_mimicry==='1');
   $('#tgHotPool').classList.toggle('on',s.hot_pool_enabled==='1');
   if($('#hpSettingsWrap')) $('#hpSettingsWrap').style.display=s.hot_pool_enabled==='1'?'block':'none';
     $('#tgHotPoolApi').classList.toggle('on',s.hot_pool_api_test!=='0');
