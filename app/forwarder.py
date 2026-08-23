@@ -657,7 +657,7 @@ async def forward(request, path):
                                                 raw = await r.aread()
                                                 err_str = str(r.status_code) + " " + raw[:300].decode('utf-8', 'replace')
                                                 proxy_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,401,403,unauthorized").split(",") if k.strip()]
-                                                ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key").split(",") if k.strip()]
+                                                ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key,new_api_error,预扣").split(",") if k.strip()]
                                                 
                                                 if any(x in err_str for x in ep_kws):
                                                     proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
@@ -732,7 +732,7 @@ async def forward(request, path):
                             detail = res[1]  # ("retry", reason) -> next proxy, same target
                             
                             proxy_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,401,403,unauthorized").split(",") if k.strip()]
-                            ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key").split(",") if k.strip()]
+                            ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key,new_api_error,预扣").split(",") if k.strip()]
                             
                             _log(method=request.method, path=path, status=502, proxy=p["url"],
                                        attempts=attempts, stream=1, redactions=redactions,
@@ -911,7 +911,7 @@ async def forward(request, path):
             detail = res[1]
             
             proxy_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,401,403,unauthorized").split(",") if k.strip()]
-            ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key").split(",") if k.strip()]
+            ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key,new_api_error,预扣").split(",") if k.strip()]
             
             _log(method=request.method, path=path, status=502, proxy=p["url"],
                        attempts=attempts, stream=0, redactions=redactions,

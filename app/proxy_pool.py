@@ -544,9 +544,9 @@ async def background_proxy_checker_loop():
                         if isinstance(res, Exception): continue
                         pid, success, lat = res
                         if success:
-                            db.update_proxy_status(pid, "ok", latency_ms=lat)
+                            db.update_proxy(pid, status="ok", latency_ms=lat)
                         else:
-                            db.update_proxy_status(pid, "unhealthy")
+                            db.update_proxy(pid, status="unhealthy")
         except Exception as e:
             print(f"Scanner error: {e}")
             

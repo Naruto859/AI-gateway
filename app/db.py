@@ -456,10 +456,11 @@ def list_endpoints():
 def add_endpoint(url, api_mode="anthropic_messages", api_key="", model_override=""):
     with _lock:
         c = conn()
-        # new endpoint goes last in priority
+        count = c.execute("SELECT COUNT(*) FROM endpoints").fetchone()[0]
+        is_primary = 1 if count == 0 else 0
         nxt = c.execute("SELECT COALESCE(MAX(priority),0)+1 FROM endpoints").fetchone()[0]
-        c.execute("INSERT OR IGNORE INTO endpoints(url, api_mode, api_key, model_override, priority) VALUES (?,?,?,?,?)",
-                  (url, api_mode, api_key, model_override, nxt))
+        c.execute("INSERT OR IGNORE INTO endpoints(url, api_mode, api_key, model_override, priority, is_primary) VALUES (?,?,?,?,?,?)",
+                  (url, api_mode, api_key, model_override, nxt, is_primary))
         c.commit()
         return c.total_changes
 

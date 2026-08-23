@@ -789,7 +789,7 @@ function openEndpointSettings(e){
 <input id="esKw" type="text" value="${e.failover_trigger_keywords||'500,501,502,503,504,524,401,403,unauthorized'}" placeholder="e.g. 500,403,unauthorized">
 <label class="fl" style="margin-top:10px">Endpoint Switch Errors (Comma-separated)</label>
 <div style="font-size:11px;color:var(--ink-faint);margin-bottom:4px;line-height:1.2">Errors that will cause the system to abandon this endpoint entirely and switch to the next routing target.</div>
-<input id="esEpKw" type="text" value="${e.endpoint_failover_keywords||'Thinking,model_not_found,invalid_api_key'}" placeholder="e.g. Thinking,model_not_found">
+<input id="esEpKw" type="text" value="${e.endpoint_failover_keywords||'Thinking,model_not_found,invalid_api_key,new_api_error,预扣'}" placeholder="e.g. Thinking,model_not_found">
 <button class="btn" id="esSave" style="margin-top:14px">Save endpoint</button>`;
   $('#epSetModal').classList.add('show');
   $('#esSave').onclick=async()=>{
