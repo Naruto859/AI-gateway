@@ -734,7 +734,7 @@ function epName(e){return e.name||e.url.replace(/^https?:\/\//,'');}
 function renderEndpoints(){
   const eps=ST.endpoints||[];
   $('#epCount').textContent=eps.length+' total';
-  const activePrimary=()=>{const e=eps.find(x=>x.is_primary);return e?epName(e):'None';}();
+  const activePrimary=(()=>{const e=eps.find(x=>x.is_primary);return e?epName(e):'None';})();
   const ai=$('#activeEpInfo');if(ai)ai.innerHTML=`⚡ Primary in use: <b>${activePrimary}</b>`;
   let h=eps.map((e)=>{
     const prim=!!e.is_primary;
