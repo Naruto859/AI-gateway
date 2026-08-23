@@ -602,11 +602,12 @@ async def forward(request, path):
         req_model = (json.loads(body) or {}).get("model", "")
     except Exception:
         req_model = ""
+    current_model_log = req_model
     body, blocked_kw, redactions = filters.apply_filters(body)
     if blocked_kw is not None:
         db.add_log(method=request.method, path=path, status=400, proxy="", attempts=0,
                    stream=0, redactions=0, ms=0, note="blocked by content filter",
-                   ip=client_ip, model=req_model)
+                   ip=client_ip, model=current_model_log)
         return _err("Request blocked by content filter.", 400, "invalid_request_error")
 
     # Strip echoed thinking blocks from history — agentrouter's schema rejects them
@@ -625,7 +626,7 @@ async def forward(request, path):
     if not base_candidates:
         db.add_log(method=request.method, path=path, status=503, proxy="", attempts=0,
                    stream=0, redactions=0, ms=0, note="no usable proxies",
-                   ip=client_ip, model=req_model)
+                   ip=client_ip, model=current_model_log)
         return _err("No usable proxies configured.", 503)
     t0 = time.time()
 
@@ -653,6 +654,7 @@ async def forward(request, path):
                 last_tgt_name = ""
                 try:
                     for tgt in targets:
+                        current_model_log = tgt.get("model_override") or req_model
                         up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
                         url = _target_url(tgt["base"], path, tgt["mode"])
                         theaders = _target_headers(request, tgt)
@@ -746,7 +748,7 @@ async def forward(request, path):
                                 _log(method=request.method, path=path, status=200, proxy=p["url"],
                                            attempts=attempts, stream=1, redactions=redactions,
                                            ms=int((time.time() - t0) * 1000), note="ok(buffered)",
-                                           ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tgt["name"])
+                                           ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                                 logged = True
                                 return
                             if res[0] == "error":
@@ -762,7 +764,7 @@ async def forward(request, path):
                             _log(method=request.method, path=path, status=502, proxy=p["url"],
                                        attempts=attempts, stream=1, redactions=redactions,
                                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
-                                       ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tgt["name"])
+                                       ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                             
                             if any(x in detail for x in ep_kws):
                                 last_err = (503, {"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover keyword."}}, tgt["name"], p["url"])
@@ -791,7 +793,7 @@ async def forward(request, path):
                         _log(method=request.method, path=path, status=status, proxy=purl,
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
-                                   ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tname,
+                                   ip=client_ip, model=current_model_log, endpoint=tname,
                                    detail=json.dumps(err)[:1500])
                         logged = True
                         yield _sse("error", err)
@@ -799,7 +801,7 @@ async def forward(request, path):
                     _log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                                stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000),
                                note=f"all targets failed: {detail}",
-                               ip=client_ip, model=req_model, endpoint="", detail=str(detail)[:1500])
+                               ip=client_ip, model=current_model_log, endpoint="", detail=str(detail)[:1500])
                     logged = True
                     yield _sse("error", {"type": "error", "error": {"type": "api_error",
                               "message": f"All proxies failed. {detail}"}})
@@ -810,16 +812,18 @@ async def forward(request, path):
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000),
                                    note=f"client disconnected: {detail or 'mid-retry'}",
-                                   ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=last_tgt_name)
+                                   ip=client_ip, model=current_model_log, endpoint=last_tgt_name)
 
             return StreamingResponse(gen(), media_type="text/event-stream")
 
         # ---- OpenAI streaming: raw relay across targets/proxies ----
         async def gen_openai():
+            current_model_log = req_model
             attempts = 0
             forwarded = False
             detail = ""
             for tgt in targets:
+                current_model_log = tgt.get("model_override") or req_model
                 if client_wants_stream:
                     up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
                 else:
@@ -843,12 +847,12 @@ async def forward(request, path):
                         if _is_waf(r.headers) or r.status_code >= 500:
                             await r.aclose(); await client.aclose()
                             proxy_pool.mark_bad(p["id"], "waf/5xx"); detail = f"{r.status_code} via {p['url']}"
-                            _log(method=request.method, path=path, status=502, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tgt["name"])
+                            _log(method=request.method, path=path, status=502, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                             if _is_waf(r.headers): pass
                             else:
                                 consecutive_5xx += 1
                                 if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
-                                    _log(method=request.method, path=path, status=503, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"smart failover: {tgt['name']} returned 5xx 3 times in a row", ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tgt["name"])
+                                    _log(method=request.method, path=path, status=503, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"smart failover: {tgt['name']} returned 5xx 3 times in a row", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                                     detail = f"{tgt['name']} returned 5xx consecutively"
                                     break
                                 await _retry_backoff(attempts)
@@ -867,7 +871,7 @@ async def forward(request, path):
                         _log(method=request.method, path=path, status=200, proxy=p["url"],
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000), note="ok(relay)",
-                                   ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tgt["name"])
+                                   ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                         return
                     except Exception as e:
                         try: await client.aclose()
@@ -876,12 +880,12 @@ async def forward(request, path):
                         if forwarded:
                             return
                         proxy_pool.mark_bad(p["id"], "conn")
-                        _log(method=request.method, path=path, status=502, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tgt["name"])
+                        _log(method=request.method, path=path, status=502, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                         fail_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,RemoteProtocolError").split(",") if k.strip()]
                         if any(x in detail for x in fail_kws):
                             consecutive_5xx += 1
                             if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
-                                _log(method=request.method, path=path, status=503, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"smart failover: {tgt['name']} returned 5xx 3 times in a row", ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tgt["name"])
+                                _log(method=request.method, path=path, status=503, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"smart failover: {tgt['name']} returned 5xx 3 times in a row", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                                 detail = f"{tgt['name']} returned 5xx consecutively"
                                 break
                         else:
@@ -899,6 +903,7 @@ async def forward(request, path):
     detail = ""
     last = None  # (status, ct, payload, target_name, proxy_url) from an upstream 4xx
     for tgt in targets:
+        current_model_log = tgt.get("model_override") or req_model
         if client_wants_stream:
             up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
         else:
@@ -924,7 +929,7 @@ async def forward(request, path):
                     _log(method=request.method, path=path, status=status, proxy=p["url"],
                                attempts=attempts, stream=0, redactions=redactions,
                                ms=int((time.time() - t0) * 1000), note="ok(assembled)",
-                               ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tgt["name"])
+                               ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                     return Response(content=payload, status_code=status, media_type=ct)
                 # upstream rejection (4xx) -> remember, switch to next TARGET
                 last = (status, ct, payload, tgt["name"], p["url"])
@@ -938,7 +943,7 @@ async def forward(request, path):
             _log(method=request.method, path=path, status=502, proxy=p["url"],
                        attempts=attempts, stream=0, redactions=redactions,
                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
-                       ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tgt["name"])
+                       ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                        
             if any(x in detail for x in ep_kws):
                 payload = json.dumps({"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover."}}).encode()
@@ -967,11 +972,11 @@ async def forward(request, path):
         _log(method=request.method, path=path, status=status, proxy=purl,
                    attempts=attempts, stream=0, redactions=redactions,
                    ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
-                   ip=client_ip, model=(tgt.get('model_override') or req_model), endpoint=tname,
+                   ip=client_ip, model=current_model_log, endpoint=tname,
                    detail=payload[:1500].decode("utf-8", "replace"))
         return Response(content=payload, status_code=status, media_type=ct)
     _log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                stream=0, redactions=redactions, ms=int((time.time() - t0) * 1000),
                note=f"all targets failed: {detail}",
-               ip=client_ip, model=req_model, endpoint="", detail=str(detail)[:1500])
+               ip=client_ip, model=current_model_log, endpoint="", detail=str(detail)[:1500])
     return _err(f"All proxies failed. {detail}", 503)
