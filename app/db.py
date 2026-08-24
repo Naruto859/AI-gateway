@@ -32,6 +32,14 @@ DEFAULT_SETTINGS = {
     "max_retries": "10",                          # max attempts per request (same proxy or rotation)
     "connect_timeout": "20",                      # seconds to establish the proxy connection
     "read_timeout": "1200",                       # seconds to wait for upstream bytes (long generations)
+    "write_timeout": "120",                       # seconds to wait for downstream data upload (e.g., large POST payloads)
+    "pool_timeout": "20",                         # seconds to wait for an available connection from the internal pool
+    "keepalive_ping_interval": "10",              # seconds between SSE keep-alive pings to prevent client disconnect
+    "admin_test_timeout": "45",                   # seconds to wait when manually testing an endpoint via Dashboard
+    "scanner_tcp_timeout": "3.0",                 # seconds the background proxy scanner waits for a TCP connection
+    "cleanup_loop_interval": "3600",              # seconds between database cleanup sweeps (deleting stale/dead proxies)
+    "preflight_get_timeout": "2.0",               # seconds for rapid preflight GET tests
+    "direct_test_timeout": "25.0",                # seconds for deep proxy validation tests
     "user_agent": "claude-cli/2.1.177 (external, cli)",  # Claude Code fingerprint (agentrouter requires this)
     "dedicated_proxy_id": "",                     # pin ALL requests to one proxy ("" = first enabled)
     "dedicated_strict": "0",                      # legacy; unused when auto_rotation drives selection

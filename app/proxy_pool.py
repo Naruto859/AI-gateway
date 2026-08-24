@@ -276,8 +276,9 @@ async def _fast_check(proxy_dict, endpoint):
     proxy_url = proxy_dict["url"]
     t0 = time.time()
     try:
+        ft = float(db.get_setting("preflight_get_timeout", "2.0") or 2.0)
         async with httpx.AsyncClient(proxy=proxy_url,
-                                     timeout=httpx.Timeout(2.0, connect=2.0, read=2.0)) as client:
+                                     timeout=httpx.Timeout(ft, connect=ft, read=ft)) as client:
             url = endpoint.rstrip("/") + "/v1/messages"
             r = await client.get(url)
             latency = int((time.time() - t0) * 1000)
@@ -315,7 +316,8 @@ async def health_check(proxy_url, endpoint):
     res = {"ok": False, "status": "unhealthy", "exit_ip": "", "latency_ms": 0, "detail": ""}
     t0 = time.time()
     try:
-        async with httpx.AsyncClient(proxy=proxy_url, timeout=httpx.Timeout(25.0)) as client:
+        dt = float(db.get_setting("direct_test_timeout", "25.0") or 25.0)
+        async with httpx.AsyncClient(proxy=proxy_url, timeout=httpx.Timeout(dt)) as client:
             # 1) exit IP (neutral, no endpoint touch)
             try:
                 r_ip = await client.get("https://api.ipify.org")
@@ -521,7 +523,8 @@ async def background_proxy_checker_loop():
             host = parsed.hostname or parsed.path.split(":")[0]
             port = parsed.port or (1080 if "socks" in parsed.scheme else 3128)
             
-            _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=3.0)
+            st = float(db.get_setting("scanner_tcp_timeout", "3.0") or 3.0)
+            _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=st)
             writer.close()
             await writer.wait_closed()
             latency = int((time.time() - t0) * 1000)
@@ -561,4 +564,5 @@ async def background_cleanup_loop():
             db.delete_dead_proxies(cutoff)
         except Exception:
             pass
-        await asyncio.sleep(3600)  # run once an hour
+        cl = int(db.get_setting("cleanup_loop_interval", "3600") or 3600)
+        await asyncio.sleep(cl)  # dynamic hourly run

@@ -492,7 +492,8 @@ async def test_endpoint(url, api_mode, api_key, model, message):
     ep_name = url.replace("https://", "").replace("http://", "")
     for p in candidates:
         try:
-            async with _build_client([p], httpx.Timeout(45.0)) as client:
+            admin_to = float(db.get_setting("admin_test_timeout", "45.0") or 45.0)
+            async with _build_client([p], httpx.Timeout(admin_to)) as client:
                 r = await client.post(full, headers=headers, content=payload)
                 ms = int((time.time() - t0) * 1000)
                 raw = r.text[:1500]
@@ -531,7 +532,8 @@ async def forward(request, path):
     conn_to = float(s.get("connect_timeout", "10") or 10)
     timeout = httpx.Timeout(connect=conn_to,
                             read=float(s.get("read_timeout", "900") or 900),
-                            write=120.0, pool=20.0)
+                            write=float(s.get("write_timeout", "120.0") or 120.0),
+                            pool=float(s.get("pool_timeout", "20.0") or 20.0))
 
     # client IP (behind Caddy/Railway -> X-Forwarded-For) for the log detail view
     client_ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
@@ -709,9 +711,10 @@ async def forward(request, path):
                                     return ("retry", f"{type(e).__name__} via {p['url']}")
 
                             task = asyncio.ensure_future(consume())
+                            ping_int = float(db.get_setting("keepalive_ping_interval", "10.0") or 10.0)
                             # keepalive: ping the client ~every 10s while buffering upstream
                             while not task.done():
-                                done, _pending = await asyncio.wait({task}, timeout=10.0)
+                                done, _pending = await asyncio.wait({task}, timeout=ping_int)
                                 if not done:
                                     yield PING
                             res = task.result()

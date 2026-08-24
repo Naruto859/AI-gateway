@@ -254,6 +254,20 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="field"><div class="meta"><div class="lbl">Probe count</div><div class="desc">Coverage = idle + interval × count (≈15 min at defaults).</div></div><div class="ctrl"><input type="number" data-set="keepalive_cnt"></div></div>
 <button class="btn" id="saveTimers" style="margin-top:14px">Save timer settings</button>
 </div>
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></span>Advanced Timings</h2>
+<p class="sub">Fine-tune the gateway's network timeouts and background loops.</p>
+<div class="field"><div class="meta"><div class="lbl">Write timeout</div><div class="desc">Max seconds to upload data (e.g. huge chat history POST payloads). Lowering this forces slow/zombie proxies to fail faster.</div></div><div class="ctrl"><input type="number" data-set="write_timeout"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Max seconds to establish the initial TCP tunnel to the proxy server.</div></div><div class="ctrl"><input type="number" data-set="connect_timeout"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Pool connection wait</div><div class="desc">Max seconds to wait for an available HTTPX connection pool slot.</div></div><div class="ctrl"><input type="number" data-set="pool_timeout"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">SSE Ping interval</div><div class="desc">Seconds between fake Server-Sent Events (SSE) keep-alive pings sent to Claude Code to prevent 'Connection Timeout' drops.</div></div><div class="ctrl"><input type="number" data-set="keepalive_ping_interval"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Admin UI test timeout</div><div class="desc">Max seconds to wait when manually testing an endpoint or proxy from this Dashboard.</div></div><div class="ctrl"><input type="number" data-set="admin_test_timeout"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Scanner TCP wait</div><div class="desc">Max seconds the background proxy scanner waits for a proxy to acknowledge a port ping.</div></div><div class="ctrl"><input type="number" data-set="scanner_tcp_timeout"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Preflight test wait</div><div class="desc">Max seconds for rapid preflight GET requests (used by some background workers).</div></div><div class="ctrl"><input type="number" step="0.1" data-set="preflight_get_timeout"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Direct proxy test wait</div><div class="desc">Max seconds for a deep direct proxy validation check.</div></div><div class="ctrl"><input type="number" data-set="direct_test_timeout"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Database cleanup loop</div><div class="desc">Seconds between background sweeps that delete dead/stale proxies from the DB.</div></div><div class="ctrl"><input type="number" data-set="cleanup_loop_interval"><span class="unit">sec</span></div></div>
+<button class="btn" id="saveAdvTimers" style="margin-top:14px">Save advanced timings</button>
+</div>
 </section>
 <!-- PROXY -->
 <section data-p="proxy" class="hidden">
@@ -847,6 +861,7 @@ $('#createKey').onclick=async()=>{
 
 async function saveSettings(keys,lbl){const body={};keys.forEach(k=>{const el=$('[data-set="'+k+'"]');if(el){body[k]=el.value;el._dirty=false;}});await api('/admin/settings',body);Object.assign(ST.settings,body);toast((lbl||'Settings')+' saved','ok');}
 $('#saveTimers').onclick=()=>saveSettings(['read_timeout','keepalive_idle','keepalive_intvl','keepalive_cnt'],'Timers');
+$('#saveAdvTimers').onclick=()=>saveSettings(['write_timeout','connect_timeout','pool_timeout','keepalive_ping_interval','admin_test_timeout','scanner_tcp_timeout','preflight_get_timeout','direct_test_timeout','cleanup_loop_interval'],'Advanced Timings');
 
 // Mark inputs dirty when user modifies them
 $$('[data-set]').forEach(el=>el.addEventListener('input',()=>{el._dirty=true;}));
