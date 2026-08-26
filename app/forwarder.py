@@ -23,6 +23,45 @@ import httpx
 from starlette.responses import StreamingResponse, Response, JSONResponse
 from . import db, proxy_pool, filters
 
+def _get_dedicated_candidates(tgt, max_needed):
+    candidates = []
+    
+    scrape_token = tgt.get("scrape_do_token") or ""
+    try: custom_proxies = json.loads(tgt.get("custom_proxies") or "[]")
+    except: custom_proxies = []
+    try: proxy_priority = json.loads(tgt.get("proxy_priority") or "[]")
+    except: proxy_priority = []
+    
+    for p_id in proxy_priority:
+        if p_id == "scrape.do" and scrape_token:
+            candidates.append({"id": "scrape", "url": f"http://{scrape_token}:@proxy.scrape.do:8080"})
+        elif p_id.startswith("custom_"):
+            idx = int(p_id.split('_')[1])
+            if idx < len(custom_proxies) and custom_proxies[idx]:
+                candidates.append({"id": p_id, "url": custom_proxies[idx]})
+    
+    if candidates and len(candidates) < max_needed:
+        base = list(candidates)
+        while len(candidates) < max_needed:
+            candidates.extend(base)
+    
+    return candidates[:max_needed]
+
+def _resolve_candidates(tgt, attempted_pids, max_needed):
+    dedicated = _get_dedicated_candidates(tgt, 99)
+    pool_candidates = []
+    
+    if dedicated:
+        fallback = tgt.get("proxy_fallback", 1)
+        if fallback == 1:
+            pool = [p for p in proxy_pool.ordered_for_request(max_needed * 3) if p["id"] not in attempted_pids]
+            pool_candidates = pool
+    else:
+        pool_candidates = [p for p in proxy_pool.ordered_for_request(max_needed * 3) if p["id"] not in attempted_pids]
+    
+    candidates = [p for p in dedicated if p["id"] not in attempted_pids] + pool_candidates
+    return candidates[:max_needed]
+
 
 # TCP keepalive so the residential-proxy CONNECT tunnel is NOT idle-dropped while
 # the upstream model "thinks" before emitting its first SSE byte. Without this,
@@ -51,7 +90,7 @@ def _build_client(candidates, timeout):
     else:
         proxy = candidates[0]["url"]
     transport = httpx.AsyncHTTPTransport(proxy=proxy, socket_options=_keepalive_opts())
-    return httpx.AsyncClient(transport=transport, timeout=timeout)
+    return httpx.AsyncClient(verify=False, transport=transport, timeout=timeout)
 
 
 async def _retry_backoff(retry_num):
@@ -465,7 +504,11 @@ async def _consume_assemble(candidates, url, headers, body, timeout, kind):
 async def test_endpoint(url, api_mode, api_key, model, message):
     """Send ONE small chat through the pinned/first proxy to a specific endpoint.
     Returns {ok, status, ms, reply, detail}. Token-cheap (max_tokens=20)."""
-    candidates = proxy_pool.ordered_for_request(2)
+    tgt = {}
+    with db._lock:
+        row = db.conn().execute("SELECT * FROM endpoints WHERE url=?", (url,)).fetchone()
+        if row: tgt = dict(row)
+    candidates = _resolve_candidates(tgt, set(), 2)
     if not candidates:
         return {"ok": False, "status": 0, "ms": 0, "reply": "", "detail": "no proxies configured"}
     openai = (api_mode == "chat_completions")
