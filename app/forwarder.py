@@ -49,18 +49,19 @@ def _get_dedicated_candidates(tgt, max_needed):
 
 def _resolve_candidates(tgt, attempted_pids, max_needed):
     dedicated = _get_dedicated_candidates(tgt, 99)
-    pool_candidates = []
     
-    if dedicated:
-        fallback = tgt.get("proxy_fallback", 1)
-        if fallback == 1:
-            pool = [p for p in proxy_pool.ordered_for_request(max_needed * 3) if p["id"] not in attempted_pids]
-            pool_candidates = pool
-    else:
-        pool_candidates = [p for p in proxy_pool.ordered_for_request(max_needed * 3) if p["id"] not in attempted_pids]
-    
-    candidates = [p for p in dedicated if p["id"] not in attempted_pids] + pool_candidates
-    return candidates[:max_needed]
+    # Try dedicated proxies first, ONE AT A TIME (no hedging for premium proxies)
+    for p in dedicated:
+        if p["id"] not in attempted_pids:
+            return [p]
+            
+    # If all dedicated proxies are exhausted (or none configured), use the free pool with full hedging concurrency
+    fallback = tgt.get("proxy_fallback", 1) if dedicated else 1
+    if fallback == 1:
+        pool = [p for p in proxy_pool.ordered_for_request(max_needed * 3) if p["id"] not in attempted_pids]
+        return pool[:max_needed]
+        
+    return []
 
 
 # TCP keepalive so the residential-proxy CONNECT tunnel is NOT idle-dropped while
