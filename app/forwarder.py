@@ -139,7 +139,11 @@ def _targets(s):
             "id": e.get("id"),
             "model_override": e.get("model_override") or s.get("global_model_override", ""),
             "failover_trigger_keywords": e.get("failover_trigger_keywords", ""),
-            "endpoint_failover_keywords": e.get("endpoint_failover_keywords", "")
+            "endpoint_failover_keywords": e.get("endpoint_failover_keywords", ""),
+            "scrape_do_token": e.get("scrape_do_token", ""),
+            "custom_proxies": e.get("custom_proxies", "[]"),
+            "proxy_priority": e.get("proxy_priority", "[]"),
+            "proxy_fallback": e.get("proxy_fallback", 1)
         }
     
     primary_custom = next((e for e in customs if e.get("is_primary")), None)
@@ -638,7 +642,7 @@ async def forward(request, path):
                         consecutive_5xx = 0
                         for _ in range(max_retries):
                             concurrency = int(db.get_setting("hedging_concurrency", "3"))
-                            candidates = [p for p in proxy_pool.ordered_for_request(max_retries * concurrency) if p["id"] not in attempted_pids][:concurrency]
+                            candidates = _resolve_candidates(tgt, attempted_pids, concurrency)
                             if not candidates:
                                 break
                             p = candidates[0]
@@ -652,7 +656,7 @@ async def forward(request, path):
                                     async with _build_client(candidates, timeout) as client:
                                         async with client.stream("POST", url, headers=theaders, content=up_body) as r:
                                             if _is_waf(r.headers):
-                                                proxy_pool.mark_bad(p["id"], "waf")
+                                                if type(p["id"]) == int: proxy_pool.mark_bad(p["id"], "waf")
                                                 return ("retry", f"WAF via {p['url']}")
                                             ct = r.headers.get("content-type", "")
                                             if r.status_code >= 400 and "text/event-stream" not in ct:
@@ -662,23 +666,23 @@ async def forward(request, path):
                                                 ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key,new_api_error,预扣").split(",") if k.strip()]
                                                 
                                                 if any(x in err_str for x in ep_kws):
-                                                    proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                                                    if type(p["id"]) == int: proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
                                                     try: err = json.loads(raw)
                                                     except: err = {"type": "error", "error": {"message": err_str}}
                                                     return ("error", r.status_code, err)
                                                 elif any(x in err_str for x in proxy_kws):
-                                                    proxy_pool.mark_bad(p["id"], f"{r.status_code} proxy switch")
+                                                    if type(p["id"]) == int: proxy_pool.mark_bad(p["id"], f"{r.status_code} proxy switch")
                                                     return ("retry", f"{r.status_code} proxy switch: {err_str[:100]}")
                                                 else:
                                                     if r.status_code >= 500:
-                                                        proxy_pool.mark_bad(p["id"], "5xx")
+                                                        if type(p["id"]) == int: proxy_pool.mark_bad(p["id"], "5xx")
                                                         return ("retry", f"{r.status_code} via {p['url']}")
                                                     else:
-                                                        proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                                                        if type(p["id"]) == int: proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
                                                         try: err = json.loads(raw)
                                                         except: err = {"type": "error", "error": {"message": err_str}}
                                                         return ("error", r.status_code, err)
-                                                proxy_pool.mark_bad(p["id"], "non-sse")
+                                                if type(p["id"]) == int: proxy_pool.mark_bad(p["id"], "non-sse")
                                                 return ("retry", f"non-SSE {r.status_code} via {p['url']}")
                                             asm = AnthropicAssembler()
                                             saw_stop = False
@@ -702,12 +706,12 @@ async def forward(request, path):
                                                     if b.get("type") == "tool_use" and "input" not in b:
                                                         complete = False; break
                                             if not complete:
-                                                proxy_pool.mark_bad(p["id"], "truncated")
+                                                if type(p["id"]) == int: proxy_pool.mark_bad(p["id"], "truncated")
                                                 return ("retry", f"incomplete via {p['url']}")
-                                            proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                                            if type(p["id"]) == int: proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
                                             return ("ok", obj)
                                 except Exception as e:
-                                    proxy_pool.mark_bad(p["id"], "conn")
+                                    if type(p["id"]) == int: proxy_pool.mark_bad(p["id"], "conn")
                                     return ("retry", f"{type(e).__name__} via {p['url']}")
 
                             task = asyncio.ensure_future(consume())
@@ -810,7 +814,7 @@ async def forward(request, path):
                 consecutive_5xx = 0
                 for _ in range(max_retries):
                     concurrency = int(db.get_setting("hedging_concurrency", "3"))
-                    candidates = [p for p in proxy_pool.ordered_for_request(max_retries * concurrency) if p["id"] not in attempted_pids][:concurrency]
+                    candidates = _resolve_candidates(tgt, attempted_pids, concurrency)
                     if not candidates:
                         break
                     p = candidates[0]
@@ -822,7 +826,7 @@ async def forward(request, path):
                         r = await client.send(req, stream=True)
                         if _is_waf(r.headers) or r.status_code >= 500:
                             await r.aclose(); await client.aclose()
-                            proxy_pool.mark_bad(p["id"], "waf/5xx"); detail = f"{r.status_code} via {p['url']}"
+                            if type(p["id"]) == int: proxy_pool.mark_bad(p["id"], "waf/5xx"); detail = f"{r.status_code} via {p['url']}"
                             _log(method=request.method, path=path, status=502, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                             if _is_waf(r.headers): pass
                             else:
@@ -839,7 +843,7 @@ async def forward(request, path):
                             await r.aclose(); await client.aclose()
                             detail = f"{tgt['name']} {r.status_code}"
                             break
-                        proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
+                        if type(p["id"]) == int: proxy_pool.mark_good(p["id"], int((time.time() - t0) * 1000))
                         async for chunk in r.aiter_raw():
                             forwarded = True
                             yield chunk
@@ -855,7 +859,7 @@ async def forward(request, path):
                         detail = f"{type(e).__name__} via {p['url']}"
                         if forwarded:
                             return
-                        proxy_pool.mark_bad(p["id"], "conn")
+                        if type(p["id"]) == int: proxy_pool.mark_bad(p["id"], "conn")
                         _log(method=request.method, path=path, status=502, proxy=p["url"], attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                         fail_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,RemoteProtocolError").split(",") if k.strip()]
                         if any(x in detail for x in fail_kws):
@@ -892,7 +896,7 @@ async def forward(request, path):
         consecutive_5xx = 0
         for _ in range(max_retries):
             concurrency = int(db.get_setting("hedging_concurrency", "3"))
-            candidates = [p for p in proxy_pool.ordered_for_request(max_retries * concurrency) if p["id"] not in attempted_pids][:concurrency]
+            candidates = _resolve_candidates(tgt, attempted_pids, concurrency)
             if not candidates:
                 break
             p = candidates[0]

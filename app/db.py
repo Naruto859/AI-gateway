@@ -176,10 +176,19 @@ def _init(c):
         c.execute("ALTER TABLE endpoints ADD COLUMN name TEXT DEFAULT ''")
     if "model_override" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN model_override TEXT DEFAULT ''")
-    if "failover_trigger_keywords" not in ecols:
+    if "failover_trigger_keywords", "endpoint_failover_keywords", "scrape_do_token", "custom_proxies", "proxy_priority", "proxy_fallback" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN failover_trigger_keywords TEXT DEFAULT '500,501,502,503,504,524,401,403,unauthorized'")
     if "endpoint_failover_keywords" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN endpoint_failover_keywords TEXT DEFAULT 'Thinking,model_not_found,invalid_api_key'")
+    if "scrape_do_token" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN scrape_do_token TEXT DEFAULT ''")
+    if "custom_proxies" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN custom_proxies TEXT DEFAULT '[]'")
+    if "proxy_priority" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN proxy_priority TEXT DEFAULT '[]'")
+    if "proxy_fallback" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN proxy_fallback INTEGER DEFAULT 1")
+
     # logs: add ip / model / detail for the log-detail view
     lcols = [r[1] for r in c.execute("PRAGMA table_info(logs)").fetchall()]
     if "ip" not in lcols:
@@ -474,7 +483,7 @@ def add_endpoint(url, api_mode="anthropic_messages", api_key="", model_override=
 
 
 def update_endpoint(eid, **fields):
-    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords"}
+    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords", "endpoint_failover_keywords", "scrape_do_token", "custom_proxies", "proxy_priority", "proxy_fallback"}
     fields = {k: v for k, v in fields.items() if k in allowed_ENDPOINT_COLS}
     if not fields:
         return
