@@ -777,6 +777,10 @@ async def forward(request, path):
                                 return
                             if res[0] == "error":
                                 _, status, err = res
+                                _log(method=request.method, path=path, status=status, proxy=p["url"],
+                                     attempts=attempts, stream=1, redactions=redactions,
+                                     ms=int((time.time() - t0) * 1000), note=f"upstream rejected: {json.dumps(err)[:100]}",
+                                     ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                                 last_err = (status, err, tgt["name"], p["url"])
                                 upstream_rejected = True
                                 break  # this target rejected the content — try NEXT target
@@ -956,6 +960,11 @@ async def forward(request, path):
                                ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                     return Response(content=payload, status_code=status, media_type=ct)
                 # upstream rejection (4xx) -> remember, switch to next TARGET
+                err_text = payload[:100].decode('utf-8', 'replace') if isinstance(payload, bytes) else str(payload)[:100]
+                _log(method=request.method, path=path, status=status, proxy=p["url"],
+                     attempts=attempts, stream=0, redactions=redactions,
+                     ms=int((time.time() - t0) * 1000), note=f"upstream rejected: {err_text}",
+                     ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                 last = (status, ct, payload, tgt["name"], p["url"])
                 upstream_rejected = True
                 break
