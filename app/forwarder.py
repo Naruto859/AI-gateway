@@ -90,7 +90,7 @@ def _build_client(candidates, timeout):
         proxy = httpx.Proxy("http://127.0.0.1:9090", headers={"x-hedge-proxies": hedge_urls})
     else:
         proxy = candidates[0]["url"]
-    transport = httpx.AsyncHTTPTransport(proxy=proxy, socket_options=_keepalive_opts())
+    transport = httpx.AsyncHTTPTransport(proxy=proxy, verify=False, socket_options=_keepalive_opts())
     return httpx.AsyncClient(verify=False, transport=transport, timeout=timeout)
 
 
