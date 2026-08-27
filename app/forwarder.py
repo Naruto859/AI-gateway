@@ -34,7 +34,7 @@ def _get_dedicated_candidates(tgt, max_needed):
     
     for p_id in proxy_priority:
         if p_id == "scrape.do" and scrape_token:
-            candidates.append({"id": "scrape", "url": f"http://{scrape_token}:@proxy.scrape.do:8080"})
+            candidates.append({"id": "scrape", "url": f"http://{scrape_token}&customHeaders=true:@proxy.scrape.do:8080"})
         elif p_id.startswith("custom_"):
             idx = int(p_id.split('_')[1])
             if idx < len(custom_proxies) and custom_proxies[idx]:
