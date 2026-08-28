@@ -528,10 +528,35 @@ def add_log(**f):
         c.commit()
 
 
-def recent_logs(limit=100):
+def recent_logs(limit=100, after_id=None):
+    """Recent log rows, newest first.
+
+    `after_id` returns only rows newer than that id, which lets the dashboard poll
+    frequently without re-sending the whole list — the live view used to wait for the
+    12s full-state refresh (which also re-serialised every setting, endpoint and 200
+    proxies) just to show a new line.
+
+    req_body is excluded: it can be 3 KB per row and the list view never shows it.
+    The detail modal reads it via log_detail().
+    """
+    cols = ("id, ts, method, path, status, proxy, attempts, stream, redactions, ms, "
+            "note, ip, model, endpoint, source, detail, req_id, final")
     with _lock:
-        return [dict(r) for r in conn().execute(
-            "SELECT * FROM logs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]
+        c = conn()
+        if after_id:
+            rows = c.execute(f"SELECT {cols} FROM logs WHERE id>? ORDER BY id DESC LIMIT ?",
+                             (int(after_id), limit)).fetchall()
+        else:
+            rows = c.execute(f"SELECT {cols} FROM logs ORDER BY id DESC LIMIT ?",
+                             (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def log_detail(log_id):
+    """Full row including req_body, for the detail modal only."""
+    with _lock:
+        r = conn().execute("SELECT * FROM logs WHERE id=?", (int(log_id),)).fetchone()
+    return dict(r) if r else None
 
 
 def clear_logs():

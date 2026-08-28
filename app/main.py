@@ -179,6 +179,33 @@ async def state(x_admin_token: str = Header(default="")):
     }
 
 
+@app.get("/admin/logs")
+async def logs_feed(x_admin_token: str = Header(default=""),
+                    after_id: int = 0, limit: int = 80):
+    """Cheap live-log feed, polled every couple of seconds.
+
+    /admin/state carries settings + endpoints + 200 proxies + stats, so the dashboard
+    could only afford to call it every 12s — which meant a request finishing now
+    showed up in the log view up to 12 seconds later. This returns just the new rows
+    (plus fresh stats, which are cheap) so the live view can poll fast.
+    """
+    _require_admin(x_admin_token)
+    limit = max(1, min(int(limit), 200))
+    rows = db.recent_logs(limit=limit, after_id=int(after_id) or None)
+    return {"logs": rows, "stats": db.stats(),
+            "latest_id": rows[0]["id"] if rows else int(after_id)}
+
+
+@app.get("/admin/log/{log_id}")
+async def log_detail(log_id: int, x_admin_token: str = Header(default="")):
+    """One log row with its request body — only fetched when a row is opened."""
+    _require_admin(x_admin_token)
+    row = db.log_detail(log_id)
+    if not row:
+        raise HTTPException(404, "no such log row")
+    return row
+
+
 @app.get("/admin/hotpool")
 async def hotpool_status(x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)

@@ -629,6 +629,12 @@ async function api(path,body){
   if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
   return r.json();
 }
+// api() is POST-only; read-only endpoints need their own helper.
+async function apiGet(path){
+  const r=await fetch(path,{headers:{'x-admin-token':TOK}});
+  if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||r.status);
+  return r.json();
+}
 async function getState(){
   const r=await fetch('/admin/state',{headers:{'x-admin-token':TOK}});
   if(!r.ok)throw new Error('auth');
@@ -865,15 +871,11 @@ async function _hpPoll(){
   }catch(e){console.error('hp poll error',e);}
 }
 
-function render(){
-  // An open .csel moves its popup into <body>; re-initialising the widget while
-  // it is open used to strand that popup as an unclickable floating menu.
-  $$('.csel.open').forEach(_cselClose);
-  const s=ST.settings||{},st=ST.stats||{};
-  ST.proxies=ST.proxies||[];ST.endpoints=ST.endpoints||[];ST.logs=ST.logs||[];ST.keywords=ST.keywords||[];
-  // stats
-  // These are whole-request numbers now (one per client call, retries included), so
-  // they finally match the wait the user actually experiences.
+// Stat tiles live in their own function so the 2s log poll can refresh the headline
+// numbers without triggering a full render() (which rebuilds the proxy list and would
+// close any open dropdown under the user's finger).
+function renderStats(){
+  const st=ST.stats||{};
   $('#s_ok').innerHTML=(st.success_pct!=null?st.success_pct:'—')+'<small>%</small>';
   const sok=$('#s_ok').closest('.stat');
   if(sok)sok.title=st.total?`${st.ok} of ${st.total} requests succeeded`:'no requests yet';
@@ -886,6 +888,16 @@ function render(){
     : 'no requests yet';
   const sub=$('#s_ms_sub');
   if(sub)sub.textContent=st.total?`p95 ${roMs(st.p95_ms)} · ${st.first_try_pct}% 1st try`:'';
+}
+
+function render(){
+  // An open .csel moves its popup into <body>; re-initialising the widget while
+  // it is open used to strand that popup as an unclickable floating menu.
+  $$('.csel.open').forEach(_cselClose);
+  const s=ST.settings||{},st=ST.stats||{};
+  ST.proxies=ST.proxies||[];ST.endpoints=ST.endpoints||[];ST.logs=ST.logs||[];ST.keywords=ST.keywords||[];
+  // stats
+  renderStats();
   const enp=ST.counts ? ST.counts.enabled : ST.proxies.filter(p=>p.enabled).length;
   const tot=ST.counts ? ST.counts.total : ST.proxies.length;
   $('#s_px').innerHTML=enp+'<small>/ '+tot+'</small>';
@@ -1428,7 +1440,19 @@ function renderLogs(){
       ${dbox}
     </div>`;
   }).join('')||'<div class="muted">No requests yet.</div>';
-  $$('#logList [data-logi]').forEach(el=>el.onclick=()=>openLogDetail(logs[+el.dataset.logi]));
+  // The list payload no longer carries req_body (3 KB/row), so fetch the full row
+  // when a line is actually opened. Falls back to the list row if that fetch fails.
+  $$('#logList [data-logi]').forEach(el=>el.onclick=async()=>{
+    const row=logs[+el.dataset.logi];
+    openLogDetail(row);
+    if(row&&row.id&&!row.req_body){
+      try{
+        const full=await apiGet('/admin/log/'+row.id);
+        Object.assign(row,full);
+        openLogDetail(row);
+      }catch(e){/* keep what we already showed */}
+    }
+  });
 }
 function renderKeywords(){
   $('#kwList').innerHTML=(ST.keywords||[]).map(k=>`<div class="prx"><span class="st ${k.enabled?'ok':'dead'}"></span><div class="pi"><div class="ip" style="font-family:inherit">${esc(k.value)}</div><div class="tag">${k.mode==='block'?'block request':'redact → '+esc(k.replacement)}</div></div><div class="tg ${k.enabled?'on':''}" data-kwtg="${k.id}"></div><button class="xbtn" data-kwdel="${k.id}">×</button></div>`).join('')||'<div class="muted">No filters.</div>';
@@ -1561,6 +1585,38 @@ $('#clearLogs').onclick=async()=>{
   catch(e){toast('Clear failed: '+(e.message||'error'),'bad');}
 };
 
+// ---- refresh cadence ----
+// Two loops, because the two payloads cost very different amounts.
+//
+// The heavy one (/admin/state: settings + endpoints + 200 proxies + counts) stays on
+// a slow tick. The live log feed is cheap and only sends rows newer than the last id
+// we hold, so it polls fast — a finished request now appears in ~2s instead of
+// waiting up to 12s for the full-state refresh.
+const LOG_POLL_MS=2000, STATE_POLL_MS=15000;
+let _logPollBusy=false;
+
+async function pollLogs(){
+  if(_logPollBusy)return;
+  if($('#app').classList.contains('hidden'))return;
+  // The Logs tab is the only place these rows are shown; skip the work otherwise,
+  // but keep polling while a log modal is open so the list stays live behind it.
+  const pane=$('section[data-p="logs"]');
+  if(!pane||pane.classList.contains('hidden'))return;
+  _logPollBusy=true;
+  try{
+    const latest=(ST.logs&&ST.logs.length)?ST.logs[0].id:0;
+    const d=await apiGet('/admin/logs?after_id='+(latest||0)+'&limit=80');
+    if(d.logs&&d.logs.length){
+      // Prepend the new rows and keep the list bounded.
+      ST.logs=d.logs.concat(ST.logs||[]).slice(0,80);
+      renderLogs();
+    }
+    if(d.stats){ST.stats=d.stats;renderStats();}
+  }catch(e){/* a failed poll is not worth a toast; the next tick retries */}
+  finally{_logPollBusy=false;}
+}
+setInterval(pollLogs,LOG_POLL_MS);
+
 setInterval(()=>{
   if($('#app').classList.contains('hidden'))return;
   // A background refresh replaces ST.endpoints/ST.proxies wholesale. If a modal is
@@ -1569,7 +1625,7 @@ setInterval(()=>{
   if($('.modal.show'))return;
   refresh();
   if(!RO.pending)loadRouting();
-},12000);
+},STATE_POLL_MS);
 
 // ============ MODALS ============
 // Every dismissal path routes through closeModal so the per-modal cleanup (scroll
