@@ -12,3 +12,5 @@ venv/
 preview/
 
 data/
+# the sandbox symlinks `data` at the DB dir; match the symlink itself, not just a dir
+data

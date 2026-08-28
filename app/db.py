@@ -29,8 +29,15 @@ DEFAULT_SETTINGS = {
     "require_client_key": "1",                    # 1 = clients must send the gateway_key
     "admin_password": "12345678",                 # dashboard password (CHANGE THIS)
     "model_note": "claude-opus-4-8",              # informational
-    "max_retries": "10",                          # max attempts per request (same proxy or rotation)
-    "connect_timeout": "20",                      # seconds to establish the proxy connection
+    # --- latency-tuned defaults -------------------------------------------------
+    # Measured over 24h of live traffic: 1-attempt requests averaged 33s while
+    # 4-6 attempt requests averaged 247-471s. Almost all latency is burned in
+    # failed retries, not in generation — so the defaults below are chosen to fail
+    # fast and move on, rather than to keep grinding one bad path.
+    "max_retries": "6",                           # attempts per endpoint before moving to the next one
+    "connect_timeout": "8",                       # seconds to establish the proxy tunnel; a live proxy
+                                                  # answers in 1-3s, so a longer wait only pays for
+                                                  # dead ones (45 dead-proxy hits in the sample day)
     "read_timeout": "1200",                       # seconds to wait for upstream bytes (long generations)
     "write_timeout": "120",                       # seconds to wait for downstream data upload (e.g., large POST payloads)
     "pool_timeout": "20",                         # seconds to wait for an available connection from the internal pool
@@ -46,29 +53,36 @@ DEFAULT_SETTINGS = {
     "auto_rotation": "0",                         # 1 = rotate across enabled proxies on fail; 0 = single dedicated
     "hot_pool_enabled": "1",                      # 1 = hot pool engine active; 0 = off (for premium proxies)
     "hot_pool_api_test": "1",                     # 1 = HTTP API GET test; 0 = simple TCP connection test
-    "hedging_concurrency": "3",                   # Number of proxies to race in parallel for a request
+    "hedging_concurrency": "5",                   # proxies raced in parallel; first tunnel wins. Higher
+                                                  # = lower connect latency. Safe to raise now that an
+                                                  # attempt only consumes the winner + genuine failures
     "hot_pool_size": "100",                       # number of verified proxies to keep in hot pool
     "hot_pool_refresh": "5",                      # seconds between hot pool refresh cycles
     "hot_pool_test_timeout": "3.0",               # timeout in seconds for hot pool tests
     "hot_pool_concurrency": "20",                 # max concurrent proxy tests during hot pool refresh
+    "dedicated_cooldown": "60",                   # seconds a dedicated proxy (phone/scrape.do)
+                                                  # is skipped after a connect-level failure.
+                                                  # It has no DB row, so without this every
+                                                  # request re-discovers that the phone is off
+    "proxy_scanner_enabled": "1",                 # 1 = background TCP scanner active (UI toggle read this before it existed)
     "proxy_scanner_interval": "5",
     "proxy_scanner_batch": "150",
-    "failover_5xx_threshold": "3",
-    "retry_initial_delay": "0.5",
-    "retry_max_delay": "5.0",
-    "keepalive_idle": "5",
-    "keepalive_intvl": "5",
-    "keepalive_cnt": "180",
-    # --- retry backoff (Claude Code SDK formula: min(initial*2^n, max) + jitter) ---
-    "retry_initial_delay": "1.0",                 # seconds before first retry
-    "retry_max_delay": "8.0",                     # cap on the backoff delay
-    "failover_5xx_threshold": "3",                # consecutive 5xx errors before assuming endpoint is down
     "global_model_override": "",                  # Override model id globally
     "claude_mimicry": "1",                        # 1 = Full A-to-Z node/claude-cli mimicry
+    # --- retry backoff (Claude Code SDK formula: min(initial*2^n, max) + jitter) ---
+    "retry_initial_delay": "0.5",                 # seconds before first retry. Only applies to upstream
+    "retry_max_delay": "4.0",                     # pressure (5xx/429); proxy-local failures rotate to a
+                                                  # fresh exit IP and skip the wait entirely
+    "failover_5xx_threshold": "2",                # consecutive 5xx before abandoning this endpoint. 2 is
+                                                  # enough of a signal and saves a whole slow attempt
     # --- TCP keepalive on the proxy tunnel (covers slow upstream "thinking") ---
-    "keepalive_idle": "30",                       # seconds idle before first probe
-    "keepalive_intvl": "5",                       # seconds between probes
-    "keepalive_cnt": "174",                       # probe count (idle + intvl*cnt = total coverage)
+    # Probes start sooner and repeat faster than the old 30s/5s: the residential
+    # tunnel goes idle while the model "thinks", and an idle-dropped tunnel showed up
+    # as RemoteProtocolError 48 times in the sample day — the single largest
+    # non-upstream failure cause.
+    "keepalive_idle": "15",                       # seconds idle before first probe
+    "keepalive_intvl": "3",                       # seconds between probes
+    "keepalive_cnt": "200",                       # probe count (idle + intvl*cnt = total coverage)
 }
 
 
@@ -123,7 +137,9 @@ def _init(c):
             redactions INTEGER,
             ms         INTEGER,
             note       TEXT,
-            req_body   TEXT
+            req_body   TEXT,
+            req_id     TEXT DEFAULT '',   -- same value for every attempt of one request
+            final      INTEGER DEFAULT 0  -- 1 on the row that decided the outcome
         );
         CREATE TABLE IF NOT EXISTS endpoints (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,7 +152,7 @@ def _init(c):
             note      TEXT    DEFAULT '',
             model_override TEXT DEFAULT '',
             failover_trigger_keywords TEXT DEFAULT '500,501,502,503,504,524,401,403,unauthorized',
-            endpoint_failover_keywords TEXT DEFAULT 'Thinking,model_not_found,invalid_api_key'
+            endpoint_failover_keywords TEXT DEFAULT 'Thinking,model_not_found,invalid_api_key,content-blocked,content_filter'
         );
         CREATE TABLE IF NOT EXISTS api_keys (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,10 +192,27 @@ def _init(c):
         c.execute("ALTER TABLE endpoints ADD COLUMN name TEXT DEFAULT ''")
     if "model_override" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN model_override TEXT DEFAULT ''")
+    lcols = [r[1] for r in c.execute("PRAGMA table_info(logs)").fetchall()]
+    if "req_id" not in lcols:
+        c.execute("ALTER TABLE logs ADD COLUMN req_id TEXT DEFAULT ''")
+    if "final" not in lcols:
+        c.execute("ALTER TABLE logs ADD COLUMN final INTEGER DEFAULT 0")
+        # Backfill: attempts resets to 1 on each new request, and the last row before
+        # the next reset is that request's outcome.
+        c.execute("""
+            UPDATE logs SET final=1 WHERE id IN (
+              SELECT id FROM (
+                SELECT id, attempts,
+                       LEAD(attempts) OVER (ORDER BY id) nxt
+                FROM logs WHERE COALESCE(source,'')=''
+              ) WHERE nxt IS NULL OR nxt<=1
+            )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_logs_final ON logs(final, ts)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_logs_reqid ON logs(req_id)")
     if "failover_trigger_keywords" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN failover_trigger_keywords TEXT DEFAULT '500,501,502,503,504,524,401,403,unauthorized'")
     if "endpoint_failover_keywords" not in ecols:
-        c.execute("ALTER TABLE endpoints ADD COLUMN endpoint_failover_keywords TEXT DEFAULT 'Thinking,model_not_found,invalid_api_key'")
+        c.execute("ALTER TABLE endpoints ADD COLUMN endpoint_failover_keywords TEXT DEFAULT 'Thinking,model_not_found,invalid_api_key,content-blocked,content_filter'")
     if "scrape_do_token" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN scrape_do_token TEXT DEFAULT ''")
     if "custom_proxies" not in ecols:
@@ -209,9 +242,17 @@ def _init(c):
 
 # ----- settings -----
 def get_setting(key, default=""):
+    """Read a setting, falling back to DEFAULT_SETTINGS before the caller's default.
+
+    Call sites used to carry their own literal fallback (`get_setting("max_retries",
+    "10")`), so a tuned default here could be silently overridden by a stale literal
+    somewhere else. DEFAULT_SETTINGS is now the single source of truth.
+    """
     with _lock:
         row = conn().execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-    return row["value"] if row else default
+    if row is not None:
+        return row["value"]
+    return DEFAULT_SETTINGS.get(key, default)
 
 
 def set_setting(key, value):
@@ -226,9 +267,17 @@ def set_setting(key, value):
 
 
 def get_all_settings():
+    """All settings, with DEFAULT_SETTINGS filling any key the DB has never stored.
+
+    forward() reads its timeouts and retry budget from this dict with its own inline
+    fallbacks (`s.get("max_retries", "4")`), which quietly diverged from
+    DEFAULT_SETTINGS. Merging here keeps one source of truth.
+    """
     with _lock:
         rows = conn().execute("SELECT key, value FROM settings").fetchall()
-    return {r["key"]: r["value"] for r in rows}
+    merged = dict(DEFAULT_SETTINGS)
+    merged.update({r["key"]: r["value"] for r in rows})
+    return merged
 
 
 # ----- proxies -----
@@ -336,6 +385,33 @@ def delete_old_disabled_proxies(cutoff_time):
         return cur.rowcount
 
 
+def search_proxies(q="", limit=100, offset=0, status=""):
+    """Server-side proxy search/paging.
+
+    The dashboard used to fetch a flat first-200 slice while displaying the true
+    total, so filtering or "Show all" quietly missed the other 15k rows. Searching
+    and paging now happen in SQL against the whole table.
+    """
+    where, params = [], []
+    if q:
+        where.append("(url LIKE ? OR COALESCE(status,'') LIKE ? OR COALESCE(exit_ip,'') LIKE ?)")
+        like = f"%{q}%"
+        params += [like, like, like]
+    if status:
+        where.append("status = ?")
+        params.append(status)
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    with _lock:
+        c = conn()
+        total = c.execute(f"SELECT COUNT(*) FROM proxies {clause}", params).fetchone()[0]
+        rows = c.execute(
+            f"SELECT * FROM proxies {clause} ORDER BY "
+            "CASE status WHEN 'ok' THEN 0 WHEN 'unknown' THEN 1 WHEN 'unhealthy' THEN 2 ELSE 3 END, "
+            "latency_ms, id LIMIT ? OFFSET ?",
+            params + [max(1, min(int(limit), 500)), max(0, int(offset))]).fetchall()
+    return {"proxies": [dict(r) for r in rows], "matched": total}
+
+
 def get_proxy(pid):
     with _lock:
         row = conn().execute("SELECT * FROM proxies WHERE id=?", (pid,)).fetchone()
@@ -424,8 +500,8 @@ def add_log(**f):
     with _lock:
         c = conn()
         c.execute(
-            "INSERT INTO logs(ts, method, path, status, proxy, attempts, stream, redactions, ms, note, ip, model, detail, endpoint, source, req_body) "
-            "VALUES (:ts, :method, :path, :status, :proxy, :attempts, :stream, :redactions, :ms, :note, :ip, :model, :detail, :endpoint, :source, :req_body)",
+            "INSERT INTO logs(ts, method, path, status, proxy, attempts, stream, redactions, ms, note, ip, model, detail, endpoint, source, req_body, req_id, final) "
+            "VALUES (:ts, :method, :path, :status, :proxy, :attempts, :stream, :redactions, :ms, :note, :ip, :model, :detail, :endpoint, :source, :req_body, :req_id, :final)",
             {
                 "ts": f.get("ts", time.time()),
                 "method": f.get("method", ""),
@@ -443,6 +519,8 @@ def add_log(**f):
                 "endpoint": f.get("endpoint", ""),
                 "source": f.get("source", ""),
                 "req_body": f.get("req_body", ""),
+                "req_id": f.get("req_id", ""),
+                "final": 1 if f.get("final") else 0,
             },
         )
         # keep last 500
@@ -502,13 +580,54 @@ def delete_endpoint(eid):
 
 
 def set_primary_endpoint(eid):
-    """Mark one endpoint primary (clears the flag on all others). eid=0 -> none."""
+    """Make one endpoint the first routing target.
+
+    `priority` is the single source of truth for try-order, so promoting an
+    endpoint means moving it to priority 0 and pushing everything else down.
+    is_primary stays in sync purely as a display flag, which keeps the dashboard
+    order and the forwarder's real order from ever disagreeing. eid=0 -> none.
+    """
     with _lock:
         c = conn()
         c.execute("UPDATE endpoints SET is_primary=0")
         if eid:
-            c.execute("UPDATE endpoints SET is_primary=1, enabled=1 WHERE id=?", (eid,))
+            rest = [r[0] for r in c.execute(
+                "SELECT id FROM endpoints WHERE id!=? ORDER BY priority, id", (eid,)).fetchall()]
+            c.execute("UPDATE endpoints SET is_primary=1, enabled=1, priority=0 WHERE id=?", (eid,))
+            for i, other in enumerate(rest, start=1):
+                c.execute("UPDATE endpoints SET priority=? WHERE id=?", (i, other))
         c.commit()
+
+
+def reorder_endpoints(ids):
+    """Persist an explicit try-order: ids[0] is tried first, ids[1] next, ...
+
+    The first ENABLED id also becomes primary so the star in the dashboard always
+    marks the endpoint that actually receives the first request. Any endpoint not
+    named in `ids` keeps its relative order after the listed ones.
+    """
+    with _lock:
+        c = conn()
+        known = [r[0] for r in c.execute("SELECT id FROM endpoints ORDER BY priority, id").fetchall()]
+        seen, order = set(), []
+        for eid in ids:
+            try:
+                eid = int(eid)
+            except (TypeError, ValueError):
+                continue
+            if eid in known and eid not in seen:
+                seen.add(eid)
+                order.append(eid)
+        order += [e for e in known if e not in seen]
+        for i, eid in enumerate(order):
+            c.execute("UPDATE endpoints SET priority=? WHERE id=?", (i, eid))
+        enabled = {r[0] for r in c.execute("SELECT id FROM endpoints WHERE enabled=1").fetchall()}
+        first = next((e for e in order if e in enabled), None)
+        c.execute("UPDATE endpoints SET is_primary=0")
+        if first is not None:
+            c.execute("UPDATE endpoints SET is_primary=1 WHERE id=?", (first,))
+        c.commit()
+        return order
 
 
 # ----- api keys (client-facing keys the gateway accepts) -----
@@ -549,26 +668,103 @@ def touch_api_key(kid):
         c.commit()
 
 
+def endpoint_stats(window_sec=86400):
+    """Per-endpoint routed-traffic outcome, keyed by the endpoint's display name.
+
+    Powers the dashboard's routing-transparency panel: for each upstream the
+    operator can see how many real requests it served, how many it rejected, its
+    median-ish latency, and when it was last touched — so "which endpoint is
+    actually being used" stops being a guess.
+
+    Counted per ATTEMPT here on purpose: this panel answers "how does this endpoint
+    behave when the router tries it", which is an attempt-level question. Whole-request
+    latency lives in stats() instead.
+    """
+    cutoff = time.time() - window_sec
+    with _lock:
+        rows = conn().execute(
+            "SELECT endpoint, status, ms, ts FROM logs "
+            "WHERE ts>=? AND COALESCE(source,'')='' AND COALESCE(endpoint,'')!=''",
+            (cutoff,)).fetchall()
+    agg = {}
+    for r in rows:
+        st = r["status"] or 0
+        # 404 = path the upstream doesn't implement (v1/props, count_tokens);
+        # not a routing failure, so it must not pollute the success rate.
+        if st == 404:
+            continue
+        a = agg.setdefault(r["endpoint"], {"served": 0, "failed": 0, "_ms": [], "last_ts": 0})
+        if 200 <= st < 300:
+            a["served"] += 1
+            if r["ms"]:
+                a["_ms"].append(r["ms"])
+        else:
+            a["failed"] += 1
+        a["last_ts"] = max(a["last_ts"], r["ts"] or 0)
+    out = {}
+    for name, a in agg.items():
+        total = a["served"] + a["failed"]
+        ms = sorted(a["_ms"])
+        out[name] = {
+            "served": a["served"],
+            "failed": a["failed"],
+            "total": total,
+            "success_pct": round(a["served"] / total * 100, 1) if total else 0.0,
+            "avg_ms": round(sum(ms) / len(ms)) if ms else 0,
+            "median_ms": ms[len(ms) // 2] if ms else 0,
+            "last_ts": a["last_ts"],
+        }
+    return out
+
+
 # ----- computed stats for the dashboard -----
 def stats(window_sec=86400):
-    """Real success rate / avg latency / counts over the recent window."""
+    """What the CLIENT experienced, one row per request — not per attempt.
+
+    The old version aggregated every log row, so a request that retried 7 times was
+    counted as 7 "requests" (measured: 266 rows for 52 real requests, a 5.1x
+    inflation, and success rate read 12% when it was really 63%). Worse, only 2xx rows
+    carry a latency, so the minutes burned by a FAILED request never entered the
+    average at all — which is exactly why the dashboard said 146s while requests were
+    really taking ~171s, and why a 10-minute failure appeared to cost nothing.
+
+    Latency here is the full wall-clock time the client waited, including every retry
+    and every endpoint switch, for successes AND failures.
+    """
     import time as _t
     cutoff = _t.time() - window_sec
     with _lock:
         rows = conn().execute(
-            "SELECT status, attempts, ms, stream FROM logs WHERE ts>=? AND COALESCE(source,'')=''", (cutoff,)).fetchall()
-    # only count real model calls (POST messages -> stream/buffered/assembled), skip 404 probes
-    real = [r for r in rows if r["status"] and r["status"] != 404]
-    total = len(real)
-    ok = sum(1 for r in real if 200 <= (r["status"] or 0) < 300)
+            "SELECT status, attempts, ms, stream FROM logs "
+            "WHERE ts>=? AND COALESCE(source,'')='' AND final=1 AND COALESCE(status,0)!=404",
+            (cutoff,)).fetchall()
+    total = len(rows)
+    ok = sum(1 for r in rows if 200 <= (r["status"] or 0) < 300)
     fails = total - ok
-    oks_ms = [r["ms"] for r in real if 200 <= (r["status"] or 0) < 300 and r["ms"]]
-    avg_ms = round(sum(oks_ms) / len(oks_ms)) if oks_ms else 0
+    all_ms = sorted(r["ms"] for r in rows if r["ms"])
+    ok_ms = sorted(r["ms"] for r in rows if 200 <= (r["status"] or 0) < 300 and r["ms"])
+    fail_ms = sorted(r["ms"] for r in rows if not (200 <= (r["status"] or 0) < 300) and r["ms"])
+    attempts = [r["attempts"] for r in rows if r["attempts"]]
+
+    def _avg(v):
+        return round(sum(v) / len(v)) if v else 0
+
+    def _pct(v, q):
+        return v[min(len(v) - 1, int(len(v) * q))] if v else 0
+
     return {
         "total": total,
         "ok": ok,
         "fails": fails,
         "success_pct": round(ok / total * 100, 1) if total else 0.0,
-        "avg_ms": avg_ms,
+        # avg_ms stays the headline number but now spans successes AND failures
+        "avg_ms": _avg(all_ms),
+        "median_ms": _pct(all_ms, 0.5),
+        "p95_ms": _pct(all_ms, 0.95),
+        "worst_ms": all_ms[-1] if all_ms else 0,
+        "avg_ok_ms": _avg(ok_ms),
+        "avg_fail_ms": _avg(fail_ms),
+        "avg_attempts": round(sum(attempts) / len(attempts), 2) if attempts else 0,
+        "first_try_pct": round(sum(1 for a in attempts if a == 1) / len(attempts) * 100, 1) if attempts else 0.0,
         "window_sec": window_sec,
     }

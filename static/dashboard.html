@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mugen Routes</title>
 <style>
 :root{--g-50:#f0faf4;--g-100:#dcf5e6;--g-300:#86d6a8;--g-400:#4fbd82;--g-500:#2fa56a;--g-600:#1f8a56;--g-700:#1a6e46;--ink:#1d2a33;--ink-soft:#4a5a64;--ink-faint:#8595a0;--card:rgba(255,255,255,.72);--line:rgba(90,120,150,.18);--shadow:0 1px 2px rgba(40,60,80,.05),0 10px 30px rgba(40,70,90,.08);--r:18px;--c-mint:#a7e0c4;--c-mint-d:#3f9e78;--c-sky:#bad0f5;--c-sky-d:#5278c4;--c-lav:#e7c4f0;--c-lav-d:#9a63c0;--c-peach:#ffd6c4;--c-peach-d:#d77a4e;--c-pink:#f5c8e0;--c-pink-d:#c35a93;--c-aqua:#c4ece0;--c-aqua-d:#2f9e86}
@@ -35,6 +35,7 @@ header{display:flex;align-items:center;gap:13px;margin:4px 4px 22px;animation:ri
 .stat:nth-child(2){background:linear-gradient(135deg,rgba(186,208,245,.45),var(--card));animation-delay:.05s}
 .stat:nth-child(3){background:linear-gradient(135deg,rgba(231,196,240,.45),var(--card));animation-delay:.1s}
 .stat .k{font-size:12px;color:var(--ink-faint);font-weight:600}.stat .v{font-size:22px;font-weight:740;margin-top:4px;letter-spacing:-.5px}
+.stat .ksub{font-size:9.5px;color:var(--ink-faint);font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stat .v small{font-size:13px;color:var(--ink-faint);font-weight:600}
 .tabs{display:flex;gap:6px;overflow-x:auto;padding:5px;background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:18px;box-shadow:var(--shadow);scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
@@ -66,7 +67,7 @@ header{display:flex;align-items:center;gap:13px;margin:4px 4px 22px;animation:ri
 .field .ctrl{flex:none;display:flex;align-items:center}
 input[type=text],input[type=number],input[type=password]{font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);width:120px;text-align:right;transition:.2s;outline:none}
 input:focus{border-color:var(--c-mint-d);box-shadow:0 0 0 3px rgba(63,158,120,.16)}
-input.wide{width:100%;text-align:left}
+input.wide,textarea.wide{width:100%;text-align:left}
 .csel{position:relative;display:inline-block;min-width:130px}.csel.wide{display:block;width:100%}.csel.open{z-index:998}
 .csel-btn{font:inherit;font-size:14px;font-weight:600;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:11px;padding:9px 36px 9px 13px;cursor:pointer;width:100%;text-align:left;transition:.2s;display:flex;align-items:center;gap:8px;position:relative}
 .csel-btn:hover{border-color:var(--c-mint-d);background:var(--g-50)}
@@ -77,13 +78,30 @@ input.wide{width:100%;text-align:left}
 .csel-pop{position:absolute;top:calc(100% + 7px);left:0;right:0;min-width:200px;background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(40,70,90,.18);padding:6px;z-index:999;opacity:0;transform:translateY(-8px) scale(.97);pointer-events:none;transition:.2s cubic-bezier(.2,.8,.2,1);max-height:260px;overflow:auto;scrollbar-width:none}
 .csel-pop::-webkit-scrollbar{display:none}
 .csel.open .csel-pop{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
-.csel-opt{padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;display:flex;align-items:center;gap:9px;transition:.14s}
-.csel-opt:hover{background:var(--g-50);color:var(--ink)}.csel-opt.sel{background:var(--g-100);color:var(--g-700)}
-.csel-opt .ck{margin-left:auto;width:16px;height:16px;opacity:0;transition:.14s}.csel-opt.sel .ck{opacity:1}
+.csel-opt{padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;display:flex;align-items:center;gap:9px;transition:background .14s,color .14s}
+.csel-opt:hover{background:var(--g-50);color:var(--ink)}
+/* Only ONE option may look chosen. Hover is a lighter tint than .sel so the two are
+   never confusable — previously both read as the same green and looked co-selected. */
+.csel-opt.sel{background:var(--g-100);color:var(--g-700);font-weight:700}
+.csel-opt.sel:hover{background:var(--g-100)}
+.csel-opt .ck{margin-left:auto;width:15px;height:15px;flex:none;color:var(--g-600);opacity:0;transform:scale(.6);transition:opacity .18s cubic-bezier(.2,.8,.2,1),transform .18s cubic-bezier(.2,.8,.2,1)}
+.csel-opt.sel .ck{opacity:1;transform:scale(1)}
+/* draw-on tick: the path animates its dash offset the first time it is shown */
+.csel-opt .ck path{stroke-dasharray:24;stroke-dashoffset:24;transition:stroke-dashoffset .3s cubic-bezier(.2,.8,.2,1) .04s}
+.csel-opt.sel .ck path{stroke-dashoffset:0}
 .unit{font-size:12px;color:var(--ink-faint);margin-left:7px;font-weight:600}
-.tg{width:48px;height:28px;border-radius:999px;background:#cfe3d6;position:relative;cursor:pointer;transition:.28s;flex:none}
-.tg::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.18);transition:.28s}
-.tg.on{background:linear-gradient(145deg,var(--g-400),var(--g-600))}.tg.on::after{transform:translateX(20px)}
+/* Switch. The OFF track was a pale green (#cfe3d6) — nearly the same hue as ON, so
+   at a glance both states read as "on". OFF is now neutral grey, and only the knob
+   moves; the track cross-fades. The knob nudges on press for tactile feedback. */
+.tg{width:46px;height:26px;border-radius:999px;background:#d7dee2;position:relative;cursor:pointer;flex:none;
+    transition:background .26s cubic-bezier(.2,.8,.2,1);box-shadow:inset 0 1px 2px rgba(20,40,50,.14)}
+.tg::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;
+    box-shadow:0 1px 3px rgba(20,40,50,.28);transition:transform .26s cubic-bezier(.2,.8,.2,1),width .18s ease}
+.tg.on{background:linear-gradient(145deg,var(--g-400),var(--g-600));box-shadow:inset 0 1px 2px rgba(20,60,40,.18)}
+.tg.on::after{transform:translateX(20px)}
+.tg:active::after{width:23px}
+.tg.on:active::after{transform:translateX(17px)}
+.tg[aria-disabled="true"]{opacity:.5;cursor:progress}
 /* hot pool */
 .hp-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 6px}
 .hp-stat{background:var(--g-50);border:1px solid var(--line);border-radius:11px;padding:10px 12px;text-align:center}
@@ -127,7 +145,36 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .code.s2{background:var(--g-100);color:var(--g-700)}.code.s5{background:#fbe4e4;color:#c0392b}.code.s4{background:#fdf0d8;color:#b8841f}
 .log .ld{flex:1;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .copyrow{display:flex;gap:7px;align-items:center}.copyrow input{flex:1}
+/* Password field with an inline reveal button. The button sits INSIDE the field's
+   box so it can never drift out of alignment with the input's height, which is what
+   the old flex row + emoji did. */
+.revealrow{position:relative;display:block}
+.revealrow input{width:100%;padding-right:44px}
+.eyebtn{position:absolute;top:50%;right:6px;transform:translateY(-50%);width:30px;height:30px;padding:0;border:none;border-radius:9px;background:transparent;color:var(--ink-faint);cursor:pointer;display:grid;place-items:center;transition:background .16s,color .16s}
+.eyebtn:hover{background:var(--g-50);color:var(--g-700)}
+.eyebtn:active{transform:translateY(-50%) scale(.92)}
+.eyebtn:focus-visible{outline:2px solid var(--g-400);outline-offset:1px}
+.eyebtn.on{color:var(--g-700)}
+.eyebtn .eye{width:18px;height:18px;display:block;overflow:visible}
+/* closed state: slash drawn across the eye. Revealing wipes it away. */
+.eyebtn .eye-slash{stroke-dasharray:24;stroke-dashoffset:0;transition:stroke-dashoffset .26s cubic-bezier(.2,.8,.2,1)}
+.eyebtn.on .eye-slash{stroke-dashoffset:24}
+.eyebtn .eye-pupil{transform-origin:12px 12px;transition:transform .26s cubic-bezier(.2,.8,.2,1),opacity .2s}
+.eyebtn .eye-pupil{transform:scale(.55);opacity:.55}
+.eyebtn.on .eye-pupil{transform:scale(1);opacity:1}
+.eyebtn .eye-lid{transition:d .26s ease}
+/* Users who ask the OS for less motion get the same states without the animation. */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
 .xbtn.cp{background:var(--g-50);color:var(--g-700)}.xbtn.cp:hover{background:var(--g-100);color:var(--g-700)}
+.i16{width:14px;height:14px;display:block;flex:none}
+.xbtn .i16{width:15px;height:15px}
+.eprank .i16{width:12px;height:12px}
+/* sbtn holds an icon + label, so it needs to be a flex row or the icon sits on the
+   text baseline and looks dropped */
+.sbtn{display:inline-flex;align-items:center;gap:5px;line-height:1}
+.sbtn .i16{width:12px;height:12px}
 .keyrow{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;background:#fff}
 .keyrow .km{flex:1;min-width:0}.keyrow .kn{font-size:13.5px;font-weight:660;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .keyrow .kt{font-size:11px;color:var(--ink-faint);margin-top:2px}
@@ -143,9 +190,74 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .upbox:hover,.upbox.drag{border-color:var(--g-500);background:var(--g-50)}
 .log .lt{color:var(--ink-faint);font-family:ui-monospace,monospace;font-size:11.5px;flex:none}
 .ep{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;background:#fff;overflow:hidden;max-width:100%}
-.eprank{width:26px;height:26px;border-radius:8px;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;font-size:13px;font-weight:740;display:grid;place-items:center;flex:none}
-.ep{flex-wrap:wrap}.ep .epacts{display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap}
-.ep .tg{width:40px;height:24px}.ep .tg::after{width:18px;height:18px}.ep .tg.on::after{transform:translateX(16px)}
+/* ---- Routing Order panel ---- */
+.rolist{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+/* One row = one line. No wrapping: the stat block and nudge buttons are fixed-width
+   and the name column absorbs whatever is left, so a row stays ~46px tall instead of
+   growing to three stacked lines on a phone. */
+.ro{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:12px;background:#fff;max-width:100%}
+.ro.off{opacity:.55;background:#fafafa}
+.ro.moved{border-color:var(--g-400);background:var(--g-50)}
+.ro-grip{color:#c2cdc7;font-size:14px;cursor:grab;flex:none;touch-action:none;user-select:none;padding:0 1px;line-height:1}
+.ro-grip:active{cursor:grabbing}
+.ro-pos{width:22px;height:22px;border-radius:7px;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;font-size:11.5px;font-weight:740;display:grid;place-items:center;flex:none}
+.ro.off .ro-pos{background:#cbd5cf}
+.ro-main{flex:1 1 auto;min-width:0}
+.ro-nm{font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:5px}
+.ro-nm .nmtxt{overflow:hidden;text-overflow:ellipsis}
+.ro-sub{font-size:10px;color:var(--ink-faint);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ro-stat{flex:none;text-align:right;font-size:9.5px;line-height:1.35;color:var(--ink-faint);width:64px}
+.ro-stat b{font-size:11.5px;font-weight:740;display:block}
+.ro-ok b{color:var(--c-mint-d)}.ro-warn b{color:#c98a1e}.ro-bad b{color:#c9524f}.ro-idle b{color:var(--ink-faint)}
+.ro-nudge{display:flex;flex-direction:column;gap:2px;flex:none}
+.ro-nudge button{font:inherit;font-size:8px;line-height:1;padding:2px 5px;border-radius:5px;border:1px solid var(--g-300);background:#fff;color:var(--g-700);cursor:pointer}
+.ro-nudge button:disabled{opacity:.3;cursor:default}
+.ro-nudge button:not(:disabled):hover{background:var(--g-50)}
+.ro-nudge button:not(:disabled):active{background:var(--g-100)}
+.ro-grip .gicon{width:14px;height:14px;display:block}
+.ro-nudge .nicon{width:11px;height:11px;display:block}
+/* the priority list inside Endpoint settings uses the same grip */
+.pgrip .gicon{width:14px;height:14px;display:block}
+.ro-chip{font-size:8.5px;font-weight:700;padding:1px 5px;border-radius:5px;background:var(--g-100);color:var(--g-700);flex:none;letter-spacing:.2px}
+.ro-chip.warn{background:#fdf3e0;color:#a9761a}
+/* Save / Discard sit side by side and only appear when there IS a draft, so the
+   panel isn't dominated by two full-width buttons at rest. */
+.robar{display:flex;gap:8px;align-items:center;margin-top:11px}
+.robar .btn{flex:1 1 0;min-width:0;font-size:12.5px;padding:9px 12px}
+.robar .csel{flex:0 0 auto;margin-left:auto;min-width:118px}
+.robar.clean .rodraft{display:none}
+.rohint{font-size:10.5px;color:var(--ink-faint);margin-top:8px;line-height:1.5}
+/* endpoint-settings modal: custom proxy rows + priority rows */
+.pxrow{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.pxrow .pxInput{flex:1 1 auto;min-width:0;height:36px}
+.pxrow .pxDel{flex:0 0 30px;width:30px;height:30px;background:#fee2e2;color:#dc2626;border:none;border-radius:7px;font-size:15px;cursor:pointer;display:grid;place-items:center;padding:0;line-height:1}
+.pxrow .pxDel:hover{background:#fecaca}
+.pprow{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-bottom:6px}
+.pgrip{color:var(--ink-faint);cursor:grab;touch-action:none;user-select:none;flex:none}
+.pgrip:active{cursor:grabbing}
+.ppos{width:20px;height:20px;border-radius:6px;background:var(--g-100);color:var(--g-700);font-size:10.5px;font-weight:740;display:grid;place-items:center;flex:none}
+.plabel{flex:1;font-size:12px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:600px){.ro-stat{min-width:76px}.robar .btn{flex:1 1 100%;min-width:0}.robar .csel{margin-left:0;width:100%}}
+.eprank{width:24px;height:24px;border-radius:7px;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;font-size:12px;font-weight:740;display:grid;place-items:center;flex:none}
+/* Two-row card: [rank | name+meta | switch & delete] then [action buttons].
+   The switch rides the title row's spare space; the divider sits midway between the
+   two rows rather than hugging the buttons. */
+.ep{flex-wrap:wrap;padding:11px;gap:9px 10px;align-items:flex-start}
+/* min-width:0 lets the name column actually shrink; without it a long URL like
+   freetokenfaucet.com/anthropic held the row at its full text width and pushed the
+   switch onto a line of its own. The name now ellipsises instead. */
+.ep .pi{padding-top:1px;flex:1 1 0;min-width:0}
+.ep .pi .ip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ep .epstate{display:flex;gap:6px;align-items:center;margin-left:auto;flex:0 0 auto}
+.ep .epacts{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:520px){
+  /* margin-top spaces the divider off the meta line; padding-top gives the buttons
+     the same breathing room below it, so the line lands centred between them. */
+  .ep .epacts{flex:1 1 100%;justify-content:flex-start;margin-top:2px;padding-top:11px;border-top:1px dashed var(--line)}
+  .ep .epacts .sbtn{flex:1 1 auto;justify-content:center}
+}
+.ep .tg{width:38px;height:22px}.ep .tg::after{width:16px;height:16px}.ep .tg.on::after{transform:translateX(16px)}
+.ep .tg:active::after{width:19px}.ep .tg.on:active::after{transform:translateX(13px)}
 .sbtn{font:inherit;font-size:11px;font-weight:700;padding:6px 10px;border-radius:9px;border:1px solid var(--g-300);background:#fff;color:var(--g-700);cursor:pointer;transition:.15s;white-space:nowrap}
 .sbtn:hover{background:var(--g-50)}.sbtn.star{border-color:#e3b341;color:#b8841f}.sbtn.star.on{background:#fdf6e3;border-color:#e3b341}
 .sbtn.chat{border-color:var(--c-sky-d);color:var(--c-sky-d)}.sbtn.chat:hover{background:#eef5ff}
@@ -164,7 +276,14 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .msg{padding:9px 13px;border-radius:13px;font-size:13.5px;line-height:1.5;max-width:85%;white-space:pre-wrap;word-break:break-word}
 .msg.u{align-self:flex-end;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;border-bottom-right-radius:4px}
 .msg.a{align-self:flex-start;background:var(--g-50);color:var(--ink);border:1px solid var(--line);border-bottom-left-radius:4px}
-.msg.sys{align-self:center;background:#fdf0d8;color:#b8841f;font-size:11.5px;font-weight:600;border-radius:8px;padding:5px 10px}
+.msg.sys{align-self:center;background:#fdf0d8;color:#b8841f;font-size:11.5px;font-weight:600;border-radius:8px;padding:5px 10px;text-align:center}
+.msg.a.err{background:#fdf2f2;border-color:#f3c9c9;color:#9b3d3a}
+.msg-meta{margin-top:6px;font-size:10.5px;font-weight:600;color:var(--ink-faint);font-family:ui-monospace,monospace}
+/* three-dot typing indicator, drawn in CSS so there is no image to load */
+.dots{display:inline-flex;gap:4px;align-items:center;height:14px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--g-500);display:block;animation:dotpulse 1.25s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.18s}.dots i:nth-child(3){animation-delay:.36s}
+@keyframes dotpulse{0%,60%,100%{opacity:.28;transform:translateY(0) scale(.85)}30%{opacity:1;transform:translateY(-3px) scale(1)}}
 .chatin{padding:12px 14px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-end}
 .chatin textarea{flex:1;resize:none;font:inherit;font-size:13.5px;border:1px solid var(--line);border-radius:11px;padding:9px 12px;max-height:90px;min-height:40px}
 .chatin .send{width:40px;height:40px;border:none;border-radius:11px;background:linear-gradient(145deg,var(--g-500),var(--g-600));color:#fff;cursor:pointer;flex:none;font-size:16px}
@@ -229,7 +348,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 </header>
 <div class="stats">
 <div class="stat"><div class="k">Success (24h)</div><div class="v" id="s_ok" style="color:var(--c-mint-d)">—</div></div>
-<div class="stat"><div class="k">Avg latency</div><div class="v" id="s_ms" style="color:var(--c-sky-d)">—</div></div>
+<div class="stat"><div class="k">Median latency</div><div class="v" id="s_ms" style="color:var(--c-sky-d)">—</div><div class="ksub" id="s_ms_sub"></div></div>
 <div class="stat"><div class="k">Active proxies</div><div class="v" id="s_px" style="color:var(--c-lav-d)">—</div></div>
 </div>
 <div class="tabs">
@@ -286,8 +405,8 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <p class="sub">Pre-verified fast proxies kept in memory for instant use. Reduces latency dramatically.</p>
 <div class="field"><div class="meta"><div class="lbl">Hot Pool</div><div class="desc">ON = keep a pool of verified proxies in memory, refresh periodically. OFF = use DB proxies directly (for premium/paid proxies).</div></div><div class="ctrl"><div class="tg" id="tgHotPool"></div></div></div>
 <div id="hpSettingsWrap">
-<div class="field"><div class="meta"><div class="lbl">Pool size</div><div class="desc">Number of verified proxies to keep ready in the hot pool.</div></div><div class="ctrl"><input type="number" data-set="hot_pool_size" min="1" max="50" style="width:70px"></div></div>
-<div class="field"><div class="meta"><div class="lbl">Refresh interval</div><div class="desc">How often to re-test and refresh the hot pool.</div></div><div class="ctrl"><input type="number" data-set="hot_pool_refresh" min="10" max="600" style="width:70px"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Pool size</div><div class="desc">Number of verified proxies to keep ready in the hot pool.</div></div><div class="ctrl"><input type="number" data-set="hot_pool_size" min="1" max="200" style="width:70px"></div></div>
+<div class="field"><div class="meta"><div class="lbl">Refresh interval</div><div class="desc">How often to re-test and refresh the hot pool.</div></div><div class="ctrl"><input type="number" data-set="hot_pool_refresh" min="3" max="3600" style="width:70px"><span class="unit">sec</span></div></div>
 <div class="field"><div class="meta"><div class="lbl">Test timeout</div><div class="desc">Timeout for background tests. Higher finds more free proxies, lower finds faster ones.</div></div><div class="ctrl"><input type="number" data-set="hot_pool_test_timeout" min="1" max="30" step="0.1" style="width:70px"><span class="unit">sec</span></div></div>
 <div class="field"><div class="meta"><div class="lbl">Testing Concurrency</div><div class="desc">Max candidates to test in parallel during refresh (limits CPU / event loop load).</div></div><div class="ctrl"><input type="number" data-set="hot_pool_concurrency" min="1" max="100" style="width:70px"></div></div>
 <div style="padding:10px 0 4px;display:flex;gap:9px;align-items:center">
@@ -312,8 +431,8 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2l3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1 3-6z"/></svg></span>Proxy Engine Settings</h2>
 <p class="sub">Global proxy testing and connection tuning.</p>
 <div class="field"><div class="meta"><div class="lbl">API testing</div><div class="desc">ON = deep test proxy using API endpoint. OFF = basic TCP ping (very fast).</div></div><div class="ctrl"><div class="tg" id="tgHotPoolApi"></div></div></div>
-<div class="field"><div class="meta"><div class="lbl">Hedging Concurrency</div><div class="desc">Number of proxies to race in parallel for ZERO latency. (Higher = faster, but uses more proxy bandwidth).</div></div><div class="ctrl"><input type="number" data-set="hedging_concurrency" min="1" max="10" style="width:70px"></div></div>
-<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Max seconds to wait for a proxy connection. Lower = fail faster, try next.</div></div><div class="ctrl"><input type="number" data-set="connect_timeout" min="1" max="30" style="width:70px"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Hedging Concurrency</div><div class="desc">Number of proxies to race in parallel for ZERO latency. (Higher = faster, but uses more proxy bandwidth).</div></div><div class="ctrl"><input type="number" data-set="hedging_concurrency" min="1" max="50" style="width:70px"></div></div>
+<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Set under <b>Timers → Advanced Timings</b>. Lower = a dead proxy fails faster and the next one is tried sooner.</div></div><div class="ctrl"><span class="unit" id="ctMirror">—</span></div></div>
 <div class="field"><div class="meta"><div class="lbl">Max retries</div><div class="desc">Attempts per request before giving up.</div></div><div class="ctrl"><input type="number" data-set="max_retries" style="width:70px"></div></div>
 <div class="field"><div class="meta"><div class="lbl">Endpoint failover threshold</div><div class="desc">Consecutive 500+ errors required on different proxies to switch to the next endpoint target.</div></div><div class="ctrl"><input type="number" data-set="failover_5xx_threshold" min="1" max="10" style="width:70px"></div></div>
 <div class="field"><div class="meta"><div class="lbl">Retry initial delay</div><div class="desc">Wait before 1st retry. Doubles each time.</div></div><div class="ctrl"><input type="number" step="0.5" data-set="retry_initial_delay" style="width:70px"><span class="unit">sec</span></div></div>
@@ -324,7 +443,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 </div>
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="2" y="3" width="20" height="6" rx="2"/><rect x="2" y="15" width="20" height="6" rx="2"/></svg></span>Proxy pool <span id="prxCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
-<p class="sub">Tap ⟳ to test a proxy against the upstream endpoint.</p>
+<p class="sub">Tap the refresh icon on a row to test that proxy against the upstream endpoint.</p>
 <div class="prxbar">
 <input id="prxSearch" type="text" placeholder="🔍 Filter by IP / status…" autocomplete="off">
 <div class="csel" id="prxShow" data-val="10"><button class="csel-btn">Show 10</button><div class="csel-pop"><div class="csel-opt sel" data-v="5">Show 5</div><div class="csel-opt" data-v="10">Show 10</div><div class="csel-opt" data-v="25">Show 25</div><div class="csel-opt" data-v="50">Show 50</div><div class="csel-opt" data-v="100">Show 100</div><div class="csel-opt" data-v="all">Show all</div></div></div>
@@ -341,7 +460,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div style="text-align:center;font-size:11px;color:var(--ink-faint);margin:10px 0 6px">— or paste / add one —</div>
 <div class="full" style="margin-bottom:9px"><label class="fl">Bulk paste (one per line, any format)</label><textarea class="wide" id="newBulk" rows="2" placeholder="206.123.156.233:6289&#10;user:pass@38.154.203.95:5863" style="resize:vertical;font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:11px;padding:9px 12px"></textarea></div>
 <div class="grid2">
-<div><label class="fl">Type</label><div class="csel wide" id="newPtype" data-val="http"><button class="csel-btn">HTTP</button><div class="csel-pop"><div class="csel-opt sel" data-v="http">HTTP <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="https">HTTPS</div><div class="csel-opt" data-v="socks5">SOCKS5</div><div class="csel-opt" data-v="socks4">SOCKS4</div></div></div></div>
+<div><label class="fl">Type</label><div class="csel wide" id="newPtype" data-val="http"><button class="csel-btn">HTTP</button><div class="csel-pop"><div class="csel-opt sel" data-v="http">HTTP</div><div class="csel-opt" data-v="https">HTTPS</div><div class="csel-opt" data-v="socks5">SOCKS5</div><div class="csel-opt" data-v="socks4">SOCKS4</div></div></div></div>
 <div><label class="fl">Host / IP</label><input class="wide" id="newHost" type="text" placeholder="217.181.91.60"></div>
 <div><label class="fl">Port</label><input class="wide" id="newPort" type="text" placeholder="3129"></div>
 <div><label class="fl">Username (opt)</label><input class="wide" id="newUser" type="text" placeholder="user"></div>
@@ -365,8 +484,19 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></span>Your gateway endpoint</h2>
 <p class="sub">This is the URL your apps connect to. Copy it into your client.</p>
-<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Public endpoint URL</label><div class="copyrow"><input class="wide" type="text" id="publicUrl" readonly><button class="xbtn cp" id="cpPublic" title="copy">⧉</button></div></div>
+<div style="padding:13px 0;border-top:1px solid var(--line)"><label class="fl">Public endpoint URL</label><div class="copyrow"><input class="wide" type="text" id="publicUrl" readonly><button class="xbtn cp" id="cpPublic" title="Copy URL" aria-label="Copy URL"></button></div></div>
 <div id="activeEpInfo" style="font-size:12px;color:var(--ink-faint);padding:8px 2px 2px;line-height:1.55"></div>
+</div>
+<div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M3 6h13M3 12h9M3 18h5M17 15l3 3 3-3"/></svg></span>Routing Order <span id="roWindow" style="margin-left:auto;font-size:11px;color:var(--ink-faint);font-weight:600"></span></h2>
+<p class="sub">Position 1 gets every request first; the next is used only if it gives up. Drag the grip or use ▲▼.</p>
+<div id="roList" class="rolist"></div>
+<div class="robar clean" id="roBar">
+  <button class="btn rodraft" id="roSave" disabled>Save order</button>
+  <button class="btn ghost rodraft" id="roReset" disabled>Discard</button>
+  <div class="csel" id="roRange" data-val="86400"><button class="csel-btn">Last 24h</button><div class="csel-pop"><div class="csel-opt" data-v="3600">Last 1h</div><div class="csel-opt" data-v="21600">Last 6h</div><div class="csel-opt sel" data-v="86400">Last 24h</div><div class="csel-opt" data-v="604800">Last 7d</div></div></div>
+</div>
+<div class="rohint" id="roHint"></div>
 </div>
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints <span id="epCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
@@ -377,7 +507,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <label class="fl" style="font-size:13px;margin-bottom:10px">+ Add endpoint</label>
 <div class="grid2">
 <div class="full"><label class="fl">Base URL</label><input class="wide" id="epUrl" type="text" placeholder="https://api.provider.com/v1"></div>
-<div><label class="fl">API mode</label><div class="csel wide" id="epMode" data-val="anthropic_messages"><button class="csel-btn">Anthropic Messages</button><div class="csel-pop"><div class="csel-opt sel" data-v="anthropic_messages">Anthropic Messages <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="chat_completions">OpenAI Chat</div></div></div></div>
+<div><label class="fl">API mode</label><div class="csel wide" id="epMode" data-val="anthropic_messages"><button class="csel-btn">Anthropic Messages</button><div class="csel-pop"><div class="csel-opt sel" data-v="anthropic_messages">Anthropic Messages</div><div class="csel-opt" data-v="chat_completions">OpenAI Chat</div></div></div></div>
 <div><label class="fl">API key</label><input class="wide" id="epKey" type="password" placeholder="sk-..."></div>
 <div class="full"><label class="fl">Model ID override (optional)</label><input class="wide" id="epModel" type="text" placeholder="claude-3-opus-123"></div>
 </div>
@@ -411,7 +541,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="addbox" style="margin-top:10px">
 <div class="grid2">
 <div class="full"><label class="fl">Keyword</label><input class="wide" id="kwVal" type="text" placeholder="secret-word"></div>
-<div><label class="fl">Mode</label><div class="csel wide" id="kwMode" data-val="redact"><button class="csel-btn">Redact</button><div class="csel-pop"><div class="csel-opt sel" data-v="redact">Redact <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="block">Block request</div></div></div></div>
+<div><label class="fl">Mode</label><div class="csel wide" id="kwMode" data-val="redact"><button class="csel-btn">Redact</button><div class="csel-pop"><div class="csel-opt sel" data-v="redact">Redact</div><div class="csel-opt" data-v="block">Block request</div></div></div></div>
 <div><label class="fl">Replace with</label><input class="wide" id="kwRepl" type="text" placeholder="[REDACTED]"></div>
 </div>
 <button class="btn" id="addKw">Add filter</button>
@@ -470,7 +600,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="apsettings" id="agentSettings">
 <div class="field" style="padding:8px 0"><div class="meta"><div class="lbl">Brain</div><div class="desc">Default uses this gateway. Custom uses your own model.</div></div><div class="ctrl"><div class="tg" id="agentMode"></div></div></div>
 <div id="agentCustom" style="display:none">
-<label class="fl">SDK</label><div class="csel wide" id="agentSdk" data-val="openai" style="margin-bottom:8px"><button class="csel-btn">OpenAI</button><div class="csel-pop"><div class="csel-opt sel" data-v="openai">OpenAI <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div><div class="csel-opt" data-v="anthropic">Anthropic</div></div></div>
+<label class="fl">SDK</label><div class="csel wide" id="agentSdk" data-val="openai" style="margin-bottom:8px"><button class="csel-btn">OpenAI</button><div class="csel-pop"><div class="csel-opt sel" data-v="openai">OpenAI</div><div class="csel-opt" data-v="anthropic">Anthropic</div></div></div>
 <label class="fl">Endpoint</label><input class="wide" id="agentEp" placeholder="https://api.provider.com/v1" style="margin-bottom:8px">
 <label class="fl">Model name</label><input class="wide" id="agentModel" placeholder="qwen-large" style="margin-bottom:8px">
 <label class="fl">API key</label><input class="wide" id="agentKey" type="password" placeholder="sk-..." style="margin-bottom:8px">
@@ -488,6 +618,10 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <script>
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 let TOK=localStorage.getItem('mr_tok')||'',ST=null;
+// Every DB-sourced string reaches the DOM through a template literal, so it must
+// be escaped: a proxy URL or endpoint name containing " or < would otherwise
+// break out of the attribute and swallow the rest of the row.
+const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function toast(msg,k){const t=$('#toast');t.textContent=msg;t.className='toast '+(k||'')+' show';clearTimeout(t._h);t._h=setTimeout(()=>t.className='toast',2400)}
 async function api(path,body){
@@ -567,11 +701,46 @@ function _cselClose(cs){
   cs.classList.remove('open');
   if(cs._pop){cs._pop.style.cssText='';if(cs._pop._home&&cs._pop.parentNode!==cs._pop._home)cs._pop._home.appendChild(cs._pop);}
 }
+// Glyphs like ☰ ▲ ▼ are font-dependent and render at different weights and baselines
+// per platform, which is what made the routing rows look ragged. These are drawn.
+// Small inline icon set. Emoji were sized and baselined differently on every
+// platform, which is what pushed the reveal button and row controls out of line.
+const ICO={
+  copy:'<svg class="i16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11.5" height="11.5" rx="2.6"/><path d="M15.6 6.2A2.6 2.6 0 0 0 13 3.5H6.1A2.6 2.6 0 0 0 3.5 6.1V13a2.6 2.6 0 0 0 2.7 2.6"/></svg>',
+  retry:'<svg class="i16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.6 4.2v5h-5"/></svg>',
+  star:'<svg class="i16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 3.4l2.6 5.5 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.7l6-.8z"/></svg>',
+  chat:'<svg class="i16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.3a7.7 7.7 0 0 1-8.2 7.7 9 9 0 0 1-2.5-.4L4.6 20.3l1.4-4.1a7.4 7.4 0 0 1-1.5-4.5A7.7 7.7 0 0 1 12.4 4a7.9 7.9 0 0 1 8.1 7.3z"/></svg>',
+  gear:'<svg class="i16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.6v2.2M12 19.2v2.2M4.5 4.5l1.6 1.6M17.9 17.9l1.6 1.6M2.6 12h2.2M19.2 12h2.2M4.5 19.5l1.6-1.6M17.9 6.1l1.6-1.6"/></svg>'
+};
+
+const GRIP_SVG='<svg class="gicon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M2.5 5h11M2.5 8h11M2.5 11h11"/></svg>';
+const CHEV_UP='<svg class="nicon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4-4 4 4"/></svg>';
+const CHEV_DN='<svg class="nicon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>';
+const CK_SVG='<svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"/></svg>';
+
+// Hand-drawn eye, not the 👁 emoji: the emoji renders at a different size and
+// baseline on every platform, which is why it sat visibly off-centre. An inline SVG
+// inherits currentColor and centres exactly. The slash strokes itself on when the
+// key becomes visible, so the button also reads as a state, not just an icon.
+const EYE_SVG=`<svg class="eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path class="eye-lid" d="M2.2 12S5.8 5.4 12 5.4 21.8 12 21.8 12 18.2 18.6 12 18.6 2.2 12 2.2 12Z"/>
+  <circle class="eye-pupil" cx="12" cy="12" r="3.05"/>
+  <path class="eye-slash" d="M4 20 20 4"/>
+</svg>`;
+
 function initCsel(cs){
   const btn=cs.querySelector('.csel-btn');
   const pop=cs.querySelector('.csel-pop');
   if(!btn||!pop)return;
   cs._pop=pop;pop._home=cs;
+  // Some option lists were hand-written with the tick SVG and some without, so the
+  // selected row silently lost its checkmark in half the dropdowns. Inject it once
+  // here instead of repeating it in markup. data-label keeps the plain text so the
+  // trigger never picks up SVG markup.
+  pop.querySelectorAll('.csel-opt').forEach(o=>{
+    if(!o.dataset.label)o.dataset.label=(o.childNodes[0]?o.childNodes[0].textContent:o.textContent).trim();
+    if(!o.querySelector('.ck'))o.insertAdjacentHTML('beforeend',CK_SVG);
+  });
   btn.onclick=e=>{
     e.stopPropagation();
     const isOpen=cs.classList.contains('open');
@@ -580,14 +749,26 @@ function initCsel(cs){
       cs.classList.add('open');
       const r=btn.getBoundingClientRect();
       document.body.appendChild(pop);
-      pop.style.cssText=`position:absolute;top:${window.scrollY+r.bottom+7}px;left:${window.scrollX+r.left}px;width:${r.width}px;z-index:99999;opacity:1;transform:none;pointer-events:auto`;
+      // Clamp inside the viewport: at 360px a right-aligned trigger pushed the
+      // popup (min-width 200px) off-screen and its options became unreachable.
+      const popW=Math.max(r.width,200);
+      const left=Math.max(8,Math.min(r.left,window.innerWidth-popW-8));
+      pop.style.cssText=`position:absolute;top:${window.scrollY+r.bottom+7}px;left:${window.scrollX+left}px;width:${r.width}px;min-width:${popW}px;z-index:99999;opacity:1;transform:none;pointer-events:auto`;
     }
   };
-  cs.querySelectorAll('.csel-opt').forEach(opt=>opt.onclick=e=>{
-    e.stopPropagation();cs.querySelectorAll('.csel-opt').forEach(o=>o.classList.remove('sel'));opt.classList.add('sel');
-    btn.innerHTML=opt.childNodes[0].textContent.trim();
+  // Options are queried from `pop`, NOT from `cs`. While the dropdown is open the
+  // popup lives in <body> (so it can escape overflow clipping), so the options are
+  // no longer descendants of `cs` — `cs.querySelectorAll` matched nothing and the
+  // previous selection's green highlight was never cleared. Two options then looked
+  // selected at once.
+  pop.querySelectorAll('.csel-opt').forEach(opt=>opt.onclick=e=>{
+    e.stopPropagation();
+    pop.querySelectorAll('.csel-opt').forEach(o=>o.classList.remove('sel'));
+    opt.classList.add('sel');
+    btn.textContent=(opt.dataset.label||opt.childNodes[0].textContent).trim();
     if(opt.dataset.v!==undefined)cs.dataset.val=opt.dataset.v;
-    _cselClose(cs);if(cs._cb)cs._cb(opt.dataset.v);
+    _cselClose(cs);
+    if(cs._cb)cs._cb(opt.dataset.v);
   });
 }
 document.addEventListener('click',e=>$$('.csel.open').forEach(cs=>{
@@ -598,71 +779,85 @@ function mkCsel(id,opts,cur,cb){
   const el=$('#'+id);
   if(!el)return;
   el._cb=cb;
-  const optHtml=opts.map(o=>`<div class="csel-opt${o.v===cur?' sel':''}" data-v="${o.v}">${o.l} <svg class="ck" viewBox="0 0 24 24" fill="none" stroke="var(--c-mint-d)" stroke-width="3"><path d="M5 12l5 5 9-11"/></svg></div>`).join('');
+  // Labels are built from proxy URLs, so they must be escaped before reaching innerHTML.
+  const optHtml=opts.map(o=>`<div class="csel-opt${o.v===cur?' sel':''}" data-v="${esc(o.v)}" data-label="${esc(o.l)}">${esc(o.l)}</div>`).join('');
   const curL=(opts.find(o=>o.v===cur)||opts[0]||{}).l||cur;
   el.dataset.val=cur;
-  el.innerHTML=`<button class="csel-btn">${curL}</button><div class="csel-pop">${optHtml}</div>`;
+  el.innerHTML=`<button class="csel-btn">${esc(curL)}</button><div class="csel-pop">${optHtml}</div>`;
   initCsel(el);
 }
 
 // toggles
-$('#tgRotation').onclick=async()=>{const on=!$('#tgRotation').classList.contains('on');$('#tgRotation').classList.toggle('on',on);if($('#rotSettingsWrap')) $('#rotSettingsWrap').style.display=on?'none':'block';await api('/admin/settings',{auto_rotation:on?'1':'0'});ST.settings.auto_rotation=on?'1':'0';render();toast('Auto rotation '+(on?'ON':'OFF'),'ok');};
-$('#tgMimicry').onclick=async()=>{const on=!$('#tgMimicry').classList.contains('on');$('#tgMimicry').classList.toggle('on',on);await api('/admin/settings',{claude_mimicry:on?'1':'0'});ST.settings.claude_mimicry=on?'1':'0';toast('Mimicry '+(on?'ON':'OFF'),'ok');};
-$('#tgHotPool').onclick=async()=>{const on=!$('#tgHotPool').classList.contains('on');$('#tgHotPool').classList.toggle('on',on);$('#hpSettingsWrap').style.display=on?'block':'none';await api('/admin/settings',{hot_pool_enabled:on?'1':'0'});ST.settings.hot_pool_enabled=on?'1':'0';toast('Hot Pool '+(on?'ON':'OFF'),'ok');};
-$('#tgHotPoolApi').onclick=async()=>{const on=!$('#tgHotPoolApi').classList.contains('on');$('#tgHotPoolApi').classList.toggle('on',on);await api('/admin/settings',{hot_pool_api_test:on?'1':'0'});ST.settings.hot_pool_api_test=on?'1':'0';toast('API testing '+(on?'ON':'OFF'),'ok');};
+// A toggle used to flip its own class first and only then call the server, so a
+// failed request left the switch showing a state the DB never had. bindToggle
+// sends first and paints only on success — on failure the switch stays put and
+// the user gets a real error.
+function bindToggle(id,key,label,onAfter){
+  const el=$('#'+id);
+  if(!el)return;
+  el.onclick=async()=>{
+    if(el._busy)return;
+    const on=!el.classList.contains('on');
+    el._busy=true;el.setAttribute('aria-disabled','true');
+    try{
+      await api('/admin/settings',{[key]:on?'1':'0'});
+      ST.settings[key]=on?'1':'0';
+      el.classList.toggle('on',on);
+      if(onAfter)onAfter(on);
+      toast(label+' '+(on?'ON':'OFF'),'ok');
+    }catch(e){
+      toast(label+' change failed: '+(e.message||'error'),'bad');
+    }finally{
+      el._busy=false;el.removeAttribute('aria-disabled');
+    }
+  };
+}
+bindToggle('tgRotation','auto_rotation','Auto rotation',on=>{
+  if($('#rotSettingsWrap'))$('#rotSettingsWrap').style.display=on?'none':'block';
+  render();
+});
+bindToggle('tgMimicry','claude_mimicry','Mimicry');
+bindToggle('tgHotPool','hot_pool_enabled','Hot Pool',on=>{
+  if($('#hpSettingsWrap'))$('#hpSettingsWrap').style.display=on?'block':'none';
+});
+bindToggle('tgHotPoolApi','hot_pool_api_test','API testing');
 
-$('#tgScanner').onclick=async()=>{const on=!$('#tgScanner').classList.contains('on');$('#tgScanner').classList.toggle('on',on);if($('#scanSettingsWrap')) $('#scanSettingsWrap').style.display=on?'block':'none';await api('/admin/settings',{proxy_scanner_enabled:on?'1':'0'});ST.settings.proxy_scanner_enabled=on?'1':'0';toast('Scanner '+(on?'ON':'OFF'),'ok');};
-$('#saveScannerBtn').onclick=async()=>{
-  const interval=$('input[data-set="proxy_scanner_interval"]').value;
-  const batch=$('input[data-set="proxy_scanner_batch"]').value;
-  await api('/admin/settings',{proxy_scanner_interval:interval,proxy_scanner_batch:batch});
-  toast('Scanner settings saved','ok');
-  ['proxy_scanner_interval','proxy_scanner_batch'].forEach(k=>{const el=$('[data-set="'+k+'"]');if(el)el._dirty=false;});
-  ST.settings.proxy_scanner_interval=interval;ST.settings.proxy_scanner_batch=batch;
-  render();
-};
-$('#saveHotPool').onclick=async()=>{
-  const size=$('input[data-set="hot_pool_size"]').value;
-  const refresh=$('input[data-set="hot_pool_refresh"]').value;
-  const timeout=$('input[data-set="hot_pool_test_timeout"]').value;
-  const conc=$('input[data-set="hot_pool_concurrency"]').value;
-  await api('/admin/settings',{hot_pool_size:size,hot_pool_refresh:refresh,hot_pool_test_timeout:timeout,hot_pool_concurrency:conc});
-  toast('Hot pool settings saved','ok');
-  ['hot_pool_size','hot_pool_refresh','hot_pool_test_timeout','hot_pool_concurrency'].forEach(k=>{const el=$('[data-set="'+k+'"]');if(el)el._dirty=false;});
-  ST.settings.hot_pool_size=size;ST.settings.hot_pool_refresh=refresh;ST.settings.hot_pool_test_timeout=timeout;ST.settings.hot_pool_concurrency=conc;
-  render();
-};
-$('#saveProxyEngine').onclick=()=>saveSettings(['hedging_concurrency','connect_timeout','max_retries','failover_5xx_threshold','retry_initial_delay','retry_max_delay'],'Proxy Engine');
+bindToggle('tgScanner','proxy_scanner_enabled','Scanner',on=>{
+  if($('#scanSettingsWrap'))$('#scanSettingsWrap').style.display=on?'block':'none';
+});
+$('#saveScannerBtn').onclick=()=>saveSettings(['proxy_scanner_interval','proxy_scanner_batch'],'Scanner settings');
+$('#saveHotPool').onclick=()=>saveSettings(['hot_pool_size','hot_pool_refresh','hot_pool_test_timeout','hot_pool_concurrency'],'Hot pool settings');
+$('#saveProxyEngine').onclick=()=>saveSettings(['hedging_concurrency','max_retries','failover_5xx_threshold','retry_initial_delay','retry_max_delay'],'Proxy Engine');
 
 // Hot Pool Live View
 let _hpInterval=null;
-$('#openHotPool').onclick=()=>{$('#hpModal').classList.add('show');document.body.style.overflow='hidden';_hpPoll();_hpInterval=setInterval(_hpPoll,2000);};
-$('#hpModalX').onclick=()=>{$('#hpModal').classList.remove('show');document.body.style.overflow='';if(_hpInterval){clearInterval(_hpInterval);_hpInterval=null;}};
-$('#hpModal').onclick=e=>{if(e.target===$('#hpModal')){$('#hpModalX').click();}};
+function _hpStopPoll(){if(_hpInterval){clearInterval(_hpInterval);_hpInterval=null;}}
+$('#openHotPool').onclick=()=>{$('#hpModal').classList.add('show');document.body.style.overflow='hidden';_hpPoll();_hpStopPoll();_hpInterval=setInterval(_hpPoll,2000);};
+$('#hpModalX').onclick=()=>closeModal('hpModal');
 async function _hpPoll(){
   try{
     const r=await fetch('/admin/hotpool',{headers:{'x-admin-token':TOK}});
     if(!r.ok)return;
     const d=await r.json();
-    // Stats
     const ago=d.last_refresh?Math.round((Date.now()/1000-d.last_refresh))+'s ago':'never';
+    // Header badge updates on every poll; the modal internals only when it is open.
+    const hpS=$('#hpStatus');
+    if(hpS)hpS.textContent=d.refreshing?'Refreshing…':d.proxies.length+' ready · '+ago;
+    if(!$('#hpModal').classList.contains('show'))return;
     $('#hpStats').innerHTML=`
       <div class="hp-stat"><div class="hpv">${d.proxies.length}</div><div class="hpk">In Pool</div></div>
       <div class="hp-stat"><div class="hpv">${d.cycle_tested}</div><div class="hpk">Last Tested</div></div>
       <div class="hp-stat"><div class="hpv">${d.cycle_passed}</div><div class="hpk">Last Passed</div></div>
     `;
-    // Update header status
-    const hpS=$('#hpStatus');
-    if(hpS) hpS.textContent=d.refreshing?'⟳ Refreshing...':d.proxies.length+' ready · '+ago;
     // Proxies
     if(d.proxies.length){
-      $('#hpProxies').innerHTML=d.proxies.map(p=>`<div class="hp-proxy"><span class="st"></span><span class="hp-url">${p.url.split('@').pop()}</span><span class="hp-lat">${p.latency_ms}ms</span></div>`).join('');
+      $('#hpProxies').innerHTML=d.proxies.map(p=>`<div class="hp-proxy"><span class="st"></span><span class="hp-url">${esc(p.url.split('@').pop())}</span><span class="hp-lat">${p.latency_ms}ms</span></div>`).join('');
     }else{
       $('#hpProxies').innerHTML='<div class="hp-empty">No proxies in hot pool yet. Waiting for next refresh cycle...</div>';
     }
     // Log
     if(d.log.length){
-      $('#hpLog').innerHTML=d.log.slice().reverse().map(l=>`<div class="hpl">${l}</div>`).join('');
+      $('#hpLog').innerHTML=d.log.slice().reverse().map(l=>`<div class="hpl">${esc(l)}</div>`).join('');
       $('#hpLog').scrollTop=0;
     }else{
       $('#hpLog').innerHTML='<div class="hp-empty">No activity yet.</div>';
@@ -671,11 +866,26 @@ async function _hpPoll(){
 }
 
 function render(){
+  // An open .csel moves its popup into <body>; re-initialising the widget while
+  // it is open used to strand that popup as an unclickable floating menu.
+  $$('.csel.open').forEach(_cselClose);
   const s=ST.settings||{},st=ST.stats||{};
   ST.proxies=ST.proxies||[];ST.endpoints=ST.endpoints||[];ST.logs=ST.logs||[];ST.keywords=ST.keywords||[];
   // stats
+  // These are whole-request numbers now (one per client call, retries included), so
+  // they finally match the wait the user actually experiences.
   $('#s_ok').innerHTML=(st.success_pct!=null?st.success_pct:'—')+'<small>%</small>';
-  $('#s_ms').innerHTML=st.avg_ms?(st.avg_ms/1000).toFixed(1)+'<small>s</small>':'—';
+  const sok=$('#s_ok').closest('.stat');
+  if(sok)sok.title=st.total?`${st.ok} of ${st.total} requests succeeded`:'no requests yet';
+  $('#s_ms').innerHTML=st.median_ms?(st.median_ms/1000).toFixed(1)+'<small>s</small>':'—';
+  const sms=$('#s_ms').closest('.stat');
+  if(sms)sms.title=st.total
+    ? `median ${roMs(st.median_ms)} · avg ${roMs(st.avg_ms)} · p95 ${roMs(st.p95_ms)} · worst ${roMs(st.worst_ms)}\n`
+      +`successes avg ${roMs(st.avg_ok_ms)} · failures avg ${roMs(st.avg_fail_ms)}\n`
+      +`${st.avg_attempts} attempts avg · ${st.first_try_pct}% first try`
+    : 'no requests yet';
+  const sub=$('#s_ms_sub');
+  if(sub)sub.textContent=st.total?`p95 ${roMs(st.p95_ms)} · ${st.first_try_pct}% 1st try`:'';
   const enp=ST.counts ? ST.counts.enabled : ST.proxies.filter(p=>p.enabled).length;
   const tot=ST.counts ? ST.counts.total : ST.proxies.length;
   $('#s_px').innerHTML=enp+'<small>/ '+tot+'</small>';
@@ -695,8 +905,20 @@ function render(){
   if($('#hpSettingsWrap')) $('#hpSettingsWrap').style.display=s.hot_pool_enabled==='1'?'block':'none';
     $('#tgHotPoolApi').classList.toggle('on',s.hot_pool_api_test!=='0');
   
-  $('#tgScanner').classList.toggle('on',s.proxy_scanner_enabled!=='0');
-  if($('#scanSettingsWrap')) $('#scanSettingsWrap').style.display=s.proxy_scanner_enabled!=='0'?'block':'none';
+  const scanOn=(s.proxy_scanner_enabled??'1')!=='0';
+  $('#tgScanner').classList.toggle('on',scanOn);
+  if($('#scanSettingsWrap')) $('#scanSettingsWrap').style.display=scanOn?'block':'none';
+  const ctm=$('#ctMirror');if(ctm)ctm.textContent=(s.connect_timeout||'—')+' sec';
+  // These three were rendered empty / hard-coded, so the cards advertised state
+  // that never appeared.
+  const ri=$('#rotInfo');
+  if(ri)ri.innerHTML=s.auto_rotation==='1'
+    ? 'Rotation <b>ON</b> — a failing IP rolls to the next enabled proxy.'
+    : 'Rotation <b>OFF</b> — every retry reuses the single pinned proxy below, so the upstream always sees one stable exit IP.';
+  const hs=$('#hstatus');
+  if(hs)hs.textContent=ST._stale?'Reconnecting…':'Online';
+  const hpill=$('#hpill');
+  if(hpill)hpill.style.opacity=ST._stale?'.55':'';
   
   const elHc = $('input[data-set="hedging_concurrency"]');
   if(elHc && !elHc._dirty) elHc.value = s.hedging_concurrency || "3";
@@ -707,43 +929,73 @@ function render(){
   
   renderProxies();renderEndpoints();renderLogs();renderKeywords();renderKeys();
   $$('.csel').forEach(initCsel);
-  const ps=$('#prxShow');if(ps){ps._cb=v=>{PRX.show=v;PRX.page=0;renderProxies();};}
+  const ps=$('#prxShow');if(ps){ps._cb=v=>{PRX.show=v;PRX.page=0;loadProxies();};}
+  if(PRX.rows===null&&!PRX.loading)loadProxies();
+  const rr=$('#roRange');if(rr){rr._cb=v=>{RO.window=+v||86400;loadRouting();};}
+  if(!RO.data&&!RO.loading)loadRouting();
+  if(!_hpInterval)_hpPoll();
 }
 
 function pst(p){if(p.status==='ok')return'ok';if(p.status==='banned'||p.status==='unhealthy')return'dead';return'warn';}
-let PRX={page:0,show:10,q:''};
+// Paging and filtering are server-side: the pool holds ~15k rows and /admin/state
+// only ships the first 200, so client-side filtering used to report "0 match" for
+// proxies that really existed.
+let PRX={page:0,show:10,q:'',rows:null,matched:0,total:0,loading:false};
+
+async function loadProxies(){
+  if(!TOK)return;
+  const per=PRX.show==='all'?500:+PRX.show;
+  PRX.loading=true;
+  try{
+    const u='/admin/proxies?limit='+per+'&offset='+(PRX.page*per)+'&q='+encodeURIComponent(PRX.q);
+    const r=await fetch(u,{headers:{'x-admin-token':TOK}});
+    if(!r.ok)throw new Error(r.status);
+    const d=await r.json();
+    PRX.rows=d.proxies;PRX.matched=d.matched;PRX.total=(d.counts||{}).total||d.matched;
+    renderProxies();
+  }catch(e){
+    const el=$('#prxList');if(el)el.innerHTML='<div class="muted">Could not load proxies. '+esc(e.message||'')+'</div>';
+  }finally{PRX.loading=false;}
+}
+
 function renderProxies(){
   const pin=ST.settings.dedicated_proxy_id;
-  let list=ST.proxies;
-  if(PRX.q){const q=PRX.q.toLowerCase();list=list.filter(p=>(p.url+' '+(p.status||'')).toLowerCase().includes(q));}
-  const tot=ST.counts ? ST.counts.total : ST.proxies.length;
-  $('#prxCount').textContent=tot+' total'+(PRX.q?' · '+list.length+' match':'');
-  const per=PRX.show==='all'?list.length||1:+PRX.show;
-  const pages=Math.max(1,Math.ceil(list.length/per));
+  // Until the first server page lands, fall back to the slice inside /admin/state.
+  const server=PRX.rows!==null;
+  const list=server?PRX.rows:(ST.proxies||[]);
+  const tot=server?PRX.total:(ST.counts?ST.counts.total:(ST.proxies||[]).length);
+  const matched=server?PRX.matched:list.length;
+  $('#prxCount').textContent=tot+' total'+(PRX.q?' · '+matched+' match':'');
+  const per=PRX.show==='all'?500:+PRX.show;
+  const pages=Math.max(1,Math.ceil(matched/per));
   if(PRX.page>=pages)PRX.page=0;
-  const start=PRX.page*per, slice=list.slice(start,start+per);
+  const start=PRX.page*per, slice=server?list:list.slice(start,start+per);
   $('#prxList').innerHTML=slice.map(p=>{
     const host=p.url.split('@').pop(),cl=pst(p);
     const lat=p.latency_ms?' · '+(p.latency_ms/1000).toFixed(1)+'s':'';
     const isPin=String(p.id)===String(pin);
     return`<div class="prx">
-<span class="st ${cl}"></span><div class="pi"><div class="ip">${host}</div><div class="tag">#${p.id} · ${p.status||'unknown'}${lat} · ${p.success_count||0} ok</div></div>
+<span class="st ${cl}"></span><div class="pi"><div class="ip">${esc(host)}</div><div class="tag">#${p.id} · ${esc(p.status||'unknown')}${lat} · ${p.success_count||0} ok</div></div>
 ${isPin?'<span class="badge pin">Pinned</span>':''}
-<span class="badge ${p.ptype||'http'}">${(p.ptype||'http').toUpperCase()}</span>
-<button class="xbtn t" title="test" data-test="${p.id}">⟳</button>
+<span class="badge ${esc(p.ptype||'http')}">${esc((p.ptype||'http').toUpperCase())}</span>
+<button class="xbtn t" title="Test this proxy" aria-label="Test this proxy" data-test="${p.id}">${ICO.retry}</button>
 <button class="xbtn" title="delete" data-del="${p.id}">×</button>
 </div>`;
   }).join('')||'<div class="muted">No proxies match.</div>';
   const pg=$('#prxPage');
   if(pages>1){
-    pg.innerHTML=`<button data-pprev ${PRX.page<=0?'disabled':''}>‹ Prev</button><span class="pinfo">${start+1}–${Math.min(start+per,list.length)} of ${list.length}</span><button data-pnext ${PRX.page>=pages-1?'disabled':''}>Next ›</button>`;
-    pg.querySelector('[data-pprev]').onclick=()=>{if(PRX.page>0){PRX.page--;renderProxies();}};
-    pg.querySelector('[data-pnext]').onclick=()=>{if(PRX.page<pages-1){PRX.page++;renderProxies();}};
+    pg.innerHTML=`<button data-pprev ${PRX.page<=0?'disabled':''}>‹ Prev</button><span class="pinfo">${start+1}–${Math.min(start+slice.length,matched)} of ${matched}</span><button data-pnext ${PRX.page>=pages-1?'disabled':''}>Next ›</button>`;
+    pg.querySelector('[data-pprev]').onclick=()=>{if(PRX.page>0){PRX.page--;loadProxies();}};
+    pg.querySelector('[data-pnext]').onclick=()=>{if(PRX.page<pages-1){PRX.page++;loadProxies();}};
   }else pg.innerHTML='';
   $$('#prxList [data-test]').forEach(b=>b.onclick=async e=>{e.stopPropagation();b.textContent='…';
-    try{const r=await api('/admin/proxy/test',{id:+b.dataset.test});toast(r.ok?'Clean ✓ '+r.exit_ip:r.detail,r.ok?'ok':'bad');await refresh();}catch(e){toast('Test failed','bad');b.textContent='⟳';}
+    try{const r=await api('/admin/proxy/test',{id:+b.dataset.test});toast(r.ok?'Clean ✓ '+r.exit_ip:r.detail,r.ok?'ok':'bad');await refresh();await loadProxies();}catch(e){toast('Test failed','bad');b.innerHTML=ICO.retry;}
   });
-  $$('#prxList [data-del]').forEach(b=>b.onclick=async e=>{e.stopPropagation();await api('/admin/proxy/delete',{id:+b.dataset.del});toast('Proxy removed','ok');await refresh();});
+  $$('#prxList [data-del]').forEach(b=>b.onclick=async e=>{
+    e.stopPropagation();
+    try{await api('/admin/proxy/delete',{id:+b.dataset.del});toast('Proxy removed','ok');await refresh();await loadProxies();}
+    catch(err){toast('Delete failed: '+(err.message||'error'),'bad');}
+  });
 }
 function epName(e){return e.name||e.url.replace(/^https?:\/\//,'');}
 function renderEndpoints(){
@@ -753,30 +1005,175 @@ function renderEndpoints(){
   const ai=$('#activeEpInfo');if(ai)ai.innerHTML=`⚡ Primary in use: <b>${activePrimary}</b>`;
   let h=eps.map((e)=>{
     const prim=!!e.is_primary;
-    return`<div class="ep"><span class="eprank">${prim?'★':e.priority||'·'}</span>
-<div class="pi"><div class="ip" style="font-family:inherit">${epName(e)}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI':'Anthropic'} · ${prim?'primary':'fallback'}${e.status&&e.status!=='unknown'?' · '+e.status:''}</div></div>
+    // The on/off switch and delete sit on the TITLE row, filling the empty space to
+    // the right of "Anthropic · fallback". They used to trail the three action
+    // buttons and wrapped onto a line of their own, which wasted a whole row.
+    return`<div class="ep"><span class="eprank">${prim?ICO.star:(e.priority||'·')}</span>
+<div class="pi"><div class="ip" style="font-family:inherit" title="${esc(e.url)}">${esc(epName(e))}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI':'Anthropic'} · ${prim?'primary':'fallback'}${e.status&&e.status!=='unknown'?' · '+esc(e.status):''}</div></div>
+<div class="epstate">
+<div class="tg ${e.enabled?'on':''}" data-eptg="${e.id}" title="${e.enabled?'Disable':'Enable'} this endpoint"></div>
+<button class="xbtn" data-epdel="${e.id}" title="Remove endpoint" aria-label="Remove endpoint">×</button>
+</div>
 <div class="epacts">
-<button class="sbtn star${prim?' on':''}" data-epprimary="${e.id}">${prim?'★ Primary':'Set primary'}</button>
-<button class="sbtn chat" data-epchat="${e.id}">💬 Chat</button>
-<button class="sbtn" data-epset="${e.id}">⚙ Settings</button>
-<div class="tg ${e.enabled?'on':''}" data-eptg="${e.id}"></div>
-<button class="xbtn" data-epdel="${e.id}">×</button>
+<button class="sbtn star${prim?' on':''}" data-epprimary="${e.id}">${prim?ICO.star+' Primary':'Set primary'}</button>
+<button class="sbtn chat" data-epchat="${e.id}">${ICO.chat} Chat</button>
+<button class="sbtn" data-epset="${e.id}">${ICO.gear} Settings</button>
 </div></div>`;
   }).join('');
   $('#epList').innerHTML=h;
 
-  $$('#epList [data-eptg]').forEach(b=>b.onclick=async()=>{const e=eps.find(x=>x.id==b.dataset.eptg);await api('/admin/endpoint/update',{id:+b.dataset.eptg,enabled:e.enabled?0:1});toast('Endpoint '+(e.enabled?'OFF':'ON'),'ok');await refresh();});
-  $$('#epList [data-epprimary]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/primary',{id:+b.dataset.epprimary});toast('Primary set','ok');await refresh();});
-  $$('#epList [data-epdel]').forEach(b=>b.onclick=async()=>{await api('/admin/endpoint/delete',{id:+b.dataset.epdel});toast('Endpoint removed','ok');await refresh();});
-  $$('#epList [data-epset]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epset);openEndpointSettings(e);});
-  $$('#epList [data-eptest]').forEach(b=>b.onclick=async()=>{
-    const e=eps.find(x=>x.id==b.dataset.eptest);b.textContent='…';
-    try{const r=await api('/admin/endpoint/test',{url:e.url,api_mode:e.api_mode,api_key:e.api_key,model:ST.settings.model_note});
-      toast(r.ok?('✓ '+r.ms+'ms: '+(r.reply||'').slice(0,30)):('✗ '+(r.detail||'failed').slice(0,40)),r.ok?'ok':'bad');
-    }catch(e){toast('Test error','bad');}b.textContent='🧪 Test';
+  $$('#epList [data-eptg]').forEach(b=>b.onclick=async()=>{
+    const e=eps.find(x=>x.id==b.dataset.eptg);
+    try{await api('/admin/endpoint/update',{id:+b.dataset.eptg,enabled:e.enabled?0:1});toast('Endpoint '+(e.enabled?'OFF':'ON'),'ok');await refresh();await loadRouting();}
+    catch(err){toast('Toggle failed: '+(err.message||'error'),'bad');}
   });
-  $$('#epList [data-epchat]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epchat);openEndpointChat({name:epName(e),url:e.url,api_mode:e.api_mode,api_key:e.api_key,model:ST.settings.model_note||'claude-sonnet-4-6'});});
+  $$('#epList [data-epprimary]').forEach(b=>b.onclick=async()=>{
+    try{await api('/admin/endpoint/primary',{id:+b.dataset.epprimary});toast('Primary set — now position 1','ok');await refresh();await loadRouting();}
+    catch(err){toast('Failed: '+(err.message||'error'),'bad');}
+  });
+  $$('#epList [data-epdel]').forEach(b=>b.onclick=async()=>{
+    try{await api('/admin/endpoint/delete',{id:+b.dataset.epdel});toast('Endpoint removed','ok');await refresh();await loadRouting();}
+    catch(err){toast('Delete failed: '+(err.message||'error'),'bad');}
+  });
+  $$('#epList [data-epset]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epset);openEndpointSettings(e);});
+  // Test/chat must use the model this endpoint actually routes with, otherwise a
+  // pass/fail says nothing about the endpoint.
+  const epModel=e=>e.model_override||ST.settings.global_model_override||ST.settings.model_note||'claude-sonnet-4-6';
+  $$('#epList [data-epchat]').forEach(b=>b.onclick=()=>{const e=eps.find(x=>x.id==b.dataset.epchat);openEndpointChat({name:epName(e),url:e.url,api_mode:e.api_mode,api_key:e.api_key,model:epModel(e)});});
 }
+
+/* ================= Routing Order (transparency + reorder) =================
+   The gateway walks endpoints in `priority` order — position 1 always receives
+   the request first, position 2 only if 1 gives up. Before this panel the only
+   visible signal was the primary star, so fallback order was invisible. RO holds
+   a draft order the operator can rearrange; nothing is persisted until Save,
+   and `pending` guards against a background refresh wiping an unsaved draft. */
+let RO={data:null,draft:null,window:86400,pending:false,sortable:null,loading:false};
+
+async function loadRouting(){
+  if(!TOK)return;
+  RO.loading=true;
+  try{
+    const r=await fetch('/admin/routing?window='+RO.window,{headers:{'x-admin-token':TOK}});
+    if(!r.ok)throw new Error(r.status);
+    RO.data=await r.json();
+    if(!RO.pending)RO.draft=RO.data.order.map(o=>o.id);
+    renderRouting();
+  }catch(err){
+    const el=$('#roList');
+    if(el)el.innerHTML='<div class="muted">Could not load routing order. '+esc(err.message||'')+'</div>';
+  }finally{RO.loading=false;}
+}
+
+function roAgo(ts){
+  if(!ts)return'never used';
+  const s=Math.max(0,Math.round(Date.now()/1000-ts));
+  if(s<60)return s+'s ago';
+  if(s<3600)return Math.round(s/60)+'m ago';
+  if(s<86400)return Math.round(s/3600)+'h ago';
+  return Math.round(s/86400)+'d ago';
+}
+function roMs(ms){return !ms?'—':(ms>=1000?(ms/1000).toFixed(1)+'s':ms+'ms');}
+function roClass(o){
+  if(!o.total)return'ro-idle';
+  if(o.success_pct>=80)return'ro-ok';
+  if(o.success_pct>=40)return'ro-warn';
+  return'ro-bad';
+}
+
+function renderRouting(){
+  const host=$('#roList');
+  if(!host||!RO.data)return;
+  const byId={};RO.data.order.forEach(o=>byId[o.id]=o);
+  const order=(RO.draft||[]).map(id=>byId[id]).filter(Boolean);
+  const saved=RO.data.order.map(o=>o.id);
+  const dirty=RO.draft&&(RO.draft.length!==saved.length||RO.draft.some((id,i)=>id!==saved[i]));
+
+  // position numbers count only enabled endpoints — a disabled endpoint is
+  // skipped entirely by the router, so giving it a number would be a lie.
+  let pos=0;
+  host.innerHTML=order.map((o,idx)=>{
+    const on=o.enabled;
+    if(on)pos++;
+    const cls=roClass(o);
+    // A dedicated proxy in cooldown is skipped for now, so say so instead of
+    // showing a chain the router isn't actually following.
+    const cd=(RO.data&&RO.data.dedicated_cooldown)||{};
+    const chain=(o.proxy_chain||[]).map(p=>{
+      const nm=p==='scrape.do'?'Scrape.do':'Custom '+((parseInt(String(p).split('_')[1],10)||0)+1);
+      const key=p==='scrape.do'?'scrape':p;
+      return cd[key]?nm+' (cooling '+cd[key]+'s)':nm;
+    });
+    if(o.proxy_fallback)chain.push('Free pool');
+    const risk=(!o.proxy_fallback&&(o.proxy_chain||[]).length<=1);
+    return`<div class="ro${on?'':' off'}" data-id="${o.id}">
+<div class="ro-grip" title="Drag to reorder">${GRIP_SVG}</div>
+<span class="ro-pos">${on?pos:'–'}</span>
+<div class="ro-main">
+  <div class="ro-nm"><span class="nmtxt">${esc(o.name)}</span>${o.is_primary?'<span class="ro-chip">PRIMARY</span>':''}${on?'':'<span class="ro-chip warn">OFF</span>'}${risk?'<span class="ro-chip warn">NO FALLBACK</span>':''}</div>
+  <div class="ro-sub">${chain.length?esc(chain.join(' → ')):'No proxy configured'}${o.model_override?' · '+esc(o.model_override):''}</div>
+</div>
+<div class="ro-stat ${cls}" title="${o.served} ok / ${o.failed} failed · median ${roMs(o.median_ms)} · ${roAgo(o.last_ts)}"><b>${o.total?o.success_pct+'%':'—'}</b>${o.served}/${o.total||0}<br>${roMs(o.median_ms)}</div>
+<div class="ro-nudge">
+  <button data-roup="${o.id}" ${idx===0?'disabled':''} title="Move up" aria-label="Move ${esc(o.name)} up">${CHEV_UP}</button>
+  <button data-rodn="${o.id}" ${idx===order.length-1?'disabled':''} title="Move down" aria-label="Move ${esc(o.name)} down">${CHEV_DN}</button>
+</div>
+</div>`;
+  }).join('')||'<div class="muted">No endpoints configured yet.</div>';
+
+  $('#roWindow').textContent=RO.data.active_count+' active · '+(RO.window>=86400?(RO.window/86400)+'d':(RO.window/3600)+'h')+' stats';
+  $('#roSave').disabled=!dirty;
+  $('#roReset').disabled=!dirty;
+  // The two draft buttons only exist while there IS a draft — at rest the panel is
+  // just the list plus the range picker.
+  $('#roBar').classList.toggle('clean',!dirty);
+  const first=order.find(o=>o.enabled);
+  $('#roHint').innerHTML=dirty
+    ? '⚠️ Unsaved order — <b>'+esc(first?first.name:'none')+'</b> would become position 1. Click <b>Save order</b> to apply.'
+    : (first?'✓ Live order: <b>'+esc(first.name)+'</b> is tried first'+(order.filter(o=>o.enabled).length>1?', then '+order.filter(o=>o.enabled).slice(1).map(o=>esc(o.name)).join(' → '):'')+'.':'No enabled endpoints — the gateway cannot route.');
+
+  $$('#roList [data-roup]').forEach(b=>b.onclick=()=>roMove(+b.dataset.roup,-1));
+  $$('#roList [data-rodn]').forEach(b=>b.onclick=()=>roMove(+b.dataset.rodn,1));
+
+  // One Sortable per render: the old instance must be destroyed or every
+  // re-render stacks another set of drag handlers on the same rows.
+  if(RO.sortable){try{RO.sortable.destroy();}catch(e){}RO.sortable=null;}
+  if(window.Sortable&&order.length>1){
+    RO.sortable=new Sortable(host,{
+      animation:150,handle:'.ro-grip',ghostClass:'sortable-ghost',
+      onEnd:()=>{
+        RO.draft=[...host.children].map(c=>+c.dataset.id).filter(n=>!isNaN(n));
+        RO.pending=true;renderRouting();
+      }
+    });
+  }
+}
+
+function roMove(id,dir){
+  if(!RO.draft)return;
+  const i=RO.draft.indexOf(id),j=i+dir;
+  if(i<0||j<0||j>=RO.draft.length)return;
+  [RO.draft[i],RO.draft[j]]=[RO.draft[j],RO.draft[i]];
+  RO.pending=true;renderRouting();
+}
+
+$('#roSave')&&($('#roSave').onclick=async()=>{
+  const btn=$('#roSave');btn.disabled=true;btn.textContent='Saving…';
+  try{
+    await api('/admin/endpoint/reorder',{ids:RO.draft});
+    RO.pending=false;
+    toast('Routing order saved','ok');
+    await loadRouting();await refresh();
+  }catch(err){
+    toast('Save failed: '+(err.message||'error'),'bad');
+    btn.disabled=false;
+  }finally{btn.textContent='Save order';}
+});
+$('#roReset')&&($('#roReset').onclick=()=>{
+  RO.pending=false;
+  if(RO.data)RO.draft=RO.data.order.map(o=>o.id);
+  renderRouting();
+});
 function openEndpointSettings(e){
   if(!e)return;
   $('#epSetTitle').textContent='Endpoint settings';
@@ -793,16 +1190,16 @@ function openEndpointSettings(e){
   let proxyFallback = e.proxy_fallback !== undefined ? e.proxy_fallback : 1;
 
   $('#epSetBody').innerHTML=`
-<label class="fl">Name</label><input id="esName" value="${e.name||''}">
-<label class="fl">Base URL</label><input id="esUrl" value="${e.url||''}">
-<label class="fl">API key</label><input id="esKey" type="text" value="${e.api_key||''}">
-<label class="fl">Model ID override</label><input id="esMod" type="text" value="${e.model_override||''}" placeholder="e.g. claude-3-opus-123">
+<label class="fl">Name</label><input id="esName" value="${esc(e.name||'')}">
+<label class="fl">Base URL</label><input id="esUrl" value="${esc(e.url||'')}">
+<label class="fl">API key</label><div class="revealrow"><input id="esKey" type="password" value="${esc(e.api_key||'')}" autocomplete="off" spellcheck="false"><button class="eyebtn" id="esKeyEye" type="button" title="Show key" aria-label="Show key" aria-pressed="false">${EYE_SVG}</button></div>
+<label class="fl">Model ID override</label><input id="esMod" type="text" value="${esc(e.model_override||'')}" placeholder="e.g. claude-3-opus-123">
 <label class="fl">Proxy Switch Errors (Comma-separated)</label>
 <div style="font-size:11px;color:var(--ink-faint);margin-bottom:4px;line-height:1.2">Errors that will cause the system to drop the current proxy IP and try another proxy.</div>
-<input id="esKw" type="text" value="${e.failover_trigger_keywords||'500,501,502,503,504,524,401,403,unauthorized'}" placeholder="e.g. 500,403,unauthorized">
+<input id="esKw" type="text" value="${esc(e.failover_trigger_keywords||'500,501,502,503,504,524,401,403,unauthorized')}" placeholder="e.g. 500,403,unauthorized">
 <label class="fl" style="margin-top:10px">Endpoint Switch Errors (Comma-separated)</label>
 <div style="font-size:11px;color:var(--ink-faint);margin-bottom:4px;line-height:1.2">Errors that will cause the system to abandon this endpoint entirely and switch to the next routing target.</div>
-<input id="esEpKw" type="text" value="${e.endpoint_failover_keywords||'Thinking,model_not_found,invalid_api_key,new_api_error,预扣'}" placeholder="e.g. Thinking,model_not_found">
+<input id="esEpKw" type="text" value="${esc(e.endpoint_failover_keywords||'Thinking,model_not_found,invalid_api_key,new_api_error,预扣')}" placeholder="e.g. Thinking,model_not_found">
 
 <div style="margin-top:24px;border-top:1px solid var(--line);padding-top:16px;">
   <h4 style="margin:0 0 10px 0;font-size:14px;">Dedicated Proxy Routing</h4>
@@ -819,7 +1216,7 @@ function openEndpointSettings(e){
   </div>
   <div id="wrapScrape" style="display:${scrapeToken?'block':'none'};padding:10px;background:#fff;border:1px solid var(--line);border-top:none;border-radius:0 0 8px 8px;margin-top:-4px;margin-bottom:12px">
     <label class="fl" style="margin-top:0">API Token</label>
-    <input id="esScrapeToken" type="text" value="${scrapeToken}" placeholder="e.g. a9fdb000e4c4...">
+    <input id="esScrapeToken" type="text" value="${esc(scrapeToken)}" placeholder="paste your Scrape.do API token">
   </div>
 
   <div style="margin-top:16px;">
@@ -846,70 +1243,109 @@ function openEndpointSettings(e){
 
 <button class="btn" id="esSave" style="margin-top:18px;width:100%">Save endpoint</button>`;
   
-  let currentCustomProxies = [...customProxies];
-  
+  // Each custom-proxy row carries a stable local key (`uid`), and the priority
+  // draft is stored in terms of those keys rather than `custom_N` positions.
+  // Positions shift whenever a row is deleted, which is what used to silently
+  // reorder — or drop — the operator's saved priority list.
+  let _uidSeq = 0;
+  let currentCustomProxies = customProxies.map(v => ({uid: 'u' + (_uidSeq++), val: v}));
+  let priorityKeys = proxyPriority.map(p =>
+    p === 'scrape.do' ? 'scrape.do'
+      : (currentCustomProxies[parseInt(String(p).split('_')[1], 10)] || {}).uid
+  ).filter(Boolean);
+
   function renderProxies() {
     $('#customProxyList').innerHTML = currentCustomProxies.map((p, i) => `
-      <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
-        <input class="pxInput" data-idx="${i}" type="text" value="${p}" placeholder="http://user:pass@proxy.example.com:8000" style="flex:1;height:34px;">
-        <button class="pxDel" data-idx="${i}" style="flex:none;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;width:34px;height:34px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;">×</button>
+      <div class="pxrow">
+        <input class="pxInput" data-idx="${i}" type="text" value="${esc(p.val)}" placeholder="http://user:pass@proxy.example.com:8000">
+        <button class="pxDel" data-idx="${i}" title="Remove this proxy">×</button>
       </div>
-    `).join('');
-    
-    $$('.pxInput').forEach(el => {
-      el.onchange = e => {
-        currentCustomProxies[+el.dataset.idx] = e.target.value.trim();
+    `).join('') || '<div style="font-size:11px;color:var(--ink-faint);font-style:italic">No custom proxies yet.</div>';
+
+    $$('#customProxyList .pxInput').forEach(el => {
+      el.onchange = () => {
+        currentCustomProxies[+el.dataset.idx].val = el.value.trim();
         renderPriority();
       };
     });
-    $$('.pxDel').forEach(el => {
-      el.onclick = e => {
-        currentCustomProxies.splice(+el.dataset.idx, 1);
-        proxyPriority = proxyPriority.filter(x => !x.startsWith('custom_'));
-        currentCustomProxies.forEach((_, idx) => proxyPriority.push(`custom_${idx}`));
+    $$('#customProxyList .pxDel').forEach(el => {
+      el.onclick = () => {
+        const [gone] = currentCustomProxies.splice(+el.dataset.idx, 1);
+        if (gone) priorityKeys = priorityKeys.filter(k => k !== gone.uid);
         renderProxies();
         renderPriority();
       };
     });
   }
 
-  function renderPriority() {
-    let activeItems = [];
-    if ($('#tgScrape').classList.contains('on')) activeItems.push("scrape.do");
-    currentCustomProxies.forEach((p, i) => { if (currentCustomProxies[i]) activeItems.push(`custom_${i}`); });
-    
-    proxyPriority = proxyPriority.filter(x => activeItems.includes(x));
-    activeItems.forEach(x => { if (!proxyPriority.includes(x)) proxyPriority.push(x); });
+  let _epSortable = null;
 
-    if (proxyPriority.length === 0) {
+  function renderPriority() {
+    // Only rows with an actual value participate — an empty input is not a proxy.
+    const active = ['scrape.do'].filter(() => $('#tgScrape').classList.contains('on'))
+      .concat(currentCustomProxies.filter(p => p.val).map(p => p.uid));
+
+    priorityKeys = priorityKeys.filter(k => active.includes(k));
+    active.forEach(k => { if (!priorityKeys.includes(k)) priorityKeys.push(k); });
+
+    if (_epSortable) { try { _epSortable.destroy(); } catch (err) {} _epSortable = null; }
+
+    if (!priorityKeys.length) {
       $('#priorityList').innerHTML = '<div style="font-size:11px;color:var(--ink-faint);font-style:italic">No dedicated proxies enabled.</div>';
       return;
     }
 
-    $('#priorityList').innerHTML = proxyPriority.map((p, i) => {
-      let label = p === "scrape.do" ? "Scrape.do API" : `Custom Proxy ${parseInt(p.split('_')[1])+1} (${(currentCustomProxies[p.split('_')[1]]||'').split('@').pop()})`;
+    $('#priorityList').innerHTML = priorityKeys.map((k, i) => {
+      let label;
+      if (k === 'scrape.do') {
+        label = 'Scrape.do API';
+      } else {
+        const idx = currentCustomProxies.findIndex(p => p.uid === k);
+        const host = (currentCustomProxies[idx] || {val: ''}).val.split('@').pop();
+        label = `Custom Proxy ${idx + 1} (${host})`;
+      }
       return `
-      <div data-id="${p}" style="display:flex;align-items:center;background:#fff;border:1px solid var(--line);border-radius:6px;padding:8px 10px;cursor:grab;">
-        <div style="margin-right:10px;color:var(--ink-faint)">☰</div>
-        <div style="flex:1;font-size:12px;font-weight:600">${label}</div>
+      <div class="pprow" data-id="${esc(k)}">
+        <div class="pgrip">${GRIP_SVG}</div>
+        <span class="ppos">${i + 1}</span>
+        <div class="plabel">${esc(label)}</div>
+        <div class="ro-nudge">
+          <button type="button" data-ppup="${esc(k)}" ${i === 0 ? 'disabled' : ''} title="Move up">${CHEV_UP}</button>
+          <button type="button" data-ppdn="${esc(k)}" ${i === priorityKeys.length - 1 ? 'disabled' : ''} title="Move down">${CHEV_DN}</button>
+        </div>
       </div>`;
     }).join('');
 
-    // Initialize Drag and Drop using SortableJS
-    if (window.Sortable) {
-      new Sortable($('#priorityList'), {
-        animation: 150,
-        ghostClass: 'sortable-ghost',
-        onEnd: function (evt) {
-          let newOrder = [];
-          Array.from($('#priorityList').children).forEach(child => {
-            if(child.dataset && child.dataset.id) newOrder.push(child.dataset.id);
-          });
-          proxyPriority = newOrder;
+    // ▲▼ buttons exist because drag-and-drop is unreliable on touch devices.
+    const nudge = (k, dir) => {
+      const i = priorityKeys.indexOf(k), j = i + dir;
+      if (i < 0 || j < 0 || j >= priorityKeys.length) return;
+      [priorityKeys[i], priorityKeys[j]] = [priorityKeys[j], priorityKeys[i]];
+      renderPriority();
+    };
+    $$('#priorityList [data-ppup]').forEach(b => b.onclick = () => nudge(b.dataset.ppup, -1));
+    $$('#priorityList [data-ppdn]').forEach(b => b.onclick = () => nudge(b.dataset.ppdn, 1));
+
+    if (window.Sortable && priorityKeys.length > 1) {
+      _epSortable = new Sortable($('#priorityList'), {
+        animation: 150, handle: '.pgrip', ghostClass: 'sortable-ghost',
+        onEnd: () => {
+          priorityKeys = [...$('#priorityList').children]
+            .map(c => c.dataset && c.dataset.id).filter(Boolean);
+          renderPriority();
         },
       });
     }
   }
+
+  $('#esKeyEye') && ($('#esKeyEye').onclick = () => {
+    const el = $('#esKey'), b = $('#esKeyEye');
+    const show = el.type === 'password';
+    el.type = show ? 'text' : 'password';
+    b.classList.toggle('on', show);
+    b.setAttribute('aria-pressed', show ? 'true' : 'false');
+    b.title = b.setAttribute('aria-label', show ? 'Hide key' : 'Show key') || (show ? 'Hide key' : 'Show key');
+  });
 
   $('#tgScrape').onclick = () => {
     $('#tgScrape').classList.toggle('on');
@@ -922,8 +1358,8 @@ function openEndpointSettings(e){
   };
 
   $('#btnAddProxy').onclick = () => {
-    if (currentCustomProxies.length >= 3) { toast("Max 3 custom proxies allowed", "err"); return; }
-    currentCustomProxies.push("");
+    if (currentCustomProxies.length >= 3) { toast('Max 3 custom proxies allowed', 'bad'); return; }
+    currentCustomProxies.push({uid: 'u' + (_uidSeq++), val: ''});
     renderProxies();
   };
 
@@ -932,20 +1368,23 @@ function openEndpointSettings(e){
 
   $('#epSetModal').classList.add('show');
   $('#esSave').onclick=async()=>{
-    $$('.pxInput').forEach(el => { currentCustomProxies[+el.dataset.idx] = el.value.trim(); });
-    let finalScrapeToken = $('#tgScrape').classList.contains('on') ? $('#esScrapeToken').value.trim() : '';
-    let finalCustomProxies = currentCustomProxies.filter(x => x);
-    let finalFallback = $('#tgFallback').classList.contains('on') ? 1 : 0;
-    
-    let finalPriority = proxyPriority.filter(x => {
-      if (x === "scrape.do") return finalScrapeToken !== '';
-      if (x.startsWith("custom_")) {
-        let idx = parseInt(x.split('_')[1]);
-        return finalCustomProxies[idx] !== undefined;
-      }
-      return false;
-    });
+    const btn=$('#esSave');
+    $$('#customProxyList .pxInput').forEach(el => { currentCustomProxies[+el.dataset.idx].val = el.value.trim(); });
+    const finalScrapeToken = $('#tgScrape').classList.contains('on') ? $('#esScrapeToken').value.trim() : '';
+    const kept = currentCustomProxies.filter(p => p.val);
+    const finalCustomProxies = kept.map(p => p.val);
+    const finalFallback = $('#tgFallback').classList.contains('on') ? 1 : 0;
 
+    // Map the uid-based draft back to the `custom_N` wire format using the
+    // FINAL compacted array, so the saved order matches the visible order.
+    const finalPriority = priorityKeys.map(k => {
+      if (k === 'scrape.do') return finalScrapeToken ? 'scrape.do' : null;
+      const idx = kept.findIndex(p => p.uid === k);
+      return idx >= 0 ? `custom_${idx}` : null;
+    }).filter(Boolean);
+
+    btn.disabled=true;btn.textContent='Saving…';
+    try{
     await api('/admin/endpoint/update',{
       id:e.id,
       name:$('#esName').value.trim(),
@@ -959,7 +1398,12 @@ function openEndpointSettings(e){
       proxy_priority: JSON.stringify(finalPriority),
       proxy_fallback: finalFallback
     });
-    toast('Endpoint saved','ok');closeModal('epSetModal');await refresh();
+    toast('Endpoint saved','ok');closeModal('epSetModal');await refresh();await loadRouting();
+    }catch(err){
+      toast('Save failed: '+(err.message||'error'),'bad');
+    }finally{
+      btn.disabled=false;btn.textContent='Save endpoint';
+    }
   };
 }
 function logTag(src){
@@ -974,24 +1418,33 @@ function renderLogs(){
     const t=l.ts?new Date(l.ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
     const ms=l.ms?(l.ms>=1000?(l.ms/1000).toFixed(1)+'s':l.ms+'ms'):'';
     let note=(l.note||'');if(note.length>120)note=note.slice(0,120)+'…';
-    const ep=l.endpoint?' · '+l.endpoint:'';
+    const ep=l.endpoint?' · '+esc(l.endpoint):'';
     let dbox='';
     if(l.status>=400 && l.detail){
-      dbox=`<div style="margin-top:6px;padding:8px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;color:#991b1b;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;white-space:pre-wrap;word-break:break-word;">${l.detail.replace(/</g,'&lt;')}</div>`;
+      dbox=`<div style="margin-top:6px;padding:8px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;color:#991b1b;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;white-space:pre-wrap;word-break:break-word;">${esc(l.detail)}</div>`;
     }
     return`<div class="log" data-logi="${i}" style="cursor:pointer;flex-direction:column;align-items:stretch;">
-      <div style="display:flex;align-items:center;width:100%">${logTag(l.source)}<span class="code ${c}">${l.status}</span><span class="ld">${note}${l.attempts&&l.attempts>1?' · att '+l.attempts:''}${ep} ${ms?'· '+ms:''}</span><span class="lt">${t}</span><span style="color:var(--ink-faint);font-size:14px;margin-left:4px">›</span></div>
+      <div style="display:flex;align-items:center;width:100%">${logTag(l.source)}<span class="code ${c}">${l.status}</span><span class="ld">${esc(note)}${l.attempts&&l.attempts>1?' · att '+l.attempts:''}${ep} ${ms?'· '+ms:''}</span><span class="lt">${t}</span><span style="color:var(--ink-faint);font-size:14px;margin-left:4px">›</span></div>
       ${dbox}
     </div>`;
   }).join('')||'<div class="muted">No requests yet.</div>';
   $$('#logList [data-logi]').forEach(el=>el.onclick=()=>openLogDetail(logs[+el.dataset.logi]));
 }
 function renderKeywords(){
-  $('#kwList').innerHTML=(ST.keywords||[]).map(k=>`<div class="prx"><span class="st ${k.enabled?'ok':'dead'}"></span><div class="pi"><div class="ip" style="font-family:inherit">${k.value}</div><div class="tag">${k.mode==='block'?'block request':'redact → '+k.replacement}</div></div><div class="tg ${k.enabled?'on':''}" data-kwtg="${k.id}"></div><button class="xbtn" data-kwdel="${k.id}">×</button></div>`).join('')||'<div class="muted">No filters.</div>';
-  $$('[data-kwtg]').forEach(t=>t.onclick=async()=>{await api('/admin/keyword/toggle',{id:+t.dataset.kwtg});await refresh();});
-  $$('[data-kwdel]').forEach(b=>b.onclick=async()=>{await api('/admin/keyword/delete',{id:+b.dataset.kwdel});toast('Filter removed','ok');await refresh();});
+  $('#kwList').innerHTML=(ST.keywords||[]).map(k=>`<div class="prx"><span class="st ${k.enabled?'ok':'dead'}"></span><div class="pi"><div class="ip" style="font-family:inherit">${esc(k.value)}</div><div class="tag">${k.mode==='block'?'block request':'redact → '+esc(k.replacement)}</div></div><div class="tg ${k.enabled?'on':''}" data-kwtg="${k.id}"></div><button class="xbtn" data-kwdel="${k.id}">×</button></div>`).join('')||'<div class="muted">No filters.</div>';
+  $$('#kwList [data-kwtg]').forEach(t=>t.onclick=async()=>{
+    try{await api('/admin/keyword/toggle',{id:+t.dataset.kwtg});await refresh();}
+    catch(e){toast('Toggle failed: '+(e.message||'error'),'bad');}
+  });
+  $$('#kwList [data-kwdel]').forEach(b=>b.onclick=async()=>{
+    try{await api('/admin/keyword/delete',{id:+b.dataset.kwdel});toast('Filter removed','ok');await refresh();}
+    catch(e){toast('Delete failed: '+(e.message||'error'),'bad');}
+  });
 }
-async function refresh(){try{ST=await getState();render();}catch(e){}}
+async function refresh(){
+  try{ST=await getState();ST._stale=false;render();}
+  catch(e){if(ST){ST._stale=true;const hs=$('#hstatus');if(hs)hs.textContent='Reconnecting…';}}
+}
 async function copyText(txt){
   try{await navigator.clipboard.writeText(txt);toast('Copied ✓','ok');}
   catch(e){
@@ -1003,15 +1456,21 @@ async function copyText(txt){
 function renderKeys(){
   const ks=ST.api_keys||[];
   $('#keyCount').textContent=ks.length+(ks.length===1?' key':' keys');
-  $('#keyList').innerHTML=ks.map(k=>{
+  $('#keyList').innerHTML=ks.map((k,i)=>{
     const when=k.created_at?new Date(k.created_at*1000).toLocaleDateString():'';
-    const lbl=k.label?' · '+k.label:'';
-    return`<div class="keyrow"><span class="st ok"></span><div class="km"><div class="kn">${k.name}</div><div class="kt">${k.hit_count||0} hits${lbl} · ${when}</div></div>
-<button class="xbtn cp" data-copykey="${k.name}" title="copy">⧉</button>
+    const lbl=k.label?' · '+esc(k.label):'';
+    return`<div class="keyrow"><span class="st ok"></span><div class="km"><div class="kn">${esc(k.name)}</div><div class="kt">${k.hit_count||0} hits${lbl} · ${when}</div></div>
+<button class="xbtn cp" data-copyi="${i}" title="Copy key" aria-label="Copy key">${ICO.copy}</button>
 <button class="xbtn" data-keydel="${k.id}" title="delete">×</button></div>`;
   }).join('')||'<div class="muted">No keys yet. Create one below.</div>';
-  $$('#keyList [data-copykey]').forEach(b=>b.onclick=()=>copyText(b.dataset.copykey));
-  $$('#keyList [data-keydel]').forEach(b=>b.onclick=async()=>{await api('/admin/key/delete',{id:+b.dataset.keydel});toast('Key deleted','ok');await refresh();});
+  // Copy reads the key from the array by index, not from an HTML attribute — a key
+  // containing a quote used to truncate the attribute and silently copy a partial,
+  // unusable key.
+  $$('#keyList [data-copyi]').forEach(b=>b.onclick=()=>copyText(ks[+b.dataset.copyi].key||ks[+b.dataset.copyi].name));
+  $$('#keyList [data-keydel]').forEach(b=>b.onclick=async()=>{
+    try{await api('/admin/key/delete',{id:+b.dataset.keydel});toast('Key deleted','ok');await refresh();}
+    catch(e){toast('Delete failed: '+(e.message||'error'),'bad');}
+  });
 }
 $('#createKey').onclick=async()=>{
   try{
@@ -1024,20 +1483,35 @@ $('#createKey').onclick=async()=>{
   }catch(e){toast('Create failed','bad');}
 };
 
-async function saveSettings(keys,lbl){const body={};keys.forEach(k=>{const el=$('[data-set="'+k+'"]');if(el){body[k]=el.value;el._dirty=false;}});await api('/admin/settings',body);Object.assign(ST.settings,body);toast((lbl||'Settings')+' saved','ok');}
+// A failed save used to clear `_dirty` and mutate ST.settings anyway, so the UI
+// showed the new value while the DB still held the old one. Now nothing local
+// changes until the server confirms.
+async function saveSettings(keys,lbl){
+  const body={};
+  keys.forEach(k=>{const el=$('[data-set="'+k+'"]');if(el)body[k]=el.value;});
+  try{
+    await api('/admin/settings',body);
+    keys.forEach(k=>{const el=$('[data-set="'+k+'"]');if(el)el._dirty=false;});
+    Object.assign(ST.settings,body);
+    toast((lbl||'Settings')+' saved','ok');
+    render();
+  }catch(e){
+    toast((lbl||'Settings')+' save failed: '+(e.message||'error'),'bad');
+  }
+}
 $('#saveTimers').onclick=()=>saveSettings(['read_timeout','keepalive_idle','keepalive_intvl','keepalive_cnt'],'Timers');
 $('#saveAdvTimers').onclick=()=>saveSettings(['write_timeout','connect_timeout','pool_timeout','keepalive_ping_interval','admin_test_timeout','scanner_tcp_timeout','preflight_get_timeout','direct_test_timeout','cleanup_loop_interval'],'Advanced Timings');
 
 // Mark inputs dirty when user modifies them
 $$('[data-set]').forEach(el=>el.addEventListener('input',()=>{el._dirty=true;}));
-$('#cpPublic')&&($('#cpPublic').onclick=()=>copyText($('#publicUrl').value));
+if($('#cpPublic')){$('#cpPublic').innerHTML=ICO.copy;$('#cpPublic').onclick=()=>copyText($('#publicUrl').value);}
 
 $('#addProxy').onclick=async()=>{
   const bulk=$('#newBulk').value.trim();
   if(bulk){
     try{const r=await api('/admin/proxy/add',{text:bulk});
       toast(`Added ${r.added} of ${r.parsed} parsed`,r.added?'ok':'bad');
-      $('#newBulk').value='';await refresh();}
+      $('#newBulk').value='';await refresh();await loadProxies();}
     catch(e){toast('Parse failed: '+e.message,'bad');}
     return;
   }
@@ -1045,10 +1519,14 @@ $('#addProxy').onclick=async()=>{
   if(!host||!port){toast('Host+port, or paste a list above','bad');return;}
   try{const r=await api('/admin/proxy/add',{ptype:$('#newPtype').dataset.val,host,port,user:$('#newUser').value.trim(),password:$('#newPass').value.trim()});
     toast(r.added?'Proxy added ✓':'Already exists',r.added?'ok':'bad');
-    ['newHost','newPort','newUser','newPass'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});await refresh();}
+    ['newHost','newPort','newUser','newPass'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});await refresh();await loadProxies();}
   catch(e){toast('Invalid: '+e.message,'bad');}
 };
-$('#prxSearch')&&$('#prxSearch').addEventListener('input',e=>{PRX.q=e.target.value;PRX.page=0;renderProxies();});
+let _prxDebounce=null;
+$('#prxSearch')&&$('#prxSearch').addEventListener('input',e=>{
+  PRX.q=e.target.value;PRX.page=0;
+  clearTimeout(_prxDebounce);_prxDebounce=setTimeout(loadProxies,250);
+});
 function handleProxyFile(file){
   const rd=new FileReader();
   rd.onload=async()=>{
@@ -1073,19 +1551,50 @@ $('#addEndpoint').onclick=async()=>{
 };
 $('#addKw').onclick=async()=>{
   const v=$('#kwVal').value.trim();if(!v){toast('Keyword required','bad');return;}
-  await api('/admin/keyword/add',{value:v,mode:$('#kwMode').dataset.val,replacement:$('#kwRepl').value.trim()||'[REDACTED]'});
-  toast('Filter added ✓','ok');$('#kwVal').value='';$('#kwRepl').value='';await refresh();
+  try{
+    await api('/admin/keyword/add',{value:v,mode:$('#kwMode').dataset.val,replacement:$('#kwRepl').value.trim()||'[REDACTED]'});
+    toast('Filter added ✓','ok');$('#kwVal').value='';$('#kwRepl').value='';await refresh();
+  }catch(e){toast('Add failed: '+(e.message||'error'),'bad');}
 };
-$('#clearLogs').onclick=async()=>{await api('/admin/logs/clear');toast('Logs cleared','ok');await refresh();};
+$('#clearLogs').onclick=async()=>{
+  try{await api('/admin/logs/clear');toast('Logs cleared','ok');await refresh();}
+  catch(e){toast('Clear failed: '+(e.message||'error'),'bad');}
+};
 
-setInterval(()=>{if(!$('#app').classList.contains('hidden'))refresh();},12000);
+setInterval(()=>{
+  if($('#app').classList.contains('hidden'))return;
+  // A background refresh replaces ST.endpoints/ST.proxies wholesale. If a modal is
+  // open it is holding a reference to one of those objects, so refreshing under it
+  // makes the modal save stale data. Skip the tick instead.
+  if($('.modal.show'))return;
+  refresh();
+  if(!RO.pending)loadRouting();
+},12000);
 
 // ============ MODALS ============
-function closeModal(id){$('#'+id).classList.remove('show');}
+// Every dismissal path routes through closeModal so the per-modal cleanup (scroll
+// lock, poll timers) always runs. The Hot Pool modal used to break this: a generic
+// `m.onclick` assigned later clobbered its close handler, so a backdrop click hid
+// the box but left body scroll locked and /admin/hotpool polling forever.
+const _MODAL_CLEANUP={hpModal:()=>_hpStopPoll()};
+function closeModal(id){
+  const m=$('#'+id);
+  if(!m)return;
+  m.classList.remove('show');
+  document.body.style.overflow='';
+  if(_MODAL_CLEANUP[id])try{_MODAL_CLEANUP[id]();}catch(e){}
+}
 $('#logModalX').onclick=()=>closeModal('logModal');
 $('#chatModalX').onclick=()=>closeModal('chatModal');
 $('#epSetX')&&($('#epSetX').onclick=()=>closeModal('epSetModal'));
-$$('.modal').forEach(m=>m.onclick=e=>{if(e.target===m)m.classList.remove('show');});
+$$('.modal').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)closeModal(m.id);}));
+// Escape closes the topmost open modal — previously the × or a pixel-perfect
+// backdrop click were the only ways out.
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  const open=$$('.modal.show');
+  if(open.length)closeModal(open[open.length-1].id);
+});
 
 // ---- LOG DETAIL ----
 function openLogDetail(l){
@@ -1098,15 +1607,15 @@ function openLogDetail(l){
     ['Attempts',l.attempts||1],['Latency',l.ms?(l.ms>=1000?(l.ms/1000).toFixed(1)+'s':l.ms+'ms'):'—'],
     ['Stream',l.stream?'yes':'no'],['Redactions',l.redactions||0],['Note',l.note||'—'],
   ];
-  let h=rows.map(r=>`<div class="kv"><span class="k">${r[0]}</span><span class="v">${(''+r[1]).replace(/</g,'&lt;')}</span></div>`).join('');
-  if(l.req_body)h+=`<div style="margin-top:12px;font-size:11px;font-weight:700;color:var(--ink-faint)">REQUEST PAYLOAD</div><pre style="margin-top:6px;background:#f8fafb;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:11.5px;overflow:auto;white-space:pre-wrap;word-break:break-word;max-height:150px">${(l.req_body||'').replace(/</g,'&lt;')}</pre>`;
-  if(l.detail)h+=`<div style="margin-top:12px;font-size:11px;font-weight:700;color:var(--ink-faint)">FULL ERROR / RESPONSE</div><pre style="margin-top:6px;background:#f8fafb;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:11.5px;overflow:auto;white-space:pre-wrap;word-break:break-word;max-height:200px">${(l.detail||'').replace(/</g,'&lt;')}</pre>`;
+  let h=rows.map(r=>`<div class="kv"><span class="k">${esc(r[0])}</span><span class="v">${esc(r[1])}</span></div>`).join('');
+  if(l.req_body)h+=`<div style="margin-top:12px;font-size:11px;font-weight:700;color:var(--ink-faint)">REQUEST PAYLOAD</div><pre style="margin-top:6px;background:#f8fafb;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:11.5px;overflow:auto;white-space:pre-wrap;word-break:break-word;max-height:150px">${esc(l.req_body||'')}</pre>`;
+  if(l.detail)h+=`<div style="margin-top:12px;font-size:11px;font-weight:700;color:var(--ink-faint)">FULL ERROR / RESPONSE</div><pre style="margin-top:6px;background:#f8fafb;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:11.5px;overflow:auto;white-space:pre-wrap;word-break:break-word;max-height:200px">${esc(l.detail||'')}</pre>`;
   $('#logModalBody').innerHTML=h;
   $('#logModal').classList.add('show');
 }
 
 // ---- ENDPOINT CHAT (with image upload + short memory) ----
-let CHAT={cfg:null,msgs:[]};
+let CHAT={cfg:null,msgs:[],busy:false};
 function openEndpointChat(cfg){
   CHAT={cfg,msgs:[]};
   $('#chatTitle').textContent='Chat · '+cfg.name;
@@ -1121,16 +1630,74 @@ function chatBubble(role,text){
 }
 async function chatSend(){
   const inp=$('#chatInput'),txt=inp.value.trim();
-  if(!txt||!CHAT.cfg)return;
+  if(!txt||!CHAT.cfg||CHAT.busy)return;
+  CHAT.busy=true;
+  const btn=$('#chatSend');if(btn)btn.disabled=true;
   inp.value='';chatBubble('u',txt);
   CHAT.msgs.push({role:'user',content:txt});
-  const wait=chatBubble('a','…');
+  const wait=chatBubble('a','');
+  wait.innerHTML='<span class="dots"><i></i><i></i><i></i></span>';
   try{
-    const r=await api('/admin/endpoint/test',{url:CHAT.cfg.url,api_mode:CHAT.cfg.api_mode,api_key:CHAT.cfg.api_key,model:CHAT.cfg.model,message:txt});
-    wait.textContent=r.ok?(r.reply||'(empty)'):('✗ '+(r.detail||'failed'));
-    if(r.ok)CHAT.msgs.push({role:'assistant',content:r.reply});
-  }catch(e){wait.textContent='✗ Error: '+e.message;}
-  $('#chatLog').scrollTop=$('#chatLog').scrollHeight;
+    // Send the whole conversation so the endpoint can actually follow it, and
+    // report which proxy carried the reply — that's what makes this a useful test.
+    const r=await api('/admin/endpoint/test',{url:CHAT.cfg.url,api_mode:CHAT.cfg.api_mode,
+      api_key:CHAT.cfg.api_key,model:CHAT.cfg.model,message:txt,history:CHAT.msgs});
+    if(r.ok){
+      wait.textContent=r.reply||'(empty)';
+      CHAT.msgs.push({role:'assistant',content:r.reply});
+      const m=document.createElement('div');m.className='msg-meta';
+      m.textContent=`${r.ms}ms · ${r.proxy||'direct'}${r.attempts>1?' · attempt '+r.attempts:''}`;
+      wait.appendChild(m);
+    }else{
+      wait.classList.add('err');
+      wait.textContent=chatErrText(r);
+      CHAT.msgs.pop();   // don't poison the history with a failed turn
+    }
+  }catch(e){
+    wait.classList.add('err');
+    wait.textContent='Could not reach the gateway: '+(e.message||'error');
+    CHAT.msgs.pop();
+  }finally{
+    CHAT.busy=false;if(btn)btn.disabled=false;
+    $('#chatLog').scrollTop=$('#chatLog').scrollHeight;
+    inp.focus();
+  }
+}
+
+// Raw upstream errors are unreadable ("ConnectError: All connection attempts
+// failed"). Say what actually broke and what to do about it.
+function chatErrText(r){
+  const d=r.detail||'';
+  if(/WAF block/i.test(d))
+    return 'This endpoint\'s firewall refused every exit IP we tried (Aliyun WAF). '
+         + 'A different proxy is needed — the endpoint itself is up.';
+  if(/ConnectError|ConnectTimeout|ProxyError|All connection attempts failed/i.test(d))
+    return 'Could not reach this endpoint through any proxy. The dedicated proxy looks '
+         + 'down — switch the phone proxy on, or enable "Fallback to Free Proxy Pool" in Settings.';
+  if(/No proxy available/i.test(d)) return d;
+  if(r.status===401||/invalid_api_key|unauthorized/i.test(d))
+    return 'The endpoint rejected the API key (401). Check the key in Settings.';
+  // Chinese-hosted relays report an exhausted balance as a 403 with a Chinese
+  // message; without translating it the operator has no idea credit ran out.
+  if(/额度不足|余额不足|insufficient.*(quota|balance|credit)/i.test(d))
+    return 'This endpoint is out of credit — the provider reports an exhausted balance. '
+         + 'Top it up, or move this endpoint down the routing order.';
+  if(/预扣/.test(d))
+    return 'The endpoint could not reserve credit for this request (balance too low).';
+  if(r.status===403) return 'The endpoint refused this request (403).';
+  if(r.status===405)
+    return 'The endpoint rejected the request path (405). Its API mode is probably wrong — '
+         + 'try switching Anthropic ⇄ OpenAI mode, or check the Base URL.';
+  if(r.status===429) return 'Rate limited by the endpoint (429). Try again shortly.';
+  if(/content-blocked|content_filter/i.test(d))
+    return 'The endpoint blocked the message content, not the connection. Try different wording.';
+  if(r.status>=500) return `The endpoint returned a server error (${r.status}). It is likely down or out of credit.`;
+  if(/model_not_found/i.test(d))
+    return 'This endpoint does not know that model id. Set a "Model ID override" in Settings.';
+  // Some upstreams answer with a full HTML error page; dumping that markup into the
+  // bubble is unreadable, so keep only the first line of real text.
+  let t=d.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+  return (r.status?`HTTP ${r.status}: `:'')+(t.slice(0,200)||'Request failed.');
 }
 $('#chatSend').onclick=chatSend;
 $('#chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chatSend();}});

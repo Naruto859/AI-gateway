@@ -2,6 +2,8 @@
 import os
 import time
 import re
+import json
+import urllib.parse
 import asyncio
 import logging
 from fastapi import FastAPI, Request, Header, HTTPException
@@ -65,6 +67,30 @@ def _require_admin(token):
     pw = db.get_setting("admin_password", "")
     if not pw or token != pw:
         raise HTTPException(status_code=401, detail="bad admin token")
+
+
+# Addresses no exit proxy can ever have: loopback, link-local, RFC1918 private
+# ranges, the unspecified address, and port 0. The live pool had 0.0.0.0:80 sitting
+# at status "ok", so it got raced on real requests and burned an attempt every time.
+_UNROUTABLE_HOSTS = re.compile(
+    r"^(?:0\.0\.0\.0|127\.\d+\.\d+\.\d+|localhost|169\.254\.\d+\.\d+"
+    r"|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+"
+    r"|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+"
+    r"|\[?::1?\]?)$", re.I)
+
+
+def is_routable_proxy(url):
+    """False for proxies that can never reach the internet from this host."""
+    try:
+        pr = urllib.parse.urlparse(url if "://" in url else "http://" + url)
+        host, port = pr.hostname or "", pr.port
+    except Exception:
+        return False
+    if not host or _UNROUTABLE_HOSTS.match(host):
+        return False
+    if port is not None and not (0 < port < 65536):
+        return False
+    return True
 
 
 def _normalize_proxy(line):
@@ -159,6 +185,19 @@ async def hotpool_status(x_admin_token: str = Header(default="")):
     return proxy_pool.get_hot_pool_status()
 
 
+@app.get("/admin/proxies")
+async def proxies_page(x_admin_token: str = Header(default=""),
+                       q: str = "", status: str = "", limit: int = 25, offset: int = 0):
+    """Paged/filtered proxy list. /admin/state only ships the first 200 rows, so the
+    Proxies tab uses this to search and page across the full table."""
+    _require_admin(x_admin_token)
+    res = db.search_proxies(q=q.strip(), limit=limit, offset=offset, status=status.strip())
+    res["counts"] = db.proxy_counts()
+    res["limit"] = max(1, min(int(limit), 500))
+    res["offset"] = max(0, int(offset))
+    return res
+
+
 @app.post("/admin/settings")
 async def upd_settings(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
@@ -179,17 +218,27 @@ async def proxy_add(payload: dict, x_admin_token: str = Header(default="")):
                                (payload.get("password") or "").strip())
         if not _PROXY_RE.match(url):
             raise HTTPException(400, "invalid proxy fields")
+        if not is_routable_proxy(url):
+            raise HTTPException(400, "that address can never reach the internet "
+                                     "(loopback/private/0.0.0.0)")
         added = db.add_proxy(url, ptype=(payload.get("ptype", "http") or "http").lower())
         return {"added": added, "url": url.split("@")[-1]}
     # bulk paste (one per line / comma) — type inferred from scheme
     raw = payload.get("text", "")
     urls = []
+    skipped = 0
     for line in raw.replace(",", "\n").splitlines():
         u = _normalize_proxy(line)
-        if u and _PROXY_RE.match(u):
-            urls.append(u)
+        if not u or not _PROXY_RE.match(u):
+            continue
+        # A pasted list routinely carries 0.0.0.0 / LAN addresses. Letting them in
+        # means they get raced on real requests and burn an attempt each time.
+        if not is_routable_proxy(u):
+            skipped += 1
+            continue
+        urls.append(u)
     added = db.bulk_add(urls)
-    return {"added": added, "parsed": len(urls)}
+    return {"added": added, "parsed": len(urls), "skipped_unroutable": skipped}
 
 
 # ---------------- endpoints (multi-provider failover) ----------------
@@ -229,6 +278,76 @@ async def endpoint_primary(payload: dict, x_admin_token: str = Header(default=""
     return {"ok": True}
 
 
+@app.post("/admin/endpoint/reorder")
+async def endpoint_reorder(payload: dict, x_admin_token: str = Header(default="")):
+    """Persist the full endpoint try-order. Body: {"ids": [12, 11, 7, ...]}.
+
+    ids[0] is tried first. The first enabled id also becomes primary so the
+    dashboard's star can never disagree with the real routing order.
+    """
+    _require_admin(x_admin_token)
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(400, "ids must be a non-empty list of endpoint ids")
+    order = db.reorder_endpoints(ids)
+    return {"ok": True, "order": order}
+
+
+@app.get("/admin/routing")
+async def routing_view(x_admin_token: str = Header(default=""), window: int = 86400):
+    """The routing-transparency payload: exact try-order + per-endpoint outcomes.
+
+    `order` is the same list `forwarder._targets()` walks, so what the operator
+    sees here is literally what the router does — position 1 gets the request
+    first, position 2 only if position 1 gives up.
+    """
+    _require_admin(x_admin_token)
+    window = max(300, min(int(window or 86400), 604800))
+    stats = db.endpoint_stats(window)
+    eps = db.list_endpoints()
+    order = []
+    pos = 0
+    for e in sorted(eps, key=lambda x: (x.get("priority", 0), x.get("id", 0))):
+        # logs are keyed by the host form (forwarder._targets builds `name` that
+        # way), so stats must be looked up by host even when the operator has
+        # given the endpoint a friendly label.
+        host = e["url"].replace("https://", "").replace("http://", "")
+        label = e.get("name") or host
+        s = stats.get(host, {})
+        enabled = bool(e.get("enabled"))
+        if enabled:
+            pos += 1
+        try:
+            prio = json.loads(e.get("proxy_priority") or "[]")
+        except (TypeError, ValueError):
+            prio = []
+        order.append({
+            "id": e.get("id"),
+            "name": label,
+            "host": host,
+            "url": e["url"],
+            "enabled": enabled,
+            "is_primary": bool(e.get("is_primary")),
+            "priority": e.get("priority", 0),
+            "position": pos if enabled else None,
+            "api_mode": e.get("api_mode"),
+            "model_override": e.get("model_override") or "",
+            "proxy_chain": prio,
+            "proxy_fallback": e.get("proxy_fallback", 1),
+            "served": s.get("served", 0),
+            "failed": s.get("failed", 0),
+            "success_pct": s.get("success_pct", 0.0),
+            "avg_ms": s.get("avg_ms", 0),
+            "median_ms": s.get("median_ms", 0),
+            "last_ts": s.get("last_ts", 0),
+        })
+    return {"order": order, "window_sec": window,
+            "active_count": sum(1 for o in order if o["enabled"]),
+            # Dedicated proxies have no row in the proxies table, so a dead phone is
+            # otherwise invisible in the UI — the operator only saw slow requests.
+            "dedicated_cooldown": forwarder.dedicated_cooldown_state()}
+
+
 @app.post("/admin/endpoint/test")
 async def endpoint_test(payload: dict, x_admin_token: str = Header(default="")):
     """Send ONE tiny chat message through a specific endpoint to verify it works.
@@ -239,9 +358,15 @@ async def endpoint_test(payload: dict, x_admin_token: str = Header(default="")):
     key = payload.get("api_key", "") or db.get_setting("upstream_key") or db.get_setting("gateway_key", "")
     model = payload.get("model") or db.get_setting("model_note", "claude-sonnet-4-6")
     msg = payload.get("message", "Reply with exactly: OK")
+    history = payload.get("history")
+    if history is not None and not isinstance(history, list):
+        history = None
+    # Chat asks for a real answer; a health probe only needs a token or two.
+    max_tokens = 1024 if history else 20
     if not url.startswith("http"):
         raise HTTPException(400, "endpoint must be an http(s) URL")
-    res = await forwarder.test_endpoint(url, mode, key, model, msg)
+    res = await forwarder.test_endpoint(url, mode, key, model, msg,
+                                        history=history, max_tokens=max_tokens)
     return res
 
 
