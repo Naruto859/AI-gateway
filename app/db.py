@@ -34,7 +34,11 @@ DEFAULT_SETTINGS = {
     # 4-6 attempt requests averaged 247-471s. Almost all latency is burned in
     # failed retries, not in generation — so the defaults below are chosen to fail
     # fast and move on, rather than to keep grinding one bad path.
-    "max_retries": "6",                           # attempts per endpoint before moving to the next one
+    "max_retries": "3",                           # attempts per endpoint before moving to the next.
+                                                  # Kept low on purpose: measured, a 6th
+                                                  # attempt averaged 471s and rarely saved
+                                                  # the request. Every endpoint is still
+                                                  # tried before the client sees an error
     "connect_timeout": "8",                       # seconds to establish the proxy tunnel; a live proxy
                                                   # answers in 1-3s, so a longer wait only pays for
                                                   # dead ones (45 dead-proxy hits in the sample day)
