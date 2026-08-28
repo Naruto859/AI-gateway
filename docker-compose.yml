@@ -4,6 +4,10 @@ services:
     container_name: ciel-gateway-v7
     restart: unless-stopped
     env_file: .env
+    environment:
+      # inside the container's own netns, so it cannot collide with the host-side
+      # instances (staging 9091, gw-v22 9092)
+      HEDGER_PORT: "9090"
     ports:
       - "127.0.0.1:8787:8787"   # Only localhost; Nginx will proxy public traffic
     volumes:
