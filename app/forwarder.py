@@ -345,25 +345,74 @@ def _err(message, status=503, etype="api_error"):
                         status_code=status)
 
 
+def _endpoint_keys(e, s):
+    """Every API key this endpoint may use, primary first, duplicates removed.
+
+    Providers meter quota per key, so an endpoint can hold spares in `extra_keys`.
+    Exhausting one key should move to the next key for the SAME provider before the
+    provider is abandoned.
+    """
+    keys = []
+    primary = e.get("api_key") or s.get("gateway_key", "")
+    if primary:
+        keys.append(primary)
+    try:
+        extra = json.loads(e.get("extra_keys") or "[]")
+    except (TypeError, ValueError):
+        extra = []
+    if isinstance(extra, list):
+        for k in extra:
+            k = str(k or "").strip()
+            if k and k not in keys:
+                keys.append(k)
+    return keys or [""]
+
+
+def _label(e):
+    """Display name for logs and the routing panel.
+
+    A bare host is ambiguous once the same provider appears more than once (one row per
+    key), so an unnamed duplicate is suffixed with its row id. Anything the operator
+    named keeps that name.
+    """
+    if (e.get("name") or "").strip():
+        return e["name"].strip()
+    return e["url"].replace("https://", "").replace("http://", "")
+
+
 def _targets(s):
     customs = [e for e in db.list_endpoints() if e.get("enabled")]
+
+    # Disambiguate unnamed rows that share a URL, so their stats and log lines do not
+    # merge into one indistinguishable entry.
+    host_counts = {}
+    for e in customs:
+        host = e["url"].replace("https://", "").replace("http://", "")
+        host_counts[host] = host_counts.get(host, 0) + 1
+
     def mk(e):
+        host = e["url"].replace("https://", "").replace("http://", "")
+        name = _label(e)
+        if not (e.get("name") or "").strip() and host_counts.get(host, 0) > 1:
+            name = f"{host} #{e.get('id')}"
         return {
-            "name": e["url"].replace("https://", "").replace("http://", ""),
+            "name": name,
             "base": e["url"].rstrip("/"),
             "key": e.get("api_key") or s.get("gateway_key", ""),
+            "keys": _endpoint_keys(e, s),
             "mode": "openai" if e.get("api_mode") == "chat_completions" else "anthropic",
             "agentrouter": False,
             "id": e.get("id"),
             "model_override": e.get("model_override") or s.get("global_model_override", ""),
             "failover_trigger_keywords": e.get("failover_trigger_keywords", ""),
             "endpoint_failover_keywords": e.get("endpoint_failover_keywords", ""),
+            "key_failover_keywords": e.get("key_failover_keywords", ""),
             "scrape_do_token": e.get("scrape_do_token", ""),
             "custom_proxies": e.get("custom_proxies", "[]"),
             "proxy_priority": e.get("proxy_priority", "[]"),
             "proxy_fallback": e.get("proxy_fallback", 1)
         }
-    
+
     primary_custom = next((e for e in customs if e.get("is_primary")), None)
     out = []
     if primary_custom:
@@ -373,6 +422,29 @@ def _targets(s):
             continue
         out.append(mk(e))
     return out
+
+
+def _should_rotate_key(tgt, detail):
+    """True when this failure should be retried on the endpoint's NEXT key.
+
+    Empty `key_failover_keywords` means "any refusal rotates" — the sensible default
+    for someone who just added a spare key and expects it to be used. A non-empty list
+    narrows rotation to those phrases only.
+
+    Endpoint-switch triggers always win: a refusal that a different key would repeat
+    (blocked content, unknown model) must not burn every key first.
+    """
+    if len(tgt.get("keys") or []) < 2:
+        return False
+    d = (detail or "")
+    ep_kws = [k.strip() for k in (tgt.get("endpoint_failover_keywords") or "").split(",") if k.strip()]
+    if any(k in d for k in ep_kws):
+        return False
+    rules = [k.strip() for k in (tgt.get("key_failover_keywords") or "").split(",") if k.strip()]
+    if not rules:
+        return True
+    low = d.lower()
+    return any(k.lower() in low for k in rules)
 
 
 def _target_url(base, path, mode):
@@ -391,11 +463,14 @@ def _target_url(base, path, mode):
     return f"{base}/{path}"
 
 
-def _target_headers(request, target):
-    """Headers for a specific target (claude-cli fingerprint only for agentrouter)."""
+def _target_headers(request, target, key=None):
+    """Headers for a specific target, optionally with a specific API key.
+
+    `key` overrides target["key"] so the retry loop can re-send the same request on the
+    endpoint's next key without rebuilding the target.
+    """
     kind = "openai" if target["mode"] == "openai" else "anthropic"
-    headers = _build_upstream_headers(request, target["key"], kind)
-    return headers
+    return _build_upstream_headers(request, key or target["key"], kind)
 
 
 
@@ -971,11 +1046,13 @@ async def forward(request, path):
                         current_model_log = tgt.get("model_override") or req_model
                         up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
                         url = _target_url(tgt["base"], path, tgt["mode"])
-                        theaders = _target_headers(request, tgt)
                         attempted_pids = set()
                         upstream_rejected = False
                         consecutive_5xx = 0
-                        for _ in range(max_retries):
+                        ep_keys = tgt.get("keys") or [tgt.get("key", "")]
+                        key_idx = 0
+                        theaders = _target_headers(request, tgt, ep_keys[0])
+                        for _ in range(max_retries * max(1, len(ep_keys))):
                             concurrency = int(db.get_setting("hedging_concurrency", "3"))
                             candidates = _resolve_candidates(tgt, attempted_pids, concurrency)
                             if not candidates:
@@ -1086,9 +1163,24 @@ async def forward(request, path):
                                 return
                             if res[0] == "error":
                                 _, status, err, _u = res
+                                err_full = json.dumps(err)
+                                # Per-key refusal (quota/credit): retry the identical
+                                # request on this provider's next key. Nothing has been
+                                # sent to the client yet, so the retry is invisible.
+                                if key_idx + 1 < len(ep_keys) and _should_rotate_key(tgt, f"{status} {err_full}"):
+                                    key_idx += 1
+                                    theaders = _target_headers(request, tgt, ep_keys[key_idx])
+                                    _log(method=request.method, path=path, status=status, proxy=used_url,
+                                         attempts=attempts, stream=1, redactions=redactions,
+                                         ms=int((time.time() - t0) * 1000),
+                                         note=f"key {key_idx} refused ({status}), trying key {key_idx + 1}: {err_full[:80]}",
+                                         ip=client_ip, model=current_model_log, endpoint=tgt["name"])
+                                    attempted_pids = set()
+                                    consecutive_5xx = 0
+                                    continue
                                 _log(method=request.method, path=path, status=status, proxy=used_url,
                                      attempts=attempts, stream=1, redactions=redactions,
-                                     ms=int((time.time() - t0) * 1000), note=f"upstream rejected: {json.dumps(err)[:100]}",
+                                     ms=int((time.time() - t0) * 1000), note=f"upstream rejected: {err_full[:100]}",
                                      ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                                 last_err = (status, err, tgt["name"], used_url)
                                 upstream_rejected = True
@@ -1164,10 +1256,12 @@ async def forward(request, path):
                 else:
                     up_body = _mutate_body(body, want_stream=False, model_override=tgt.get("model_override"))
                 url = _target_url(tgt["base"], path, tgt["mode"])
-                theaders = _target_headers(request, tgt)
                 attempted_pids = set()
                 consecutive_5xx = 0
-                for _ in range(max_retries):
+                ep_keys = tgt.get("keys") or [tgt.get("key", "")]
+                key_idx = 0
+                theaders = _target_headers(request, tgt, ep_keys[0])
+                for _ in range(max_retries * max(1, len(ep_keys))):
                     concurrency = int(db.get_setting("hedging_concurrency", "3"))
                     candidates = _resolve_candidates(tgt, attempted_pids, concurrency)
                     if not candidates:
@@ -1203,9 +1297,26 @@ async def forward(request, path):
                             continue
                         consecutive_5xx = 0
                         if r.status_code >= 400:
-                            # upstream rejection -> next target
+                            # Upstream refused. Read a little of the body so the rotation
+                            # classifier has something to match — the relay path used to
+                            # discard it entirely and only kept the status code.
+                            try:
+                                body_peek = (await r.aread())[:400].decode("utf-8", "replace")
+                            except Exception:
+                                body_peek = ""
                             await r.aclose(); await client.aclose()
                             _mark_used_good(candidates, used_url, int((time.time() - t0) * 1000))
+                            if key_idx + 1 < len(ep_keys) and _should_rotate_key(tgt, f"{r.status_code} {body_peek}"):
+                                key_idx += 1
+                                theaders = _target_headers(request, tgt, ep_keys[key_idx])
+                                _log(method=request.method, path=path, status=r.status_code, proxy=used_url,
+                                     attempts=attempts, stream=1, redactions=redactions,
+                                     ms=int((time.time() - t0) * 1000),
+                                     note=f"key {key_idx} refused ({r.status_code}), trying key {key_idx + 1}",
+                                     ip=client_ip, model=current_model_log, endpoint=tgt["name"])
+                                attempted_pids = set()
+                                consecutive_5xx = 0
+                                continue
                             detail = f"{tgt['name']} {r.status_code}"
                             break
                         _mark_used_good(candidates, used_url, int((time.time() - t0) * 1000))
@@ -1262,12 +1373,16 @@ async def forward(request, path):
         else:
             up_body = _mutate_body(body, want_stream=False, model_override=tgt.get("model_override"))
         url = _target_url(tgt["base"], path, tgt["mode"])
-        theaders = _target_headers(request, tgt)
         tgt_kind = "openai" if tgt["mode"] == "openai" else "anthropic"
         upstream_rejected = False
         attempted_pids = set()
         consecutive_5xx = 0
-        for _ in range(max_retries):
+        # Keys for this provider, primary first. A quota refusal rotates to the next one
+        # (same URL, same proxy chain) instead of giving up on the provider.
+        ep_keys = tgt.get("keys") or [tgt.get("key", "")]
+        key_idx = 0
+        theaders = _target_headers(request, tgt, ep_keys[0])
+        for _ in range(max_retries * max(1, len(ep_keys))):
             concurrency = int(db.get_setting("hedging_concurrency", "3"))
             candidates = _resolve_candidates(tgt, attempted_pids, concurrency)
             if not candidates:
@@ -1290,8 +1405,23 @@ async def forward(request, path):
                                ms=int((time.time() - t0) * 1000), note="ok(assembled)",
                                ip=client_ip, model=current_model_log, endpoint=tgt["name"], final=True)
                     return Response(content=payload, status_code=status, media_type=ct)
-                # upstream rejection (4xx) -> remember, switch to next TARGET
-                err_text = payload[:100].decode('utf-8', 'replace') if isinstance(payload, bytes) else str(payload)[:100]
+                # Upstream refused (4xx). Before abandoning the provider, see whether
+                # this refusal is one a DIFFERENT KEY could satisfy — a quota/credit
+                # error is per-key, so rotating is the whole point of extra_keys.
+                err_full = payload.decode('utf-8', 'replace') if isinstance(payload, bytes) else str(payload)
+                err_text = err_full[:100]
+                if key_idx + 1 < len(ep_keys) and _should_rotate_key(tgt, f"{status} {err_full}"):
+                    key_idx += 1
+                    theaders = _target_headers(request, tgt, ep_keys[key_idx])
+                    _log(method=request.method, path=path, status=status, proxy=used_url,
+                         attempts=attempts, stream=0, redactions=redactions,
+                         ms=int((time.time() - t0) * 1000),
+                         note=f"key {key_idx} refused ({status}), trying key {key_idx + 1}: {err_text}",
+                         ip=client_ip, model=current_model_log, endpoint=tgt["name"])
+                    # A fresh key deserves a fresh proxy budget; the exit IP was fine.
+                    attempted_pids = set()
+                    consecutive_5xx = 0
+                    continue
                 _log(method=request.method, path=path, status=status, proxy=used_url,
                      attempts=attempts, stream=0, redactions=redactions,
                      ms=int((time.time() - t0) * 1000), note=f"upstream rejected: {err_text}",

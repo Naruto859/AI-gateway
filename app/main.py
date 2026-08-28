@@ -276,8 +276,10 @@ async def endpoint_add(payload: dict, x_admin_token: str = Header(default="")):
     if not url.startswith("http"):
         raise HTTPException(400, "endpoint must be an http(s) URL")
     mode = payload.get("api_mode", "anthropic_messages")
-    added = db.add_endpoint(url, mode, payload.get("api_key", ""), payload.get("model_override", ""))
-    return {"added": added}
+    added, eid = db.add_endpoint(url, mode, payload.get("api_key", ""),
+                                 payload.get("model_override", ""),
+                                 name=(payload.get("name") or "").strip())
+    return {"added": added, "id": eid}
 
 
 @app.post("/admin/endpoint/update")
@@ -320,6 +322,18 @@ async def endpoint_reorder(payload: dict, x_admin_token: str = Header(default=""
     return {"ok": True, "order": order}
 
 
+def _key_count(e):
+    """Number of usable API keys on an endpoint (primary + extras), never their values."""
+    n = 1 if (e.get("api_key") or "").strip() else 0
+    try:
+        extra = json.loads(e.get("extra_keys") or "[]")
+    except (TypeError, ValueError):
+        extra = []
+    if isinstance(extra, list):
+        n += len([k for k in extra if str(k or "").strip()])
+    return max(1, n)
+
+
 @app.get("/admin/routing")
 async def routing_view(x_admin_token: str = Header(default=""), window: int = 86400):
     """The routing-transparency payload: exact try-order + per-endpoint outcomes.
@@ -333,14 +347,21 @@ async def routing_view(x_admin_token: str = Header(default=""), window: int = 86
     stats = db.endpoint_stats(window)
     eps = db.list_endpoints()
     order = []
+    # Stats are keyed by whatever forwarder._targets() wrote into the log's `endpoint`
+    # column. That is now the display name, with unnamed duplicates of one URL suffixed
+    # `host #id` — so ask the forwarder for the same label instead of re-deriving it and
+    # silently merging two keys' numbers into one row.
+    try:
+        label_by_id = {t["id"]: t["name"] for t in forwarder._targets(db.get_all_settings())}
+    except Exception:
+        label_by_id = {}
+
     pos = 0
     for e in sorted(eps, key=lambda x: (x.get("priority", 0), x.get("id", 0))):
-        # logs are keyed by the host form (forwarder._targets builds `name` that
-        # way), so stats must be looked up by host even when the operator has
-        # given the endpoint a friendly label.
         host = e["url"].replace("https://", "").replace("http://", "")
-        label = e.get("name") or host
-        s = stats.get(host, {})
+        label = label_by_id.get(e.get("id")) or e.get("name") or host
+        # Disabled endpoints are absent from _targets(), so fall back to the host key.
+        s = stats.get(label) or stats.get(host, {})
         enabled = bool(e.get("enabled"))
         if enabled:
             pos += 1
@@ -360,6 +381,10 @@ async def routing_view(x_admin_token: str = Header(default=""), window: int = 86
             "api_mode": e.get("api_mode"),
             "model_override": e.get("model_override") or "",
             "proxy_chain": prio,
+            # How many API keys this endpoint can rotate through, so the panel can show
+            # "2 keys" without exposing any key material.
+            "key_count": _key_count(e),
+            "key_rules": (e.get("key_failover_keywords") or "").strip(),
             "proxy_fallback": e.get("proxy_fallback", 1),
             "served": s.get("served", 0),
             "failed": s.get("failed", 0),

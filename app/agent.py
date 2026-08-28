@@ -93,10 +93,11 @@ async def _run_tool(name, args):
                                  "status": p["status"], "ok": p["success_count"]}
                                 for p in db.list_proxies()[:50]]}
         if name == "add_endpoint":
-            added = db.add_endpoint(args["url"].rstrip("/"),
-                                    args.get("api_mode", "anthropic_messages"),
-                                    args.get("api_key", ""))
-            return {"added": added}
+            added, eid = db.add_endpoint(args["url"].rstrip("/"),
+                                         args.get("api_mode", "anthropic_messages"),
+                                         args.get("api_key", ""),
+                                         name=args.get("name", ""))
+            return {"added": added, "id": eid}
         if name == "add_filter":
             kid = db.add_keyword(args["value"], args.get("mode", "redact"))
             return {"id": kid}

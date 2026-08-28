@@ -227,6 +227,10 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .robar .csel{flex:0 0 auto;margin-left:auto;min-width:118px}
 .robar.clean .rodraft{display:none}
 .rohint{font-size:10.5px;color:var(--ink-faint);margin-top:8px;line-height:1.5}
+/* Count line for the endpoints this panel deliberately does not list. */
+.ro-keys{font-weight:700;color:var(--g-700)}
+.ro-off-note{font-size:10px;color:var(--ink-faint);text-align:center;padding:7px 4px 2px;font-weight:600}
+.ro-off-note b{color:var(--ink-soft)}
 /* endpoint-settings modal: custom proxy rows + priority rows */
 .pxrow{display:flex;gap:8px;margin-bottom:8px;align-items:center}
 .pxrow .pxInput{flex:1 1 auto;min-width:0;height:36px}
@@ -269,6 +273,30 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .modalhd h3{margin:0;font-size:15px;font-weight:720;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .modalhd .x{width:30px;height:30px;border:none;border-radius:9px;background:#f4f6f9;color:#94a3ad;cursor:pointer;font-size:18px;flex:none}
 .modalbody{padding:16px 18px;overflow:auto;font-size:13px;line-height:1.6}
+/* Sticky action row so the primary button is reachable without scrolling a long form.
+   Standard dialog anatomy: header names it, body holds the fields, footer commits. */
+.modalft{padding:12px 18px 16px;border-top:1px solid var(--line);background:#fff;flex:none}
+/* Field hint: one line under an input explaining consequence, not restating the label. */
+.fhint{font-size:10.5px;color:var(--ink-faint);line-height:1.5;margin:4px 2px 0}
+.fl .opt{font-weight:600;color:var(--ink-faint);font-size:10px;letter-spacing:.2px;text-transform:uppercase;margin-left:5px}
+/* Grouped section inside a modal: a heading, one explanatory line, then the fields.
+   Keeps a long form readable without turning every field into a card. */
+.fsect{margin-top:20px;padding-top:15px;border-top:1px solid var(--line)}
+.fsect-hd{font-size:13.5px;font-weight:720;color:var(--ink);margin-bottom:3px}
+.fsect-sub{font-size:11px;color:var(--ink-faint);line-height:1.55;margin-bottom:10px}
+/* One row per extra API key. Reveal button sits inside the field, delete outside it. */
+.kyrow{display:flex;gap:7px;align-items:center;margin-bottom:7px}
+.kyrow .revealrow{flex:1 1 auto;min-width:0}
+.kyrow .kydel{flex:0 0 30px;width:30px;height:30px;background:#fee2e2;color:#dc2626;border:none;border-radius:8px;font-size:15px;cursor:pointer;display:grid;place-items:center;padding:0;line-height:1}
+.kyrow .kydel:hover{background:#fecaca}
+.kyempty{font-size:11px;color:var(--ink-faint);font-style:italic;margin-bottom:8px}
+/* Rotation triggers stay hidden until at least one spare key exists — the control is
+   meaningless with a single key, and an unexplained empty box invites wrong guesses. */
+.krules{display:none}
+.krules.show{display:block}
+#btnAddKey{width:auto;padding:7px 13px;font-size:12px;box-shadow:none}
+.chipbtn{font:inherit;font-size:10px;font-weight:700;padding:3px 8px;margin-left:6px;border-radius:6px;border:1px solid var(--g-300);background:#fff;color:var(--g-700);cursor:pointer;vertical-align:middle}
+.chipbtn:hover{background:var(--g-50)}
 .modalbody input{width:100%;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:11px;padding:9px 12px;background:#fff;text-align:left;outline:none;transition:.2s}
 .modalbody input:focus{border-color:var(--c-mint-d);box-shadow:0 0 0 3px rgba(63,158,120,.16)}
 .kv{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}.kv .k{color:var(--ink-faint);font-weight:600;min-width:90px;flex:none}.kv .v{color:var(--ink);word-break:break-word;font-family:ui-monospace,monospace;font-size:12px}
@@ -488,6 +516,13 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div id="activeEpInfo" style="font-size:12px;color:var(--ink-faint);padding:8px 2px 2px;line-height:1.55"></div>
 </div>
 <div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints <span id="epCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
+<p class="sub">Where the gateway forwards. Set one as primary; if it fails all retries the next is tried, then it loops back to primary.</p>
+<div class="field"><div class="meta"><div class="lbl">Claude Code Mimicry</div><div class="desc">A-to-Z exact mimicry (NodeJS + Claude-CLI). Overwrites client fingerprint headers. Keep ON if upstream strictly checks for real Claude Code.</div></div><div class="ctrl"><div class="tg" id="tgMimicry"></div></div></div>
+<div id="epList" style="margin-top:6px"></div>
+<button class="btn" id="openAddEp" style="margin-top:12px">+ Add endpoint</button>
+</div>
+<div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M3 6h13M3 12h9M3 18h5M17 15l3 3 3-3"/></svg></span>Routing Order <span id="roWindow" style="margin-left:auto;font-size:11px;color:var(--ink-faint);font-weight:600"></span></h2>
 <p class="sub">Position 1 gets every request first; the next is used only if it gives up. Drag the grip or use ▲▼.</p>
 <div id="roList" class="rolist"></div>
@@ -498,23 +533,34 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 </div>
 <div class="rohint" id="roHint"></div>
 </div>
-<div class="card">
-<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints <span id="epCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
-<p class="sub">Where the gateway forwards. Set one as primary; if it fails all retries the next is tried, then it loops back to primary.</p>
-<div class="field"><div class="meta"><div class="lbl">Claude Code Mimicry</div><div class="desc">A-to-Z exact mimicry (NodeJS + Claude-CLI). Overwrites client fingerprint headers. Keep ON if upstream strictly checks for real Claude Code.</div></div><div class="ctrl"><div class="tg" id="tgMimicry"></div></div></div>
-<div id="epList" style="margin-top:6px"></div>
-<div class="addbox">
-<label class="fl" style="font-size:13px;margin-bottom:10px">+ Add endpoint</label>
-<div class="grid2">
-<div class="full"><label class="fl">Base URL</label><input class="wide" id="epUrl" type="text" placeholder="https://api.provider.com/v1"></div>
-<div><label class="fl">API mode</label><div class="csel wide" id="epMode" data-val="anthropic_messages"><button class="csel-btn">Anthropic Messages</button><div class="csel-pop"><div class="csel-opt sel" data-v="anthropic_messages">Anthropic Messages</div><div class="csel-opt" data-v="chat_completions">OpenAI Chat</div></div></div></div>
-<div><label class="fl">API key</label><input class="wide" id="epKey" type="password" placeholder="sk-..."></div>
-<div class="full"><label class="fl">Model ID override (optional)</label><input class="wide" id="epModel" type="text" placeholder="claude-3-opus-123"></div>
-</div>
-<button class="btn" id="addEndpoint">Add endpoint</button>
-</div>
-</div>
 </section>
+
+<!-- ADD ENDPOINT MODAL -->
+<div class="modal" id="epAddModal">
+<div class="modalbox">
+<div class="modalhd"><h3>Add endpoint</h3><button class="x" id="epAddX">×</button></div>
+<div class="modalbody">
+<label class="fl">Base URL</label>
+<input class="wide" id="epUrl" type="text" placeholder="https://api.provider.com/v1" autocomplete="off" spellcheck="false">
+<div class="fhint">The same provider may be added more than once — one entry per API key, each with its own quota.</div>
+
+<label class="fl" style="margin-top:11px">API mode</label>
+<div class="csel wide" id="epMode" data-val="anthropic_messages"><button class="csel-btn" type="button">Anthropic Messages</button><div class="csel-pop"><div class="csel-opt sel" data-v="anthropic_messages">Anthropic Messages</div><div class="csel-opt" data-v="chat_completions">OpenAI Chat</div></div></div>
+
+<label class="fl" style="margin-top:11px">Display name <span class="opt">optional</span></label>
+<input class="wide" id="epName" type="text" placeholder="e.g. AgentRouter · key 2">
+<div class="fhint">Shown in the routing order and in the logs. Give each key a distinct name so you can tell which one ran out.</div>
+
+<label class="fl" style="margin-top:11px">API key</label>
+<div class="revealrow"><input id="epKey" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false"><button class="eyebtn" id="epKeyEye" type="button" title="Show key" aria-label="Show key" aria-pressed="false"></button></div>
+
+<label class="fl" style="margin-top:11px">Model ID override <span class="opt">optional</span></label>
+<input class="wide" id="epModel" type="text" placeholder="claude-opus-5">
+<div class="fhint">Send this model id upstream instead of whatever the client asked for.</div>
+</div>
+<div class="modalft"><button class="btn" id="addEndpoint">Add endpoint</button></div>
+</div>
+</div>
 
 <!-- ENDPOINT SETTINGS MODAL -->
 <div class="modal" id="epSetModal">
@@ -759,7 +805,30 @@ function initCsel(cs){
       // popup (min-width 200px) off-screen and its options became unreachable.
       const popW=Math.max(r.width,200);
       const left=Math.max(8,Math.min(r.left,window.innerWidth-popW-8));
-      pop.style.cssText=`position:absolute;top:${window.scrollY+r.bottom+7}px;left:${window.scrollX+left}px;width:${r.width}px;min-width:${popW}px;z-index:99999;opacity:1;transform:none;pointer-events:auto`;
+      // Open upward when there isn't room below, so a trigger near the bottom of the
+      // screen doesn't put its options off-screen.
+      const spaceBelow=window.innerHeight-r.bottom;
+      const up=spaceBelow<190&&r.top>spaceBelow;
+      const top=up?(window.scrollY+r.top-7):(window.scrollY+r.bottom+7);
+      const base=`position:absolute;left:${window.scrollX+left}px;width:${r.width}px;`
+        +`min-width:${popW}px;z-index:99999;pointer-events:auto;`
+        +(up?`top:${top}px;`:`top:${top}px;`);
+      // Two frames: paint the closed state first so the transition has a start value.
+      // Assigning the final transform in the same frame gave the browser nothing to
+      // animate from, which is why the menu looked like it fell in from above.
+      // Upward: sit the popup's BOTTOM on the trigger's top edge. translateY(-100%)
+      // resolves against the popup's own height, unlike a percentage margin (which
+      // would resolve against <body>).
+      const rest=up?'translateY(-100%)':'translateY(0)';
+      const from=up?'translateY(calc(-100% + 6px))':'translateY(-6px)';
+      pop.style.cssText=base
+        +(up?'transform-origin:bottom center;':'transform-origin:top center;')
+        +`opacity:0;transform:${from} scale(.98);`;
+      requestAnimationFrame(()=>{
+        if(!cs.classList.contains('open'))return;
+        pop.style.opacity='1';
+        pop.style.transform=`${rest} scale(1)`;
+      });
     }
   };
   // Options are queried from `pop`, NOT from `cs`. While the dropdown is open the
@@ -1010,6 +1079,13 @@ ${isPin?'<span class="badge pin">Pinned</span>':''}
   });
 }
 function epName(e){return e.name||e.url.replace(/^https?:\/\//,'');}
+// Primary key plus any spares. Counts only, never values.
+function epKeyCount(e){
+  let n=(e.api_key||'').trim()?1:0;
+  try{const x=JSON.parse(e.extra_keys||'[]');if(Array.isArray(x))n+=x.filter(k=>String(k||'').trim()).length;}catch(err){}
+  return Math.max(1,n);
+}
+
 function renderEndpoints(){
   const eps=ST.endpoints||[];
   $('#epCount').textContent=eps.length+' total';
@@ -1021,7 +1097,7 @@ function renderEndpoints(){
     // the right of "Anthropic · fallback". They used to trail the three action
     // buttons and wrapped onto a line of their own, which wasted a whole row.
     return`<div class="ep"><span class="eprank">${prim?ICO.star:(e.priority||'·')}</span>
-<div class="pi"><div class="ip" style="font-family:inherit" title="${esc(e.url)}">${esc(epName(e))}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI':'Anthropic'} · ${prim?'primary':'fallback'}${e.status&&e.status!=='unknown'?' · '+esc(e.status):''}</div></div>
+<div class="pi"><div class="ip" style="font-family:inherit" title="${esc(e.url)}">${esc(epName(e))}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI':'Anthropic'} · ${prim?'primary':'fallback'}${epKeyCount(e)>1?' · '+epKeyCount(e)+' keys':''}${e.status&&e.status!=='unknown'?' · '+esc(e.status):''}</div></div>
 <div class="epstate">
 <div class="tg ${e.enabled?'on':''}" data-eptg="${e.id}" title="${e.enabled?'Disable':'Enable'} this endpoint"></div>
 <button class="xbtn" data-epdel="${e.id}" title="Remove endpoint" aria-label="Remove endpoint">×</button>
@@ -1101,12 +1177,16 @@ function renderRouting(){
   const saved=RO.data.order.map(o=>o.id);
   const dirty=RO.draft&&(RO.draft.length!==saved.length||RO.draft.some((id,i)=>id!==saved[i]));
 
-  // position numbers count only enabled endpoints — a disabled endpoint is
-  // skipped entirely by the router, so giving it a number would be a lie.
+  // Disabled endpoints are NOT listed. This panel answers one question — "where does
+  // a request go" — and a disabled endpoint is never tried, so listing it (greyed,
+  // numbered "–") buried the 4 rows that matter under 8 that don't. They are still
+  // fully manageable in Upstream endpoints above; a count line points there.
+  const live=order.filter(o=>o.enabled);
+  const offCount=order.length-live.length;
   let pos=0;
-  host.innerHTML=order.map((o,idx)=>{
-    const on=o.enabled;
-    if(on)pos++;
+  host.innerHTML=live.map((o,idx)=>{
+    const on=true;
+    pos++;
     const cls=roClass(o);
     // A dedicated proxy in cooldown is skipped for now, so say so instead of
     // showing a chain the router isn't actually following.
@@ -1123,15 +1203,19 @@ function renderRouting(){
 <span class="ro-pos">${on?pos:'–'}</span>
 <div class="ro-main">
   <div class="ro-nm"><span class="nmtxt">${esc(o.name)}</span>${o.is_primary?'<span class="ro-chip">PRIMARY</span>':''}${on?'':'<span class="ro-chip warn">OFF</span>'}${risk?'<span class="ro-chip warn">NO FALLBACK</span>':''}</div>
-  <div class="ro-sub">${chain.length?esc(chain.join(' → ')):'No proxy configured'}${o.model_override?' · '+esc(o.model_override):''}</div>
+  <div class="ro-sub">${o.key_count>1?`<span class="ro-keys" title="${o.key_count} API keys — a quota refusal rotates to the next${o.key_rules?', limited to: '+esc(o.key_rules):''}">${o.key_count} keys</span> · `:''}${chain.length?esc(chain.join(' → ')):'No proxy configured'}${o.model_override?' · '+esc(o.model_override):''}</div>
 </div>
 <div class="ro-stat ${cls}" title="${o.served} ok / ${o.failed} failed · median ${roMs(o.median_ms)} · ${roAgo(o.last_ts)}"><b>${o.total?o.success_pct+'%':'—'}</b>${o.served}/${o.total||0}<br>${roMs(o.median_ms)}</div>
 <div class="ro-nudge">
   <button data-roup="${o.id}" ${idx===0?'disabled':''} title="Move up" aria-label="Move ${esc(o.name)} up">${CHEV_UP}</button>
-  <button data-rodn="${o.id}" ${idx===order.length-1?'disabled':''} title="Move down" aria-label="Move ${esc(o.name)} down">${CHEV_DN}</button>
+  <button data-rodn="${o.id}" ${idx===live.length-1?'disabled':''} title="Move down" aria-label="Move ${esc(o.name)} down">${CHEV_DN}</button>
 </div>
 </div>`;
-  }).join('')||'<div class="muted">No endpoints configured yet.</div>';
+  }).join('')||'<div class="muted">No enabled endpoints — the gateway cannot route. Enable one under Upstream endpoints.</div>';
+  if(offCount){
+    host.insertAdjacentHTML('beforeend',
+      `<div class="ro-off-note">${offCount} disabled endpoint${offCount>1?'s':''} hidden — manage under <b>Upstream endpoints</b></div>`);
+  }
 
   $('#roWindow').textContent=RO.data.active_count+' active · '+(RO.window>=86400?(RO.window/86400)+'d':(RO.window/3600)+'h')+' stats';
   $('#roSave').disabled=!dirty;
@@ -1139,10 +1223,10 @@ function renderRouting(){
   // The two draft buttons only exist while there IS a draft — at rest the panel is
   // just the list plus the range picker.
   $('#roBar').classList.toggle('clean',!dirty);
-  const first=order.find(o=>o.enabled);
+  const first=live[0];
   $('#roHint').innerHTML=dirty
-    ? '⚠️ Unsaved order — <b>'+esc(first?first.name:'none')+'</b> would become position 1. Click <b>Save order</b> to apply.'
-    : (first?'✓ Live order: <b>'+esc(first.name)+'</b> is tried first'+(order.filter(o=>o.enabled).length>1?', then '+order.filter(o=>o.enabled).slice(1).map(o=>esc(o.name)).join(' → '):'')+'.':'No enabled endpoints — the gateway cannot route.');
+    ? 'Unsaved order — <b>'+esc(first?first.name:'none')+'</b> would become position 1. Click <b>Save order</b> to apply.'
+    : (first?'Live order: <b>'+esc(first.name)+'</b> is tried first'+(live.length>1?', then '+live.slice(1).map(o=>esc(o.name)).join(' → '):'')+'.':'No enabled endpoints — the gateway cannot route.');
 
   $$('#roList [data-roup]').forEach(b=>b.onclick=()=>roMove(+b.dataset.roup,-1));
   $$('#roList [data-rodn]').forEach(b=>b.onclick=()=>roMove(+b.dataset.rodn,1));
@@ -1150,22 +1234,40 @@ function renderRouting(){
   // One Sortable per render: the old instance must be destroyed or every
   // re-render stacks another set of drag handlers on the same rows.
   if(RO.sortable){try{RO.sortable.destroy();}catch(e){}RO.sortable=null;}
-  if(window.Sortable&&order.length>1){
+  if(window.Sortable&&live.length>1){
     RO.sortable=new Sortable(host,{
       animation:150,handle:'.ro-grip',ghostClass:'sortable-ghost',
       onEnd:()=>{
-        RO.draft=[...host.children].map(c=>+c.dataset.id).filter(n=>!isNaN(n));
+        // Only enabled rows are in the DOM. Rebuilding the draft from the DOM alone
+        // would silently drop every disabled endpoint and shove it to the end of the
+        // saved order, so merge the new visible sequence back into the full draft.
+        const seen=[...host.children].map(c=>+c.dataset.id).filter(n=>!isNaN(n));
+        RO.draft=mergeVisibleOrder(RO.draft,seen);
         RO.pending=true;renderRouting();
       }
     });
   }
 }
 
+// Put `seen` (the visible, enabled ids in their new sequence) back into `full`,
+// leaving every id not in `seen` exactly where it was.
+function mergeVisibleOrder(full,seen){
+  const set=new Set(seen);
+  let k=0;
+  return (full||[]).map(id=>set.has(id)?seen[k++]:id);
+}
+
+// ▲▼ move within the VISIBLE rows only. Stepping through the raw draft would make a
+// button appear to do nothing whenever a disabled endpoint sat between two enabled
+// ones — the swap would happen off-screen.
 function roMove(id,dir){
-  if(!RO.draft)return;
-  const i=RO.draft.indexOf(id),j=i+dir;
-  if(i<0||j<0||j>=RO.draft.length)return;
-  [RO.draft[i],RO.draft[j]]=[RO.draft[j],RO.draft[i]];
+  if(!RO.draft||!RO.data)return;
+  const byId={};RO.data.order.forEach(o=>byId[o.id]=o);
+  const visible=RO.draft.filter(x=>byId[x]&&byId[x].enabled);
+  const i=visible.indexOf(id),j=i+dir;
+  if(i<0||j<0||j>=visible.length)return;
+  [visible[i],visible[j]]=[visible[j],visible[i]];
+  RO.draft=mergeVisibleOrder(RO.draft,visible);
   RO.pending=true;renderRouting();
 }
 
@@ -1206,12 +1308,42 @@ function openEndpointSettings(e){
 <label class="fl">Base URL</label><input id="esUrl" value="${esc(e.url||'')}">
 <label class="fl">API key</label><div class="revealrow"><input id="esKey" type="password" value="${esc(e.api_key||'')}" autocomplete="off" spellcheck="false"><button class="eyebtn" id="esKeyEye" type="button" title="Show key" aria-label="Show key" aria-pressed="false">${EYE_SVG}</button></div>
 <label class="fl">Model ID override</label><input id="esMod" type="text" value="${esc(e.model_override||'')}" placeholder="e.g. claude-3-opus-123">
-<label class="fl">Proxy Switch Errors (Comma-separated)</label>
-<div style="font-size:11px;color:var(--ink-faint);margin-bottom:4px;line-height:1.2">Errors that will cause the system to drop the current proxy IP and try another proxy.</div>
-<input id="esKw" type="text" value="${esc(e.failover_trigger_keywords||'500,501,502,503,504,524,401,403,unauthorized')}" placeholder="e.g. 500,403,unauthorized">
-<label class="fl" style="margin-top:10px">Endpoint Switch Errors (Comma-separated)</label>
-<div style="font-size:11px;color:var(--ink-faint);margin-bottom:4px;line-height:1.2">Errors that will cause the system to abandon this endpoint entirely and switch to the next routing target.</div>
-<input id="esEpKw" type="text" value="${esc(e.endpoint_failover_keywords||'Thinking,model_not_found,invalid_api_key,new_api_error,预扣')}" placeholder="e.g. Thinking,model_not_found">
+
+<div class="fsect">
+  <div class="fsect-hd">Additional API keys</div>
+  <div class="fsect-sub">Providers usually meter quota per key. Add the spare keys for this
+    same provider here — when one is refused, the gateway retries the identical request
+    on the next key before it gives up on the provider.</div>
+  <div id="extraKeyList"></div>
+  <button class="btn ghost" id="btnAddKey" type="button">+ Add API key</button>
+
+  <div class="krules" id="krulesWrap">
+    <label class="fl" style="margin-top:12px">Key rotation triggers <span class="opt">optional</span></label>
+    <input id="esKeyKw" type="text" value="${esc(e.key_failover_keywords||'')}" placeholder="Empty — rotate on any refusal">
+    <div class="fhint"><b>Leave empty</b> and any refusal moves to the next key — the usual
+      choice. Fill it in to restrict rotation to these phrases only; anything else goes
+      straight to the failover rules below. Comma-separated, matched anywhere in the
+      upstream's reply.
+      <button type="button" class="chipbtn" id="esKeyKwFill">Use quota-only phrases</button></div>
+  </div>
+</div>
+
+<div class="fsect">
+  <div class="fsect-hd">Failover rules</div>
+  <div class="fsect-sub">Three independent lists, checked in this order. Each phrase is
+    matched anywhere in the upstream's response text.</div>
+
+  <label class="fl" style="margin-top:10px">Proxy switch triggers</label>
+  <div class="fhint" style="margin:0 2px 4px">Retry through a different exit IP. Same key,
+    same endpoint — for faults that belong to the connection, not the account.</div>
+  <input id="esKw" type="text" value="${esc(e.failover_trigger_keywords||'500,501,502,503,504,524,401,403,unauthorized')}" placeholder="500, 502, 524, unauthorized">
+
+  <label class="fl" style="margin-top:12px">Endpoint switch triggers</label>
+  <div class="fhint" style="margin:0 2px 4px">Abandon this provider immediately and move to
+    the next in the routing order. <b>Other keys are not tried</b> — use this for refusals
+    a different key would repeat, such as blocked content or an unknown model id.</div>
+  <input id="esEpKw" type="text" value="${esc(e.endpoint_failover_keywords||'Thinking,model_not_found,invalid_api_key,content-blocked,content_filter')}" placeholder="content-blocked, model_not_found">
+</div>
 
 <div style="margin-top:24px;border-top:1px solid var(--line);padding-top:16px;">
   <h4 style="margin:0 0 10px 0;font-size:14px;">Dedicated Proxy Routing</h4>
@@ -1260,6 +1392,54 @@ function openEndpointSettings(e){
   // Positions shift whenever a row is deleted, which is what used to silently
   // reorder — or drop — the operator's saved priority list.
   let _uidSeq = 0;
+
+  // ---- extra API keys for this same provider ----
+  // Each row keeps a stable uid so deleting one cannot renumber the others (the same
+  // trap the custom-proxy list fell into before).
+  let extraKeys;
+  try { extraKeys = JSON.parse(e.extra_keys || '[]'); } catch (err) { extraKeys = []; }
+  if (!Array.isArray(extraKeys)) extraKeys = [];
+  let keyRows = extraKeys.map(v => ({uid: 'k' + (_uidSeq++), val: String(v || '')}));
+
+  function renderKeyRows() {
+    const host = $('#extraKeyList');
+    if (!host) return;
+    host.innerHTML = keyRows.length
+      ? keyRows.map((k, i) => `
+        <div class="kyrow">
+          <div class="revealrow">
+            <input class="kyInput" data-idx="${i}" type="password" value="${esc(k.val)}"
+                   placeholder="sk-…" autocomplete="off" spellcheck="false">
+            <button class="eyebtn kyEye" data-idx="${i}" type="button" title="Show key"
+                    aria-label="Show key" aria-pressed="false">${EYE_SVG}</button>
+          </div>
+          <button class="kydel" data-idx="${i}" type="button" title="Remove this key"
+                  aria-label="Remove this key">×</button>
+        </div>`).join('')
+      : '<div class="kyempty">No additional keys. The primary key above is used on its own.</div>';
+
+    $$('#extraKeyList .kyInput').forEach(el => {
+      el.onchange = () => { keyRows[+el.dataset.idx].val = el.value.trim(); };
+    });
+    $$('#extraKeyList .kyEye').forEach(b => {
+      b.onclick = () => {
+        const inp = b.parentNode.querySelector('.kyInput');
+        const show = inp.type === 'password';
+        inp.type = show ? 'text' : 'password';
+        b.classList.toggle('on', show);
+        b.setAttribute('aria-pressed', show ? 'true' : 'false');
+        b.setAttribute('aria-label', show ? 'Hide key' : 'Show key');
+        b.title = show ? 'Hide key' : 'Show key';
+      };
+    });
+    $$('#extraKeyList .kydel').forEach(b => {
+      b.onclick = () => { keyRows.splice(+b.dataset.idx, 1); renderKeyRows(); };
+    });
+    // The rotation-trigger field only makes sense once there is somewhere to rotate to.
+    const kw = $('#krulesWrap');
+    if (kw) kw.classList.toggle('show', keyRows.length > 0);
+  }
+
   let currentCustomProxies = customProxies.map(v => ({uid: 'u' + (_uidSeq++), val: v}));
   let priorityKeys = proxyPriority.map(p =>
     p === 'scrape.do' ? 'scrape.do'
@@ -1350,14 +1530,7 @@ function openEndpointSettings(e){
     }
   }
 
-  $('#esKeyEye') && ($('#esKeyEye').onclick = () => {
-    const el = $('#esKey'), b = $('#esKeyEye');
-    const show = el.type === 'password';
-    el.type = show ? 'text' : 'password';
-    b.classList.toggle('on', show);
-    b.setAttribute('aria-pressed', show ? 'true' : 'false');
-    b.title = b.setAttribute('aria-label', show ? 'Hide key' : 'Show key') || (show ? 'Hide key' : 'Show key');
-  });
+  $('#esKeyEye') && ($('#esKeyEye').onclick = () => toggleReveal('esKey', 'esKeyEye'));
 
   $('#tgScrape').onclick = () => {
     $('#tgScrape').classList.toggle('on');
@@ -1375,6 +1548,23 @@ function openEndpointSettings(e){
     renderProxies();
   };
 
+  // One click fills the phrases that actually appear in the wild, so nobody has to
+  // guess how a provider words an exhausted balance.
+  if ($('#esKeyKwFill')) $('#esKeyKwFill').onclick = () => {
+    $('#esKeyKw').value = (ST.settings && ST.settings.key_rotate_hint)
+      || 'insufficient quota, quota, 额度不足, 402, insufficient balance';
+    $('#esKeyKw').focus();
+  };
+
+  $('#btnAddKey').onclick = () => {
+    if (keyRows.length >= 8) { toast('Up to 8 additional keys per endpoint', 'bad'); return; }
+    keyRows.push({uid: 'k' + (_uidSeq++), val: ''});
+    renderKeyRows();
+    const last = $$('#extraKeyList .kyInput').pop();
+    if (last) last.focus();
+  };
+
+  renderKeyRows();
   renderProxies();
   renderPriority();
 
@@ -1382,6 +1572,10 @@ function openEndpointSettings(e){
   $('#esSave').onclick=async()=>{
     const btn=$('#esSave');
     $$('#customProxyList .pxInput').forEach(el => { currentCustomProxies[+el.dataset.idx].val = el.value.trim(); });
+    // Read the key inputs straight from the DOM: a value typed and saved without
+    // blurring the field never fired `change`, so relying on that alone would drop it.
+    $$('#extraKeyList .kyInput').forEach(el => { keyRows[+el.dataset.idx].val = el.value.trim(); });
+    const finalExtraKeys = keyRows.map(k => k.val).filter(Boolean);
     const finalScrapeToken = $('#tgScrape').classList.contains('on') ? $('#esScrapeToken').value.trim() : '';
     const kept = currentCustomProxies.filter(p => p.val);
     const finalCustomProxies = kept.map(p => p.val);
@@ -1408,7 +1602,9 @@ function openEndpointSettings(e){
       scrape_do_token: finalScrapeToken,
       custom_proxies: JSON.stringify(finalCustomProxies),
       proxy_priority: JSON.stringify(finalPriority),
-      proxy_fallback: finalFallback
+      proxy_fallback: finalFallback,
+      extra_keys: JSON.stringify(finalExtraKeys),
+      key_failover_keywords: ($('#esKeyKw') ? $('#esKeyKw').value.trim() : '')
     });
     toast('Endpoint saved','ok');closeModal('epSetModal');await refresh();await loadRouting();
     }catch(err){
@@ -1568,10 +1764,43 @@ if($('#upDrop')){
   ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
   dz.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)handleProxyFile(f);});
 }
+// One reveal-toggle implementation for every password field.
+function toggleReveal(inputId,btnId){
+  const el=$('#'+inputId),b=$('#'+btnId);
+  if(!el||!b)return;
+  const show=el.type==='password';
+  el.type=show?'text':'password';
+  b.classList.toggle('on',show);
+  b.setAttribute('aria-pressed',show?'true':'false');
+  b.setAttribute('aria-label',show?'Hide key':'Show key');
+  b.title=show?'Hide key':'Show key';
+}
+
+// ---- Add endpoint (modal) ----
+if($('#openAddEp'))$('#openAddEp').onclick=()=>{
+  ['epUrl','epKey','epModel','epName'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});
+  $('#epAddModal').classList.add('show');
+  setTimeout(()=>$('#epUrl').focus(),80);
+};
+if($('#epAddX'))$('#epAddX').onclick=()=>closeModal('epAddModal');
+if($('#epKeyEye')){
+  $('#epKeyEye').innerHTML=EYE_SVG;
+  $('#epKeyEye').onclick=()=>toggleReveal('epKey','epKeyEye');
+}
 $('#addEndpoint').onclick=async()=>{
-  const u=$('#epUrl').value.trim();if(!u){toast('URL required','bad');return;}
-  try{await api('/admin/endpoint/add',{url:u,api_mode:$('#epMode').dataset.val,api_key:$('#epKey').value.trim(),model_override:$('#epModel').value.trim()});toast('Endpoint added ✓','ok');$('#epUrl').value='';$('#epKey').value='';$('#epModel').value='';await refresh();}
-  catch(e){toast('Failed: '+e.message,'bad');}
+  const u=$('#epUrl').value.trim();
+  if(!u){toast('Base URL is required','bad');return;}
+  if(!/^https?:\/\//i.test(u)){toast('Base URL must start with http:// or https://','bad');return;}
+  const btn=$('#addEndpoint');btn.disabled=true;btn.textContent='Adding…';
+  try{
+    await api('/admin/endpoint/add',{url:u,api_mode:$('#epMode').dataset.val,
+      api_key:$('#epKey').value.trim(),model_override:$('#epModel').value.trim(),
+      name:$('#epName').value.trim()});
+    toast('Endpoint added','ok');
+    closeModal('epAddModal');
+    await refresh();await loadRouting();
+  }catch(e){toast('Could not add endpoint: '+(e.message||'error'),'bad');}
+  finally{btn.disabled=false;btn.textContent='Add endpoint';}
 };
 $('#addKw').onclick=async()=>{
   const v=$('#kwVal').value.trim();if(!v){toast('Keyword required','bad');return;}

@@ -79,6 +79,11 @@ DEFAULT_SETTINGS = {
                                                   # fresh exit IP and skip the wait entirely
     "failover_5xx_threshold": "2",                # consecutive 5xx before abandoning this endpoint. 2 is
                                                   # enough of a signal and saves a whole slow attempt
+    # Suggested phrases offered in the UI for per-key rotation. Providers word an
+    # exhausted balance differently: agentrouter says "pre-consume quota failed" and
+    # later "Budget pool quota has been exhausted"; Chinese relays say 额度不足. The
+    # substring "quota" covers the first two on its own.
+    "key_rotate_hint": "insufficient quota, quota, 额度不足, 402, insufficient balance",
     # --- TCP keepalive on the proxy tunnel (covers slow upstream "thinking") ---
     # Probes start sooner and repeat faster than the old 30s/5s: the residential
     # tunnel goes idle while the model "thinks", and an idle-dropped tunnel showed up
@@ -88,6 +93,76 @@ DEFAULT_SETTINGS = {
     "keepalive_intvl": "3",                       # seconds between probes
     "keepalive_cnt": "200",                       # probe count (idle + intvl*cnt = total coverage)
 }
+
+
+_ENDPOINTS_DDL = """
+CREATE TABLE endpoints_new (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    url                       TEXT NOT NULL,
+    api_mode                  TEXT    DEFAULT 'anthropic_messages',
+    api_key                   TEXT    DEFAULT '',
+    enabled                   INTEGER DEFAULT 1,
+    priority                  INTEGER DEFAULT 0,
+    status                    TEXT    DEFAULT 'unknown',
+    note                      TEXT    DEFAULT '',
+    model_override            TEXT    DEFAULT '',
+    is_primary                INTEGER DEFAULT 0,
+    name                      TEXT    DEFAULT '',
+    failover_trigger_keywords TEXT    DEFAULT '500,501,502,503,504,524,401,403,unauthorized',
+    endpoint_failover_keywords TEXT   DEFAULT 'Thinking,model_not_found,invalid_api_key,content-blocked,content_filter',
+    scrape_do_token           TEXT    DEFAULT '',
+    custom_proxies            TEXT    DEFAULT '[]',
+    proxy_priority            TEXT    DEFAULT '[]',
+    proxy_fallback            INTEGER DEFAULT 1,
+    key_failover_keywords     TEXT    DEFAULT '',
+    extra_keys                TEXT    DEFAULT '[]'
+)
+"""
+
+
+def _drop_endpoint_url_unique(c):
+    """Rebuild `endpoints` without UNIQUE(url).
+
+    SQLite cannot drop a column constraint, so the table has to be recreated. One
+    provider legitimately appears several times — one row per API key, because quota is
+    metered per key upstream.
+    """
+    idx = [r[1] for r in c.execute("PRAGMA index_list(endpoints)").fetchall()]
+    if not any(i.startswith("sqlite_autoindex_endpoints") for i in idx):
+        return
+    old_cols = [r[1] for r in c.execute("PRAGMA table_info(endpoints)").fetchall()]
+    new_cols = [l.strip().split()[0] for l in _ENDPOINTS_DDL.splitlines()
+                if l.startswith("    ") and not l.strip().startswith(")")]
+    shared = [col for col in new_cols if col in old_cols]
+    collist = ", ".join(shared)
+    # python-sqlite3 opens an implicit transaction before DML, so an explicit BEGIN here
+    # raises "cannot start a transaction within a transaction" — which the previous
+    # version swallowed, leaving the UNIQUE index quietly in place. Commit what is
+    # pending, switch to autocommit for the rebuild, then restore.
+    prev_isolation = c.isolation_level
+    try:
+        c.commit()
+        c.isolation_level = None
+        c.execute("PRAGMA foreign_keys=off")
+        c.execute("DROP TABLE IF EXISTS endpoints_new")
+        c.execute(_ENDPOINTS_DDL)
+        c.execute(f"INSERT INTO endpoints_new({collist}) SELECT {collist} FROM endpoints")
+        c.execute("DROP TABLE endpoints")
+        c.execute("ALTER TABLE endpoints_new RENAME TO endpoints")
+    except Exception as exc:
+        # Booting matters more than the rebuild; the only cost of failing here is that
+        # duplicate URLs stay rejected. Log it so it is not silent.
+        try:
+            c.execute("DROP TABLE IF EXISTS endpoints_new")
+        except Exception:
+            pass
+        print(f"[db] endpoints rebuild skipped: {type(exc).__name__}: {exc}")
+    finally:
+        try:
+            c.execute("PRAGMA foreign_keys=on")
+        except Exception:
+            pass
+        c.isolation_level = prev_isolation
 
 
 def conn():
@@ -147,7 +222,9 @@ def _init(c):
         );
         CREATE TABLE IF NOT EXISTS endpoints (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            url       TEXT UNIQUE NOT NULL,
+            -- NOT unique: providers hand out several keys per account, each with its
+            -- own quota, so the same base URL legitimately appears more than once.
+            url       TEXT NOT NULL,
             api_mode  TEXT    DEFAULT 'anthropic_messages',  -- anthropic_messages|chat_completions
             api_key   TEXT    DEFAULT '',                    -- '' = use global upstream_key
             enabled   INTEGER DEFAULT 1,
@@ -225,6 +302,18 @@ def _init(c):
         c.execute("ALTER TABLE endpoints ADD COLUMN proxy_priority TEXT DEFAULT '[]'")
     if "proxy_fallback" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN proxy_fallback INTEGER DEFAULT 1")
+    if "key_failover_keywords" not in ecols:
+        # Third failover tier. Empty means "any error moves to the next key for this
+        # provider" — which is what someone adding a second key almost always wants,
+        # so it works with no configuration. Non-empty narrows it to these markers.
+        c.execute("ALTER TABLE endpoints ADD COLUMN key_failover_keywords TEXT DEFAULT ''")
+    if "extra_keys" not in ecols:
+        # JSON array of additional API keys for this same provider/URL. Each key
+        # carries its own quota upstream, so exhausting one should move to the next
+        # rather than abandoning the provider.
+        c.execute("ALTER TABLE endpoints ADD COLUMN extra_keys TEXT DEFAULT '[]'")
+
+    _drop_endpoint_url_unique(c)
 
     # logs: add ip / model / detail for the log-detail view
     lcols = [r[1] for r in c.execute("PRAGMA table_info(logs)").fetchall()]
@@ -577,20 +666,31 @@ def list_endpoints():
             "SELECT * FROM endpoints ORDER BY priority, id").fetchall()]
 
 
-def add_endpoint(url, api_mode="anthropic_messages", api_key="", model_override=""):
+def add_endpoint(url, api_mode="anthropic_messages", api_key="", model_override="", name=""):
+    """Insert an endpoint and return (added, endpoint_id).
+
+    The same url may be added repeatedly — one row per API key, since providers meter
+    quota per key. Previously a UNIQUE(url) index silently dropped the second one while
+    the caller reported success.
+
+    The old return value was `c.total_changes`, which counts every change since the
+    connection was opened, so the API answered things like {"added": 11990}.
+    """
     with _lock:
         c = conn()
         count = c.execute("SELECT COUNT(*) FROM endpoints").fetchone()[0]
         is_primary = 1 if count == 0 else 0
         nxt = c.execute("SELECT COALESCE(MAX(priority),0)+1 FROM endpoints").fetchone()[0]
-        c.execute("INSERT OR IGNORE INTO endpoints(url, api_mode, api_key, model_override, priority, is_primary) VALUES (?,?,?,?,?,?)",
-                  (url, api_mode, api_key, model_override, nxt, is_primary))
+        cur = c.execute(
+            "INSERT INTO endpoints(url, api_mode, api_key, model_override, priority, is_primary, name) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (url, api_mode, api_key, model_override, nxt, is_primary, name or ""))
         c.commit()
-        return c.total_changes
+        return (1 if cur.rowcount else 0), cur.lastrowid
 
 
 def update_endpoint(eid, **fields):
-    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords", "endpoint_failover_keywords", "scrape_do_token", "custom_proxies", "proxy_priority", "proxy_fallback"}
+    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords", "endpoint_failover_keywords", "scrape_do_token", "custom_proxies", "proxy_priority", "proxy_fallback", "extra_keys", "key_failover_keywords"}
     fields = {k: v for k, v in fields.items() if k in allowed_ENDPOINT_COLS}
     if not fields:
         return
