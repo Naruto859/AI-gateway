@@ -49,9 +49,7 @@ header{display:flex;align-items:center;gap:13px;margin:4px 4px 22px;animation:ri
 .tab[data-t="filters"].active{background:linear-gradient(145deg,var(--c-pink),var(--c-pink-d));color:#fff;box-shadow:0 4px 12px rgba(195,90,147,.32)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:15px;box-shadow:var(--shadow);animation:rise .5s ease both;transform:translateZ(0);overflow:hidden}
 .card.csel-lift{z-index:10}
-.card h2{margin:0 0 3px;font-size:16px;font-weight:700;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-/* A header that carries a count AND an action needs the title to be able to shrink,
-   or on a narrow screen the button gets pushed out of the card. */
+.card h2{margin:0 0 3px;font-size:16px;font-weight:700;display:flex;align-items:center;gap:9px}
 .card h2>span:not(.ic){min-width:0}
 .card h2 .ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;background:var(--g-100)}
 .card h2 .ic svg{width:17px;height:17px;stroke:var(--g-600)}
@@ -85,11 +83,16 @@ input.wide,textarea.wide{width:100%;text-align:left}
   transform-origin:top center;max-height:260px;overflow:auto;scrollbar-width:none}
 .csel-pop::-webkit-scrollbar{display:none}
 .csel.open .csel-pop{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
-/* The panel animates with scaleY, which would squash the labels; fade the rows in
-   instead of letting them stretch. */
-.csel-pop>.csel-opt{opacity:0;transition:opacity .16s ease .04s}
-.csel.open .csel-pop>.csel-opt{opacity:1}
-.csel-opt{padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;display:flex;align-items:center;gap:9px;transition:background .14s,color .14s,opacity .16s ease .04s}
+/* The panel scales on Y, which would stretch the labels; counter-scale the inner list
+   so the text keeps its shape while the panel unfolds.
+   NOTE: never key this off `.csel.open` — an open popup lives in <body>, not inside
+   .csel, so any descendant selector from .csel silently stops matching. State goes on
+   the popup itself. */
+.csel-pop{--unfold:.55}
+.csel-pop>.csel-opt{transform-origin:top center;transform:scaleY(calc(1 / var(--unfold)));
+  transition:transform .19s cubic-bezier(.2,.8,.2,1),opacity .15s ease}
+.csel-pop.shown{--unfold:1}
+.csel-opt{padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;display:flex;align-items:center;gap:9px;transition:background .14s,color .14s,transform .19s cubic-bezier(.2,.8,.2,1)}
 .csel-opt:hover{background:var(--g-50);color:var(--ink)}
 /* Only ONE option may look chosen. Hover is a lighter tint than .sel so the two are
    never confusable — previously both read as the same green and looked co-selected. */
@@ -294,12 +297,18 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .fl .opt{font-weight:600;color:var(--ink-faint);font-size:10px;letter-spacing:.2px;text-transform:uppercase;margin-left:5px}
 /* Grouped section inside a modal: a heading, one explanatory line, then the fields.
    Keeps a long form readable without turning every field into a card. */
-/* Primary action in the card header, beside the count it adds to — reachable without
-   scrolling past a list that can hold a dozen rows. */
-.addbtn{font:inherit;font-size:12px;font-weight:700;padding:7px 12px;margin-left:9px;border-radius:9px;border:1px solid var(--g-300);background:var(--g-50);color:var(--g-700);cursor:pointer;display:inline-flex;align-items:center;gap:5px;flex:none;min-height:34px;transition:background .15s,border-color .15s}
-.addbtn:hover{background:var(--g-100);border-color:var(--g-400)}
-.addbtn:active{transform:scale(.97)}
-.addbtn svg{width:13px;height:13px;flex:none}
+/* Toolbar row directly above the list it acts on: [count ........ Add].
+   Sitting inside the <h2> put it between the title and the description, which read as
+   an interruption; here the reading order is title → what it does → controls → rows. */
+.listbar{display:flex;align-items:center;gap:10px;margin:14px 0 9px;padding-top:12px;border-top:1px solid var(--line)}
+.lbcount{font-size:11.5px;font-weight:640;color:var(--ink-faint);letter-spacing:.1px}
+.listbar .addbtn{margin-left:auto}
+.addbtn{font:inherit;font-size:12.5px;font-weight:700;padding:9px 15px;border-radius:10px;border:1px solid var(--g-400);background:linear-gradient(145deg,var(--g-50),#fff);color:var(--g-700);cursor:pointer;display:inline-flex;align-items:center;gap:6px;flex:none;min-height:40px;
+  box-shadow:0 1px 2px rgba(31,138,86,.08);transition:background .16s,border-color .16s,box-shadow .16s,transform .12s}
+.addbtn:hover{background:var(--g-100);border-color:var(--g-500);box-shadow:0 3px 10px rgba(31,138,86,.15)}
+.addbtn:active{transform:scale(.97);box-shadow:none}
+.addbtn:focus-visible{outline:2px solid var(--g-400);outline-offset:2px}
+.addbtn svg{width:14px;height:14px;flex:none}
 /* Collapsed endpoint list. A tall list pushed Routing Order — the panel you read —
    off-screen entirely, so past the 4th row the rest is folded behind a count. */
 .eplist.collapsed .ep:nth-child(n+5){display:none}
@@ -531,10 +540,13 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <!-- KEYS -->
 <section data-p="keys" class="hidden">
 <div class="card">
-<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8 2 2-3 3"/></svg></span>Your API keys <span id="keyCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8 2 2-3 3"/></svg></span>Your API keys</h2>
 <p class="sub">Keys your apps send to this gateway. Create one, copy it, paste into your tool. Each starts with <b>mugen_</b>.</p>
-<div id="keyList" style="margin-top:6px"></div>
-<button class="btn" id="createKey" style="margin-top:12px">+ Create new key</button>
+<div class="listbar">
+  <span class="lbcount" id="keyCount"></span>
+  <button class="addbtn" id="createKey"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Create key</button>
+</div>
+<div id="keyList"></div>
 </div>
 </section>
 <!-- ENDPOINTS -->
@@ -546,13 +558,14 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div id="activeEpInfo" style="font-size:12px;color:var(--ink-faint);padding:8px 2px 2px;line-height:1.55"></div>
 </div>
 <div class="card">
-<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints
-  <span id="epCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span>
-  <button class="addbtn" id="openAddEp" title="Add an endpoint" aria-label="Add an endpoint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add</button>
-</h2>
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints</h2>
 <p class="sub">Where the gateway forwards. Set one as primary; if it fails all retries the next is tried, then it loops back to primary.</p>
 <div class="field"><div class="meta"><div class="lbl">Claude Code Mimicry</div><div class="desc">A-to-Z exact mimicry (NodeJS + Claude-CLI). Overwrites client fingerprint headers. Keep ON if upstream strictly checks for real Claude Code.</div></div><div class="ctrl"><div class="tg" id="tgMimicry"></div></div></div>
-<div id="epList" class="eplist" style="margin-top:6px"></div>
+<div class="listbar">
+  <span class="lbcount" id="epCount"></span>
+  <button class="addbtn" id="openAddEp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add endpoint</button>
+</div>
+<div id="epList" class="eplist"></div>
 <button class="epmore" id="epMore" hidden></button>
 </div>
 <div class="card">
@@ -783,7 +796,11 @@ $$('.tab').forEach(t=>t.onclick=()=>{
 // custom dropdowns.
 function _cselClose(cs){
   cs.classList.remove('open');
-  if(cs._pop){cs._pop.style.cssText='';if(cs._pop._home&&cs._pop.parentNode!==cs._pop._home)cs._pop._home.appendChild(cs._pop);}
+  if(cs._pop){
+    cs._pop.classList.remove('shown');
+    cs._pop.style.cssText='';
+    if(cs._pop._home&&cs._pop.parentNode!==cs._pop._home)cs._pop._home.appendChild(cs._pop);
+  }
 }
 // Glyphs like ☰ ▲ ▼ are font-dependent and render at different weights and baselines
 // per platform, which is what made the routing rows look ragged. These are drawn.
@@ -846,21 +863,24 @@ function initCsel(cs){
       // animated top/left as well (so it slid in from wherever it last sat), and the
       // final transform was set in the same frame as the move, leaving no start value.
       // Position first with animation suppressed, then release it next frame.
-      pop.style.transition='none';
+      pop.classList.remove('shown');
       pop.style.cssText=`position:absolute;`
         +`left:${window.scrollX+left}px;top:${window.scrollY+(up?r.top-6:r.bottom+6)}px;`
         +`width:${r.width}px;min-width:${popW}px;z-index:99999;pointer-events:auto;`
         +`transition:none;`
         +`transform-origin:${up?'bottom':'top'} center;`
-        // scaleY only: the panel unfolds from the button's edge rather than sliding.
-        +`opacity:0;transform:${up?'translateY(-100%) ':''}scaleY(.55);`;
+        // scaleY only: the panel unfolds from the button's edge rather than sliding in.
+        +`opacity:0;transform:${up?'translateY(-100%) ':''}scaleY(var(--unfold));`;
       // Force layout so the closed state is a real starting point, not coalesced away.
       void pop.offsetHeight;
       requestAnimationFrame(()=>{
         if(!cs.classList.contains('open'))return;
         pop.style.transition='opacity .17s cubic-bezier(.2,.8,.2,1),transform .19s cubic-bezier(.2,.8,.2,1)';
         pop.style.opacity='1';
-        pop.style.transform=(up?'translateY(-100%) ':'')+'scaleY(1)';
+        // .shown flips --unfold to 1, which drives BOTH the panel's scaleY and the
+        // rows' counter-scale from a single variable, so they can never disagree.
+        pop.classList.add('shown');
+        pop.style.transform=(up?'translateY(-100%) ':'')+'scaleY(var(--unfold))';
       });
     }
   };
@@ -1125,7 +1145,12 @@ function epKeyCount(e){
 
 function renderEndpoints(){
   const eps=ST.endpoints||[];
-  $('#epCount').textContent=eps.length+' total';
+  // Say what is routing, not just how many rows exist — the count beside an Add button
+  // is only useful if it answers "is my traffic covered".
+  const onCount=eps.filter(e=>e.enabled).length;
+  $('#epCount').textContent=onCount
+    ? `${onCount} active${eps.length>onCount?` · ${eps.length-onCount} off`:''}`
+    : `none active · ${eps.length} off`;
   const activePrimary=(()=>{const e=eps.find(x=>x.is_primary);return e?epName(e):'None';})();
   const ai=$('#activeEpInfo');if(ai)ai.innerHTML=`⚡ Primary in use: <b>${activePrimary}</b>`;
   let h=eps.map((e)=>{
@@ -1733,7 +1758,7 @@ async function copyText(txt){
 }
 function renderKeys(){
   const ks=ST.api_keys||[];
-  $('#keyCount').textContent=ks.length+(ks.length===1?' key':' keys');
+  $('#keyCount').textContent=ks.length?(ks.length+(ks.length===1?' key':' keys')):'no keys yet';
   $('#keyList').innerHTML=ks.map((k,i)=>{
     const when=k.created_at?new Date(k.created_at*1000).toLocaleDateString():'';
     const lbl=k.label?' · '+esc(k.label):'';
