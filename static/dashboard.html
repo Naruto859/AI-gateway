@@ -300,14 +300,19 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 /* Toolbar row directly above the list it acts on: [count ........ Add].
    Sitting inside the <h2> put it between the title and the description, which read as
    an interruption; here the reading order is title → what it does → controls → rows. */
-.listbar{display:flex;align-items:center;gap:10px;margin:14px 0 9px;padding-top:12px;border-top:1px solid var(--line)}
-.lbcount{font-size:11.5px;font-weight:640;color:var(--ink-faint);letter-spacing:.1px}
+.listbar{display:flex;align-items:center;gap:10px;margin:14px 0 10px;padding-top:12px;border-top:1px solid var(--line)}
+/* Sized to sit level with the button beside it — at 11.5px the left half of the row
+   read as empty space. Still clearly secondary to the button. */
+.lbcount{font-size:13px;font-weight:680;color:var(--ink-soft);letter-spacing:.1px;line-height:1.3}
+.lbcount b{font-weight:760;color:var(--ink)}
 .listbar .addbtn{margin-left:auto}
 .addbtn{font:inherit;font-size:12.5px;font-weight:700;padding:9px 15px;border-radius:10px;border:1px solid var(--g-400);background:linear-gradient(145deg,var(--g-50),#fff);color:var(--g-700);cursor:pointer;display:inline-flex;align-items:center;gap:6px;flex:none;min-height:40px;
   box-shadow:0 1px 2px rgba(31,138,86,.08);transition:background .16s,border-color .16s,box-shadow .16s,transform .12s}
 .addbtn:hover{background:var(--g-100);border-color:var(--g-500);box-shadow:0 3px 10px rgba(31,138,86,.15)}
 .addbtn:active{transform:scale(.97);box-shadow:none}
 .addbtn:focus-visible{outline:2px solid var(--g-400);outline-offset:2px}
+/* A save that leaves the dialog open confirms on the button itself. */
+.btn.ok{background:linear-gradient(145deg,var(--g-600),#15633f);box-shadow:0 4px 13px rgba(21,99,63,.3)}
 .addbtn svg{width:14px;height:14px;flex:none}
 /* Collapsed endpoint list. A tall list pushed Routing Order — the panel you read —
    off-screen entirely, so past the 4th row the rest is folded behind a count. */
@@ -960,7 +965,7 @@ $('#saveProxyEngine').onclick=()=>saveSettings(['hedging_concurrency','max_retri
 // Hot Pool Live View
 let _hpInterval=null;
 function _hpStopPoll(){if(_hpInterval){clearInterval(_hpInterval);_hpInterval=null;}}
-$('#openHotPool').onclick=()=>{$('#hpModal').classList.add('show');document.body.style.overflow='hidden';_hpPoll();_hpStopPoll();_hpInterval=setInterval(_hpPoll,2000);};
+$('#openHotPool').onclick=()=>{openModal('hpModal');_hpPoll();_hpStopPoll();_hpInterval=setInterval(_hpPoll,2000);};
 $('#hpModalX').onclick=()=>closeModal('hpModal');
 async function _hpPoll(){
   try{
@@ -1148,9 +1153,9 @@ function renderEndpoints(){
   // Say what is routing, not just how many rows exist — the count beside an Add button
   // is only useful if it answers "is my traffic covered".
   const onCount=eps.filter(e=>e.enabled).length;
-  $('#epCount').textContent=onCount
-    ? `${onCount} active${eps.length>onCount?` · ${eps.length-onCount} off`:''}`
-    : `none active · ${eps.length} off`;
+  $('#epCount').innerHTML=onCount
+    ? `<b>${onCount}</b> active${eps.length>onCount?` · ${eps.length-onCount} off`:''}`
+    : `<b>none</b> active · ${eps.length} off`;
   const activePrimary=(()=>{const e=eps.find(x=>x.is_primary);return e?epName(e):'None';})();
   const ai=$('#activeEpInfo');if(ai)ai.innerHTML=`⚡ Primary in use: <b>${activePrimary}</b>`;
   let h=eps.map((e)=>{
@@ -1651,7 +1656,7 @@ function openEndpointSettings(e){
   renderProxies();
   renderPriority();
 
-  $('#epSetModal').classList.add('show');
+  openModal('epSetModal');
   $('#esSave').onclick=async()=>{
     const btn=$('#esSave');
     $$('#customProxyList .pxInput').forEach(el => { currentCustomProxies[+el.dataset.idx].val = el.value.trim(); });
@@ -1689,10 +1694,18 @@ function openEndpointSettings(e){
       extra_keys: JSON.stringify(finalExtraKeys),
       key_failover_keywords: ($('#esKeyKw') ? $('#esKeyKw').value.trim() : '')
     });
-    toast('Endpoint saved','ok');closeModal('epSetModal');await refresh();await loadRouting();
+    // The dialog deliberately stays open. This is a settings surface — the operator is
+    // often adjusting several fields, and closing it the moment one save lands both hides
+    // the confirmation and forces a re-open to continue. Add endpoint closes instead,
+    // because once the row exists there is nothing left to do there.
+    toast('Endpoint settings saved','ok');
+    _flashSaved(btn);
+    await refresh();await loadRouting();
+      btn.disabled=false;
     }catch(err){
       toast('Save failed: '+(err.message||'error'),'bad');
-    }finally{
+      // Only the failure path restores the label — on success _flashSaved owns it and
+      // puts the original back after its own timeout.
       btn.disabled=false;btn.textContent='Save endpoint';
     }
   };
@@ -1758,7 +1771,7 @@ async function copyText(txt){
 }
 function renderKeys(){
   const ks=ST.api_keys||[];
-  $('#keyCount').textContent=ks.length?(ks.length+(ks.length===1?' key':' keys')):'no keys yet';
+  $('#keyCount').innerHTML=ks.length?(`<b>${ks.length}</b>`+(ks.length===1?' key':' keys')):'no keys yet';
   $('#keyList').innerHTML=ks.map((k,i)=>{
     const when=k.created_at?new Date(k.created_at*1000).toLocaleDateString():'';
     const lbl=k.label?' · '+esc(k.label):'';
@@ -1847,6 +1860,18 @@ if($('#upDrop')){
   ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
   dz.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)handleProxyFile(f);});
 }
+// A dialog that stays open after saving needs the confirmation attached to the control
+// that was pressed — the toast alone can be missed, and there is no dismissal to imply
+// success any more.
+function _flashSaved(btn, label){
+  if(!btn)return;
+  clearTimeout(btn._savedT);
+  const original=btn._origLabel||(btn._origLabel=btn.textContent);
+  btn.textContent=label||'Saved';
+  btn.classList.add('ok');
+  btn._savedT=setTimeout(()=>{btn.textContent=original;btn.classList.remove('ok');},1900);
+}
+
 // One reveal-toggle implementation for every password field.
 function toggleReveal(inputId,btnId){
   const el=$('#'+inputId),b=$('#'+btnId);
@@ -1862,7 +1887,7 @@ function toggleReveal(inputId,btnId){
 // ---- Add endpoint (modal) ----
 if($('#openAddEp'))$('#openAddEp').onclick=()=>{
   ['epUrl','epKey','epModel','epName'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});
-  $('#epAddModal').classList.add('show');
+  openModal('epAddModal');
   setTimeout(()=>$('#epUrl').focus(),80);
 };
 if($('#epAddX'))$('#epAddX').onclick=()=>closeModal('epAddModal');
@@ -1945,12 +1970,26 @@ setInterval(()=>{
 // `m.onclick` assigned later clobbered its close handler, so a backdrop click hid
 // the box but left body scroll locked and /admin/hotpool polling forever.
 const _MODAL_CLEANUP={hpModal:()=>_hpStopPoll()};
+// Scroll lock is a property of "some modal is open", not of any single modal. It used
+// to be set by the Hot Pool open handler alone, so every other dialog let the page
+// scroll underneath it. openModal/closeModal now own it, and the release only happens
+// once the LAST modal closes — otherwise closing a nested dialog would unlock the page
+// while its parent is still up.
+function _syncScrollLock(){
+  document.body.style.overflow=$('.modal.show')?'hidden':'';
+}
+function openModal(id){
+  const m=$('#'+id);
+  if(!m)return;
+  m.classList.add('show');
+  _syncScrollLock();
+}
 function closeModal(id){
   const m=$('#'+id);
   if(!m)return;
   m.classList.remove('show');
-  document.body.style.overflow='';
   if(_MODAL_CLEANUP[id])try{_MODAL_CLEANUP[id]();}catch(e){}
+  _syncScrollLock();
 }
 $('#logModalX').onclick=()=>closeModal('logModal');
 $('#chatModalX').onclick=()=>closeModal('chatModal');
@@ -1979,7 +2018,7 @@ function openLogDetail(l){
   if(l.req_body)h+=`<div style="margin-top:12px;font-size:11px;font-weight:700;color:var(--ink-faint)">REQUEST PAYLOAD</div><pre style="margin-top:6px;background:#f8fafb;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:11.5px;overflow:auto;white-space:pre-wrap;word-break:break-word;max-height:150px">${esc(l.req_body||'')}</pre>`;
   if(l.detail)h+=`<div style="margin-top:12px;font-size:11px;font-weight:700;color:var(--ink-faint)">FULL ERROR / RESPONSE</div><pre style="margin-top:6px;background:#f8fafb;border:1px solid var(--line);border-radius:10px;padding:11px;font-size:11.5px;overflow:auto;white-space:pre-wrap;word-break:break-word;max-height:200px">${esc(l.detail||'')}</pre>`;
   $('#logModalBody').innerHTML=h;
-  $('#logModal').classList.add('show');
+  openModal('logModal');
 }
 
 // ---- ENDPOINT CHAT (with image upload + short memory) ----
@@ -1989,7 +2028,7 @@ function openEndpointChat(cfg){
   $('#chatTitle').textContent='Chat · '+cfg.name;
   $('#chatLog').innerHTML='<div class="msg sys">Testing '+(cfg.model||'model')+' · '+(cfg.api_mode==='chat_completions'?'OpenAI':'Anthropic')+' mode. Send a message or image.</div>';
   $('#chatInput').value='';
-  $('#chatModal').classList.add('show');
+  openModal('chatModal');
   setTimeout(()=>$('#chatInput').focus(),100);
 }
 function chatBubble(role,text){
