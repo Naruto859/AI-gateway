@@ -387,6 +387,39 @@ def count_proxies(enabled_only=False):
             return conn().execute("SELECT COUNT(*) FROM proxies WHERE enabled=1").fetchone()[0]
         return conn().execute("SELECT COUNT(*) FROM proxies").fetchone()[0]
 
+def prune_proxies(mode, min_fails=3):
+    """Delete proxies that are known bad. Returns how many rows were removed.
+
+    Deliberately narrow: each mode names a condition that can be checked from stored
+    data, so the assistant cannot be talked into a broad DELETE. An unrecognised mode
+    removes nothing.
+
+      unhealthy   status is unhealthy or banned
+      failing     fail_count >= min_fails AND never succeeded
+      unroutable  addresses that can never reach the internet from this host
+    """
+    if mode == "unhealthy":
+        sql = "DELETE FROM proxies WHERE status IN ('unhealthy','banned')"
+        params = ()
+    elif mode == "failing":
+        sql = ("DELETE FROM proxies WHERE COALESCE(fail_count,0) >= ? "
+               "AND COALESCE(success_count,0) = 0")
+        params = (max(1, int(min_fails)),)
+    elif mode == "unroutable":
+        sql = ("DELETE FROM proxies WHERE url LIKE '%0.0.0.0%' OR url LIKE '%127.0.0.%' "
+               "OR url LIKE '%localhost%' OR url LIKE '%://192.168.%' OR url LIKE '%://10.%' "
+               "OR url LIKE '%://172.16.%' OR url LIKE '%://172.17.%' "
+               "OR url LIKE '%://169.254.%' OR url LIKE '%:0'")
+        params = ()
+    else:
+        return 0
+    with _lock:
+        c = conn()
+        cur = c.execute(sql, params)
+        c.commit()
+        return cur.rowcount
+
+
 def proxy_counts():
     with _lock:
         rows = conn().execute("SELECT status, COUNT(*) as cnt FROM proxies GROUP BY status").fetchall()
