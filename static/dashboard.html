@@ -49,7 +49,10 @@ header{display:flex;align-items:center;gap:13px;margin:4px 4px 22px;animation:ri
 .tab[data-t="filters"].active{background:linear-gradient(145deg,var(--c-pink),var(--c-pink-d));color:#fff;box-shadow:0 4px 12px rgba(195,90,147,.32)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:15px;box-shadow:var(--shadow);animation:rise .5s ease both;transform:translateZ(0);overflow:hidden}
 .card.csel-lift{z-index:10}
-.card h2{margin:0 0 3px;font-size:16px;font-weight:700;display:flex;align-items:center;gap:9px}
+.card h2{margin:0 0 3px;font-size:16px;font-weight:700;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+/* A header that carries a count AND an action needs the title to be able to shrink,
+   or on a narrow screen the button gets pushed out of the card. */
+.card h2>span:not(.ic){min-width:0}
 .card h2 .ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;background:var(--g-100)}
 .card h2 .ic svg{width:17px;height:17px;stroke:var(--g-600)}
 [data-p="timers"] .ic{background:var(--c-mint)}[data-p="timers"] .ic svg{stroke:var(--c-mint-d)}
@@ -75,10 +78,18 @@ input.wide,textarea.wide{width:100%;text-align:left}
 .csel.open .csel-btn::after{transform:translateY(-35%) rotate(-135deg)}
 .csel.open .csel-btn{border-color:var(--c-mint-d);box-shadow:0 0 0 3px rgba(63,158,120,.16)}
 .csel-dot{width:9px;height:9px;border-radius:50%;flex:none}
-.csel-pop{position:absolute;top:calc(100% + 7px);left:0;right:0;min-width:200px;background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(40,70,90,.18);padding:6px;z-index:999;opacity:0;transform:translateY(-8px) scale(.97);pointer-events:none;transition:.2s cubic-bezier(.2,.8,.2,1);max-height:260px;overflow:auto;scrollbar-width:none}
+.csel-pop{position:absolute;top:calc(100% + 7px);left:0;right:0;min-width:200px;background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(40,70,90,.18);padding:6px;z-index:999;opacity:0;transform:translateY(-6px) scale(.98);pointer-events:none;
+  /* opacity+transform ONLY. A bare `transition:.2s` also animates top/left, so the
+     popup slid across the screen from its previous position every time it opened. */
+  transition:opacity .18s cubic-bezier(.2,.8,.2,1),transform .18s cubic-bezier(.2,.8,.2,1);
+  transform-origin:top center;max-height:260px;overflow:auto;scrollbar-width:none}
 .csel-pop::-webkit-scrollbar{display:none}
 .csel.open .csel-pop{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
-.csel-opt{padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;display:flex;align-items:center;gap:9px;transition:background .14s,color .14s}
+/* The panel animates with scaleY, which would squash the labels; fade the rows in
+   instead of letting them stretch. */
+.csel-pop>.csel-opt{opacity:0;transition:opacity .16s ease .04s}
+.csel.open .csel-pop>.csel-opt{opacity:1}
+.csel-opt{padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;display:flex;align-items:center;gap:9px;transition:background .14s,color .14s,opacity .16s ease .04s}
 .csel-opt:hover{background:var(--g-50);color:var(--ink)}
 /* Only ONE option may look chosen. Hover is a lighter tint than .sel so the two are
    never confusable — previously both read as the same green and looked co-selected. */
@@ -222,9 +233,11 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .ro-chip.warn{background:#fdf3e0;color:#a9761a}
 /* Save / Discard sit side by side and only appear when there IS a draft, so the
    panel isn't dominated by two full-width buttons at rest. */
-.robar{display:flex;gap:8px;align-items:center;margin-top:11px}
-.robar .btn{flex:1 1 0;min-width:0;font-size:12.5px;padding:9px 12px}
-.robar .csel{flex:0 0 auto;margin-left:auto;min-width:118px}
+.robar{display:flex;gap:9px;align-items:center;margin-top:12px}
+/* 44px min height: these are the only two controls in the row and they are pressed on
+   a phone, where the old 9px padding gave a ~34px target. */
+.robar .btn{flex:1 1 0;min-width:0;font-size:13.5px;padding:13px 14px;min-height:46px}
+.robar.clean{margin-top:0}
 .robar.clean .rodraft{display:none}
 .rohint{font-size:10.5px;color:var(--ink-faint);margin-top:8px;line-height:1.5}
 /* Count line for the endpoints this panel deliberately does not list. */
@@ -281,6 +294,17 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .fl .opt{font-weight:600;color:var(--ink-faint);font-size:10px;letter-spacing:.2px;text-transform:uppercase;margin-left:5px}
 /* Grouped section inside a modal: a heading, one explanatory line, then the fields.
    Keeps a long form readable without turning every field into a card. */
+/* Primary action in the card header, beside the count it adds to — reachable without
+   scrolling past a list that can hold a dozen rows. */
+.addbtn{font:inherit;font-size:12px;font-weight:700;padding:7px 12px;margin-left:9px;border-radius:9px;border:1px solid var(--g-300);background:var(--g-50);color:var(--g-700);cursor:pointer;display:inline-flex;align-items:center;gap:5px;flex:none;min-height:34px;transition:background .15s,border-color .15s}
+.addbtn:hover{background:var(--g-100);border-color:var(--g-400)}
+.addbtn:active{transform:scale(.97)}
+.addbtn svg{width:13px;height:13px;flex:none}
+/* Collapsed endpoint list. A tall list pushed Routing Order — the panel you read —
+   off-screen entirely, so past the 4th row the rest is folded behind a count. */
+.eplist.collapsed .ep:nth-child(n+5){display:none}
+.epmore{font:inherit;font-size:12px;font-weight:700;width:100%;margin-top:8px;padding:11px;border-radius:11px;border:1px dashed var(--g-300);background:transparent;color:var(--g-700);cursor:pointer;transition:background .15s}
+.epmore:hover{background:var(--g-50)}
 .fsect{margin-top:20px;padding-top:15px;border-top:1px solid var(--line)}
 .fsect-hd{font-size:13.5px;font-weight:720;color:var(--ink);margin-bottom:3px}
 .fsect-sub{font-size:11px;color:var(--ink-faint);line-height:1.55;margin-bottom:10px}
@@ -343,8 +367,14 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .loginbox p{margin:0 0 20px;font-size:12.5px;color:var(--ink-faint)}
 .loginbox input{width:100%;text-align:left;margin-bottom:12px}
 .err{color:#c0392b;font-size:12px;margin:-6px 0 12px;min-height:14px}
-.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(80px);background:#1d2a33;color:#fff;padding:12px 20px;border-radius:13px;font-size:13.5px;font-weight:600;box-shadow:0 12px 36px rgba(0,0,0,.28);z-index:200;opacity:0;transition:.32s;max-width:90%;text-align:center}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(80px);background:#1d2a33;color:#fff;padding:12px 20px;border-radius:13px;font-size:13.5px;font-weight:600;box-shadow:0 12px 36px rgba(0,0,0,.28);
+  /* above .modal (1000) and the csel popup (99999) — a confirmation is useless if the
+     surface that triggered it covers it up */
+  z-index:100000;opacity:0;transition:opacity .32s,transform .32s;max-width:calc(100% - 32px);text-align:center;
+  line-height:1.45;word-break:break-word}
 .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.toast.ok{background:#16543a}
+.toast.bad{background:#7d2b28}
 .toast.ok{background:linear-gradient(145deg,var(--g-500),var(--g-600))}.toast.bad{background:linear-gradient(145deg,#d35a5a,#b83f3f)}
 footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px}
 @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
@@ -516,11 +546,14 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div id="activeEpInfo" style="font-size:12px;color:var(--ink-faint);padding:8px 2px 2px;line-height:1.55"></div>
 </div>
 <div class="card">
-<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints <span id="epCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span></h2>
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints
+  <span id="epCount" style="margin-left:auto;font-size:12px;color:var(--ink-faint);font-weight:600"></span>
+  <button class="addbtn" id="openAddEp" title="Add an endpoint" aria-label="Add an endpoint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add</button>
+</h2>
 <p class="sub">Where the gateway forwards. Set one as primary; if it fails all retries the next is tried, then it loops back to primary.</p>
 <div class="field"><div class="meta"><div class="lbl">Claude Code Mimicry</div><div class="desc">A-to-Z exact mimicry (NodeJS + Claude-CLI). Overwrites client fingerprint headers. Keep ON if upstream strictly checks for real Claude Code.</div></div><div class="ctrl"><div class="tg" id="tgMimicry"></div></div></div>
-<div id="epList" style="margin-top:6px"></div>
-<button class="btn" id="openAddEp" style="margin-top:12px">+ Add endpoint</button>
+<div id="epList" class="eplist" style="margin-top:6px"></div>
+<button class="epmore" id="epMore" hidden></button>
 </div>
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M3 6h13M3 12h9M3 18h5M17 15l3 3 3-3"/></svg></span>Routing Order <span id="roWindow" style="margin-left:auto;font-size:11px;color:var(--ink-faint);font-weight:600"></span></h2>
@@ -529,7 +562,6 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="robar clean" id="roBar">
   <button class="btn rodraft" id="roSave" disabled>Save order</button>
   <button class="btn ghost rodraft" id="roReset" disabled>Discard</button>
-  <div class="csel" id="roRange" data-val="86400"><button class="csel-btn">Last 24h</button><div class="csel-pop"><div class="csel-opt" data-v="3600">Last 1h</div><div class="csel-opt" data-v="21600">Last 6h</div><div class="csel-opt sel" data-v="86400">Last 24h</div><div class="csel-opt" data-v="604800">Last 7d</div></div></div>
 </div>
 <div class="rohint" id="roHint"></div>
 </div>
@@ -805,29 +837,30 @@ function initCsel(cs){
       // popup (min-width 200px) off-screen and its options became unreachable.
       const popW=Math.max(r.width,200);
       const left=Math.max(8,Math.min(r.left,window.innerWidth-popW-8));
-      // Open upward when there isn't room below, so a trigger near the bottom of the
-      // screen doesn't put its options off-screen.
+      // Open upward only when there genuinely isn't room below.
       const spaceBelow=window.innerHeight-r.bottom;
       const up=spaceBelow<190&&r.top>spaceBelow;
-      const top=up?(window.scrollY+r.top-7):(window.scrollY+r.bottom+7);
-      const base=`position:absolute;left:${window.scrollX+left}px;width:${r.width}px;`
-        +`min-width:${popW}px;z-index:99999;pointer-events:auto;`
-        +(up?`top:${top}px;`:`top:${top}px;`);
-      // Two frames: paint the closed state first so the transition has a start value.
-      // Assigning the final transform in the same frame gave the browser nothing to
-      // animate from, which is why the menu looked like it fell in from above.
-      // Upward: sit the popup's BOTTOM on the trigger's top edge. translateY(-100%)
-      // resolves against the popup's own height, unlike a percentage margin (which
-      // would resolve against <body>).
-      const rest=up?'translateY(-100%)':'translateY(0)';
-      const from=up?'translateY(calc(-100% + 6px))':'translateY(-6px)';
-      pop.style.cssText=base
-        +(up?'transform-origin:bottom center;':'transform-origin:top center;')
-        +`opacity:0;transform:${from} scale(.98);`;
+
+      // The panel must GROW OUT OF the button, so it is anchored to the button's own
+      // edge and scaled from there. Two things used to break that: `transition:.2s`
+      // animated top/left as well (so it slid in from wherever it last sat), and the
+      // final transform was set in the same frame as the move, leaving no start value.
+      // Position first with animation suppressed, then release it next frame.
+      pop.style.transition='none';
+      pop.style.cssText=`position:absolute;`
+        +`left:${window.scrollX+left}px;top:${window.scrollY+(up?r.top-6:r.bottom+6)}px;`
+        +`width:${r.width}px;min-width:${popW}px;z-index:99999;pointer-events:auto;`
+        +`transition:none;`
+        +`transform-origin:${up?'bottom':'top'} center;`
+        // scaleY only: the panel unfolds from the button's edge rather than sliding.
+        +`opacity:0;transform:${up?'translateY(-100%) ':''}scaleY(.55);`;
+      // Force layout so the closed state is a real starting point, not coalesced away.
+      void pop.offsetHeight;
       requestAnimationFrame(()=>{
         if(!cs.classList.contains('open'))return;
+        pop.style.transition='opacity .17s cubic-bezier(.2,.8,.2,1),transform .19s cubic-bezier(.2,.8,.2,1)';
         pop.style.opacity='1';
-        pop.style.transform=`${rest} scale(1)`;
+        pop.style.transform=(up?'translateY(-100%) ':'')+'scaleY(1)';
       });
     }
   };
@@ -1012,7 +1045,7 @@ function render(){
   $$('.csel').forEach(initCsel);
   const ps=$('#prxShow');if(ps){ps._cb=v=>{PRX.show=v;PRX.page=0;loadProxies();};}
   if(PRX.rows===null&&!PRX.loading)loadProxies();
-  const rr=$('#roRange');if(rr){rr._cb=v=>{RO.window=+v||86400;loadRouting();};}
+
   if(!RO.data&&!RO.loading)loadRouting();
   if(!_hpInterval)_hpPoll();
 }
@@ -1079,6 +1112,10 @@ ${isPin?'<span class="badge pin">Pinned</span>':''}
   });
 }
 function epName(e){return e.name||e.url.replace(/^https?:\/\//,'');}
+// Collapse state for the endpoint list, kept outside render() so a background refresh
+// cannot silently re-fold a list the operator just expanded.
+const EPX={collapsed:undefined};
+
 // Primary key plus any spares. Counts only, never values.
 function epKeyCount(e){
   let n=(e.api_key||'').trim()?1:0;
@@ -1110,6 +1147,25 @@ function renderEndpoints(){
   }).join('');
   $('#epList').innerHTML=h;
 
+  // Fold anything past the 4th row. The list is a management surface, not the thing
+  // being monitored — leaving 12 rows expanded pushed Routing Order off-screen.
+  const EP_VISIBLE=4;
+  const list=$('#epList'), more=$('#epMore');
+  if(more){
+    if(eps.length>EP_VISIBLE){
+      if(EPX.collapsed===undefined)EPX.collapsed=true;
+      list.classList.toggle('collapsed',EPX.collapsed);
+      more.hidden=false;
+      more.textContent=EPX.collapsed
+        ? `Show ${eps.length-EP_VISIBLE} more endpoint${eps.length-EP_VISIBLE>1?'s':''}`
+        : 'Show fewer';
+      more.onclick=()=>{EPX.collapsed=!EPX.collapsed;renderEndpoints();};
+    }else{
+      list.classList.remove('collapsed');
+      more.hidden=true;
+    }
+  }
+
   $$('#epList [data-eptg]').forEach(b=>b.onclick=async()=>{
     const e=eps.find(x=>x.id==b.dataset.eptg);
     try{await api('/admin/endpoint/update',{id:+b.dataset.eptg,enabled:e.enabled?0:1});toast('Endpoint '+(e.enabled?'OFF':'ON'),'ok');await refresh();await loadRouting();}
@@ -1136,6 +1192,8 @@ function renderEndpoints(){
    visible signal was the primary star, so fallback order was invisible. RO holds
    a draft order the operator can rearrange; nothing is persisted until Save,
    and `pending` guards against a background refresh wiping an unsaved draft. */
+// window is fixed at 24h: the picker that varied it scoped nothing the operator acts
+// on — the try-order is the same whichever window the stats are read over.
 let RO={data:null,draft:null,window:86400,pending:false,sortable:null,loading:false};
 
 async function loadRouting(){
@@ -1217,7 +1275,7 @@ function renderRouting(){
       `<div class="ro-off-note">${offCount} disabled endpoint${offCount>1?'s':''} hidden — manage under <b>Upstream endpoints</b></div>`);
   }
 
-  $('#roWindow').textContent=RO.data.active_count+' active · '+(RO.window>=86400?(RO.window/86400)+'d':(RO.window/3600)+'h')+' stats';
+  $('#roWindow').textContent=RO.data.active_count+' active · 24h stats';
   $('#roSave').disabled=!dirty;
   $('#roReset').disabled=!dirty;
   // The two draft buttons only exist while there IS a draft — at rest the panel is
