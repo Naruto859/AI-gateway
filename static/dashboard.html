@@ -360,44 +360,62 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
    widgets instead of one composer. Separation comes from a soft shadow rather than a
    hard border, and the corner radius follows the card token so it belongs to this
    design rather than looking bolted on. */
-.cmpwrap{padding:10px 12px 12px;background:linear-gradient(180deg,rgba(255,255,255,0),#fff 42%)}
-.composer{display:flex;flex-direction:column;gap:8px;padding:10px 10px 8px;border-radius:20px;
+.cmpwrap{padding:8px 12px 12px;background:linear-gradient(180deg,rgba(255,255,255,0),#fff 40%)}
+/* Single row at rest: attach · field · send, so an empty composer is ONE line tall
+   instead of a two-row block. It was ~110px for one line of text because the field and
+   the control bar stacked. */
+.composer{display:flex;flex-direction:column;gap:6px;padding:5px 6px;border-radius:22px;
   background:#fff;border:1px solid var(--line);
   box-shadow:0 1px 2px rgba(40,60,80,.04),0 6px 18px -6px rgba(40,70,90,.14);
   transition:border-color .18s,box-shadow .18s}
-/* The whole surface reacts to focus, not just the textarea inside it. */
 .composer:focus-within{border-color:var(--g-400);box-shadow:0 1px 2px rgba(40,60,80,.04),0 8px 24px -8px rgba(31,138,86,.28)}
-.composer textarea{border:none;outline:none;background:transparent;resize:none;font:inherit;
-  font-size:14px;line-height:1.5;color:var(--ink);padding:4px 6px 0;min-height:24px;max-height:132px;
-  overflow-y:auto;overscroll-behavior:contain;width:100%}
-.composer textarea::placeholder{color:var(--ink-faint)}
-.cmpbar{display:flex;align-items:center;gap:6px}
-.cmpspacer{flex:1}
-.cmpbtn{width:32px;height:32px;flex:none;border:none;border-radius:50%;background:transparent;
+/* items-end keeps the buttons pinned to the bottom line as the text grows, rather than
+   drifting to the middle of a tall field. */
+.cmprow{display:flex;align-items:flex-end;gap:4px}
+
+/* The field is wrapped so the fade can be painted on the wrapper: a mask on the
+   scrolling element itself would travel with the content. */
+.cmpfield{position:relative;flex:1;min-width:0}
+.cmpfield textarea{display:block;width:100%;border:none;outline:none;background:transparent;resize:none;
+  font:inherit;font-size:14px;line-height:1.5;color:var(--ink);padding:8px 4px;
+  min-height:36px;max-height:132px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+.cmpfield textarea::-webkit-scrollbar{display:none}
+.cmpfield textarea::placeholder{color:var(--ink-faint)}
+/* Past the cap the text scrolls; fade the TOP edge so it dissolves upward instead of
+   being sliced off. Applied only while scrollable, so a short message has no fade.
+   Bottom stays crisp — that is the line being typed. */
+.cmpfield.over::before{content:"";position:absolute;left:0;right:0;top:0;height:26px;pointer-events:none;
+  background:linear-gradient(180deg,#fff 15%,rgba(255,255,255,0));
+  border-radius:18px 18px 0 0;opacity:0;transition:opacity .22s ease}
+.cmpfield.over.fade::before{opacity:1}
+
+.cmpbtn{width:34px;height:34px;flex:none;border:none;border-radius:50%;background:transparent;
   color:var(--ink-faint);cursor:pointer;display:grid;place-items:center;padding:0;
   transition:background .15s,color .15s,transform .12s}
 .cmpbtn svg{width:17px;height:17px;display:block}
 .cmpbtn:hover{background:var(--g-50);color:var(--g-700)}
 .cmpbtn:active{transform:scale(.9)}
 .cmpbtn:focus-visible{outline:2px solid var(--g-400);outline-offset:2px}
-/* Send is state-driven: grey and unusable until there is something to send, so the
-   control tells you whether pressing it will do anything. */
+/* Send is state-driven: grey and unusable until there is something to send. */
 .cmpbtn.send{background:#e9edf0;color:#a3b0b9;box-shadow:none}
 .cmpbtn.send:hover{background:#e9edf0;color:#a3b0b9}
 .cmpbtn.send.ready{background:linear-gradient(145deg,var(--g-500),var(--g-600));color:#fff;
   box-shadow:0 2px 9px rgba(31,138,86,.32)}
 .cmpbtn.send.ready:hover{background:linear-gradient(145deg,var(--g-600),#15633f);color:#fff}
 .cmpbtn.send:disabled{cursor:default}
-/* Attachment chips sit above the field, inside the same surface. */
-.attrow{display:flex;flex-wrap:wrap;gap:6px;padding:1px 2px 0}
+/* The paper plane leans; nudge it back to optical centre inside the circle. */
+.cmpbtn.send svg{transform:translate(-1px,1px)}
+
+/* Attachment chips sit above the row, inside the same surface. */
+.attrow{display:flex;flex-wrap:wrap;gap:6px;padding:4px 4px 0}
 .attchip{display:inline-flex;align-items:center;gap:6px;max-width:100%;font-size:11px;font-weight:640;padding:5px 6px 5px 10px;border-radius:999px;background:var(--g-50);border:1px solid var(--g-300);color:var(--g-700)}
 .attchip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px}
 .attchip .sz{color:var(--ink-faint);font-weight:600;flex:none}
 .attchip .rm{width:17px;height:17px;flex:none;border:none;border-radius:50%;background:transparent;color:var(--ink-faint);cursor:pointer;font-size:13px;line-height:1;display:grid;place-items:center}
 .attchip .rm:hover{background:#fee2e2;color:#dc2626}
-/* Small meta line inside the composer bar (model · mode), replacing the banner bubble
-   that used to sit glued to the top of the field. */
-.cmphint{font-size:10.5px;font-weight:640;color:var(--ink-faint);padding-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
+/* Endpoint-chat meta (model · mode) under the row, quiet and out of the way. */
+.cmpmeta{font-size:10px;font-weight:640;color:var(--ink-faint);padding:0 8px 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmpmeta:empty{display:none}
 /* Empty-state line for a chat with no messages yet: centred, quiet, and it gives the log
    somewhere to breathe instead of starting flush against the composer. */
 .chatempty{margin:auto;text-align:center;font-size:11.5px;line-height:1.6;color:var(--ink-faint);max-width:250px;padding:20px 8px}
@@ -789,14 +807,11 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="chatlog" id="chatLog"></div>
 <div class="cmpwrap">
   <div class="composer">
-    <textarea id="chatInput" placeholder="Send a test message…" rows="1"></textarea>
-    <div class="cmpbar">
-      <span class="cmphint" id="chatMeta"></span>
-      <span class="cmpspacer"></span>
-      <button class="cmpbtn send" id="chatSend" type="button" title="Send" aria-label="Send" disabled>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M6 12l6-6 6 6"/></svg>
-      </button>
+    <div class="cmprow">
+      <div class="cmpfield"><textarea id="chatInput" placeholder="Send a test message…" rows="1"></textarea></div>
+      <button class="cmpbtn send" id="chatSend" type="button" title="Send" aria-label="Send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.3 11.6 20 5.2a.6.6 0 0 1 .8.8l-6.4 15.7a.6.6 0 0 1-1.1 0l-2.6-6.4a.6.6 0 0 0-.34-.34l-6.4-2.6a.6.6 0 0 1 0-1.1Z"/><path d="M20.6 5.4 10.9 15.1"/></svg></button>
     </div>
+    <div class="cmpmeta" id="chatMeta"></div>
   </div>
 </div>
 </div>
@@ -836,16 +851,13 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="cmpwrap">
   <div class="composer" id="agentComposer">
     <div class="attrow" id="agentAttRow" hidden></div>
-    <textarea id="agentInput" placeholder="Ask Mugen anything…" rows="1"></textarea>
-    <input type="file" id="agentFile" accept="image/*,.txt,.md,.json,.csv,.log,.yml,.yaml" style="display:none">
-    <div class="cmpbar">
+    <div class="cmprow">
       <button class="cmpbtn" id="agentAttach" type="button" title="Attach a file" aria-label="Attach a file">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 11.5l-8.5 8.5a5.1 5.1 0 01-7.2-7.2l8.9-8.9a3.4 3.4 0 014.8 4.8l-8.9 8.9a1.7 1.7 0 01-2.4-2.4l8.2-8.2"/></svg>
       </button>
-      <span class="cmpspacer"></span>
-      <button class="cmpbtn send" id="agentSend" type="button" title="Send" aria-label="Send" disabled>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M6 12l6-6 6 6"/></svg>
-      </button>
+      <input type="file" id="agentFile" accept="image/*,.txt,.md,.json,.csv,.log,.yml,.yaml" style="display:none">
+      <div class="cmpfield"><textarea id="agentInput" placeholder="Ask Mugen anything…" rows="1"></textarea></div>
+      <button class="cmpbtn send" id="agentSend" type="button" title="Send" aria-label="Send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.3 11.6 20 5.2a.6.6 0 0 1 .8.8l-6.4 15.7a.6.6 0 0 1-1.1 0l-2.6-6.4a.6.6 0 0 0-.34-.34l-6.4-2.6a.6.6 0 0 1 0-1.1Z"/><path d="M20.6 5.4 10.9 15.1"/></svg></button>
     </div>
   </div>
 </div>
@@ -2264,6 +2276,7 @@ function chatErrText(r){
 $('#chatSend').onclick=chatSend;
 $('#chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chatSend();}});
 $('#chatInput').addEventListener('input',e=>{autoGrow(e.target);syncChatSend();});
+$('#chatInput').addEventListener('scroll',e=>autoGrow(e.target));
 
 // ============ EMBEDDED AGENT ============
 let AG={cfg:JSON.parse(localStorage.getItem('mr_agent')||'{}'),msgs:[],att:[],welcomed:false,busy:false};
@@ -2455,8 +2468,19 @@ function agentErrText(m){
 // while being typed instead of scrolling inside one line.
 function autoGrow(el){
   if(!el)return;
+  const CAP=132;
   el.style.height='auto';
-  el.style.height=Math.min(el.scrollHeight,132)+'px';
+  const want=el.scrollHeight;
+  el.style.height=Math.min(want,CAP)+'px';
+  // Once the text outgrows the cap it scrolls. Fade the top edge so the overflow
+  // dissolves upward instead of being cut mid-letter; the fade itself is only mounted
+  // while scrollable, so a short message has no gradient sitting over it.
+  const wrap=el.parentNode;
+  if(!wrap||!wrap.classList.contains('cmpfield'))return;
+  const over=want>CAP+1;
+  wrap.classList.toggle('over',over);
+  // Hide the fade when scrolled to the very top — there is nothing above to dissolve.
+  wrap.classList.toggle('fade',over&&el.scrollTop>2);
 }
 
 // The send button reflects whether pressing it would do anything — grey when there is
@@ -2472,6 +2496,7 @@ function syncSend(){
 $('#agentSend').onclick=agentSend;
 $('#agentInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();agentSend();}});
 $('#agentInput').addEventListener('input',e=>{autoGrow(e.target);syncSend();});
+$('#agentInput').addEventListener('scroll',e=>autoGrow(e.target));
 syncAgentCfgUI();syncSend();$$('#agentSettings .csel').forEach(initCsel);
 $('#agentSdk')&&($('#agentSdk')._cb=v=>{AG.cfg.sdk=v;});
 
