@@ -415,7 +415,7 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .cmpbtn{width:36px;height:36px;flex:none;border:none;border-radius:50%;background:transparent;
   color:var(--ink-faint);cursor:pointer;display:grid;place-items:center;padding:0;
   transition:background .15s,color .15s,transform .12s}
-.cmpbtn svg{width:17px;height:17px;display:block}
+.cmpbtn svg{width:19px;height:19px;display:block}
 .cmpbtn:hover{background:var(--g-50);color:var(--g-700)}
 .cmpbtn:active{transform:scale(.9)}
 .cmpbtn:focus-visible{outline:2px solid var(--g-400);outline-offset:2px}
@@ -431,19 +431,24 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .cmpbtn.send:disabled{cursor:default}
 /* A vertically symmetrical arrow sits on the true centre — no optical nudge needed,
    unlike the paper plane it replaced. */
-.cmpbtn.send svg{width:18px;height:18px}
+.cmpbtn.send svg{width:19px;height:19px}
 
 /* Attachment chips sit above the row, inside the same surface. */
 /* Chips stay centred as the composer grows: the column centres them, and the row itself
-   centres its own wrapped lines rather than left-packing them. */
+   centres its own wrapped lines rather than left-packing them.
+   `[hidden]` must be restated: a `display:flex` rule outranks the UA's `display:none` for
+   the hidden attribute, so the EMPTY row was still laid out as a 4px strip above the
+   field — which pushed the text off the buttons' centre line at rest, and self-corrected
+   once something was pasted. */
 .attrow{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px;padding:4px 4px 0}
+.attrow[hidden]{display:none}
 .attchip{display:inline-flex;align-items:center;gap:6px;max-width:100%;font-size:11px;font-weight:640;line-height:17px;padding:4px 5px 4px 10px;border-radius:999px;background:var(--g-50);border:1px solid var(--g-300);color:var(--g-700)}
 .attchip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px}
 .attchip .sz{color:var(--ink-faint);font-weight:600;flex:none}
 .attchip .rm{width:17px;height:17px;flex:none;border:none;border-radius:50%;background:transparent;color:var(--ink-faint);cursor:pointer;font-size:13px;line-height:1;display:grid;place-items:center}
 .attchip .rm:hover{background:#fee2e2;color:#dc2626}
 /* Endpoint-chat meta (model · mode) under the row, quiet and out of the way. */
-.cmpmeta{display:flex;align-items:center;font-size:10px;font-weight:640;line-height:14px;color:var(--ink-faint);padding:0 10px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmpmeta{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:640;line-height:14px;color:var(--ink-faint);padding:7px 10px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cmpmeta:empty{display:none}
 /* Empty-state line for a chat with no messages yet: centred, quiet, and it gives the log
    somewhere to breathe instead of starting flush against the composer. */
@@ -492,6 +497,15 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .apsettings{padding:14px 16px 16px;background:#fff;display:none;flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
 .agentpanel.cfg .apsettings{display:block}
 .agentpanel.cfg .chatlog,.agentpanel.cfg .cmpwrap{display:none}
+/* In settings mode the panel takes the full available height. At its chat height the
+   settings content ended partway down and the page behind showed through under the panel's
+   rounded bottom, which read as the settings being "half open" and cutting the content
+   beneath. Nothing behind it competes now. */
+.agentpanel.cfg{height:calc(100vh - 84px)}
+/* Push the actions to the bottom of that taller body rather than leaving them stranded
+   halfway with empty white below. */
+.agentpanel.cfg .apsettings{display:flex;flex-direction:column}
+.agentpanel.cfg .apfoot{margin-top:auto}
 /* A full-body mode needs a visible way out; the gear alone is not discoverable. */
 .apback{margin:-2px 0 12px}
 .apbackbtn{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:11.5px;font-weight:700;color:var(--g-700);background:transparent;border:none;padding:4px 6px 4px 2px;border-radius:8px;cursor:pointer}
@@ -844,8 +858,10 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
       <div class="cmpfield"><textarea id="chatInput" placeholder="Send a test message…" rows="1"></textarea></div>
       <button class="cmpbtn send" id="chatSend" type="button" title="Send" aria-label="Send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19.5V5.5"/><path d="M5.5 12 12 5.5 18.5 12"/></svg></button>
     </div>
-    <div class="cmpmeta" id="chatMeta"></div>
   </div>
+  <!-- Outside the capsule on purpose: as a sibling INSIDE it, this line added height below
+       the row, so the arrow read as sitting above the capsule's centre. -->
+  <div class="cmpmeta" id="chatMeta"></div>
 </div>
 </div>
 </div>
