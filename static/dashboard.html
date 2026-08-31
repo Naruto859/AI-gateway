@@ -375,9 +375,15 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 /* Focus lifts the whole capsule rather than ringing the field inside it. */
 .composer:focus-within{border-color:rgba(63,158,120,.34);
   box-shadow:0 1px 2px rgba(40,60,80,.05),0 10px 28px -8px rgba(31,138,86,.24)}
-/* items-end keeps the buttons pinned to the bottom line as the text grows, rather than
-   drifting to the middle of a tall field. */
-.cmprow{display:flex;align-items:flex-end;gap:4px}
+/* Alignment, measured rather than eyeballed: at 14px/1.5 with 9px padding the text's
+   optical centre sat 19.5px above the row's bottom edge while the 34px and 36px buttons
+   centred at 17px and 18px — so the placeholder rode ~2px high and the two buttons did
+   not even agree with each other.
+   Fixed by geometry, not by nudging: both buttons are 36px, the single-line field is
+   exactly 36px tall, and the row centres them. `.grown` switches to bottom-alignment
+   once the text has actually wrapped, which is where pinning to the last line is right. */
+.cmprow{display:flex;align-items:center;gap:4px}
+.cmprow.grown{align-items:flex-end}
 
 /* The field is wrapped so the fade can be painted on the wrapper: a mask on the
    scrolling element itself would travel with the content. */
@@ -386,8 +392,10 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
    surface inside the capsule. */
 .cmpfield textarea{display:block;width:100%;border:none;outline:none;background:none;box-shadow:none;
   border-radius:0;resize:none;
-  font:inherit;font-size:14px;line-height:1.5;color:var(--ink);padding:9px 6px;
-  min-height:38px;max-height:132px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+  /* 20px line-box + 8px top + 8px bottom = 36px, matching the buttons exactly, so a
+     single line of text shares their centre line. */
+  font:inherit;font-size:14px;line-height:20px;color:var(--ink);padding:8px 6px;
+  min-height:36px;max-height:132px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
 .cmpfield textarea:focus{border:none;outline:none;box-shadow:none}
 .cmpfield textarea::-webkit-scrollbar{display:none}
 .cmpfield textarea::placeholder{color:var(--ink-faint)}
@@ -399,7 +407,7 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
   border-radius:24px 24px 0 0;opacity:0;transition:opacity .22s ease}
 .cmpfield.over.fade::before{opacity:1}
 
-.cmpbtn{width:34px;height:34px;flex:none;border:none;border-radius:50%;background:transparent;
+.cmpbtn{width:36px;height:36px;flex:none;border:none;border-radius:50%;background:transparent;
   color:var(--ink-faint);cursor:pointer;display:grid;place-items:center;padding:0;
   transition:background .15s,color .15s,transform .12s}
 .cmpbtn svg{width:17px;height:17px;display:block}
@@ -409,7 +417,7 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 /* Send is state-driven, but never a dead grey weight: at rest it is a soft tint of the
    accent (the way Gemini's is a pale blue), and it fills in once there is something to
    send. Same idea as their disabled/active pair, in our green. */
-.cmpbtn.send{width:36px;height:36px;background:var(--g-100);color:var(--g-600);box-shadow:none;
+.cmpbtn.send{background:var(--g-100);color:var(--g-600);box-shadow:none;
   transition:background .2s,color .2s,box-shadow .2s,transform .12s}
 .cmpbtn.send:hover{background:var(--g-100);color:var(--g-600)}
 .cmpbtn.send.ready{background:linear-gradient(150deg,var(--g-500),var(--g-600));color:#fff;
@@ -422,17 +430,19 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 
 /* Attachment chips sit above the row, inside the same surface. */
 .attrow{display:flex;flex-wrap:wrap;gap:6px;padding:4px 4px 0}
-.attchip{display:inline-flex;align-items:center;gap:6px;max-width:100%;font-size:11px;font-weight:640;padding:5px 6px 5px 10px;border-radius:999px;background:var(--g-50);border:1px solid var(--g-300);color:var(--g-700)}
+.attchip{display:inline-flex;align-items:center;gap:6px;max-width:100%;font-size:11px;font-weight:640;line-height:17px;padding:4px 5px 4px 10px;border-radius:999px;background:var(--g-50);border:1px solid var(--g-300);color:var(--g-700)}
 .attchip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px}
 .attchip .sz{color:var(--ink-faint);font-weight:600;flex:none}
 .attchip .rm{width:17px;height:17px;flex:none;border:none;border-radius:50%;background:transparent;color:var(--ink-faint);cursor:pointer;font-size:13px;line-height:1;display:grid;place-items:center}
 .attchip .rm:hover{background:#fee2e2;color:#dc2626}
 /* Endpoint-chat meta (model · mode) under the row, quiet and out of the way. */
-.cmpmeta{font-size:10px;font-weight:640;color:var(--ink-faint);padding:0 8px 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmpmeta{display:flex;align-items:center;font-size:10px;font-weight:640;line-height:14px;color:var(--ink-faint);padding:0 10px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cmpmeta:empty{display:none}
 /* Empty-state line for a chat with no messages yet: centred, quiet, and it gives the log
    somewhere to breathe instead of starting flush against the composer. */
-.chatempty{margin:auto;text-align:center;font-size:11.5px;line-height:1.6;color:var(--ink-faint);max-width:250px;padding:20px 8px}
+/* margin:auto centres it within the flex column; the explicit self-centring keeps it
+   horizontally centred too regardless of the column's align rules. */
+.chatempty{margin:auto;align-self:center;text-align:center;font-size:11.5px;line-height:1.6;color:var(--ink-faint);max-width:250px;padding:16px 8px}
 /* NOTE: the old `.chatin` / `.cmprow textarea` rules used to live here. They were left
    behind by the two-row layout and still painted a border and radius on the field — and
    being later in the sheet they beat `.cmpfield textarea`, which is exactly the
@@ -461,13 +471,13 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .aphd{display:flex;align-items:center;gap:11px;padding:14px 14px 13px;
   background:linear-gradient(180deg,var(--g-50),rgba(240,250,244,0));
   border-bottom:1px solid rgba(90,120,150,.10)}
-.apicon{width:32px;height:32px;border-radius:9px;background:#fff;color:var(--ink-faint);cursor:pointer;flex:none;border:1px solid var(--line);display:grid;place-items:center;padding:0;font-size:17px;line-height:1;transition:background .15s,color .15s,border-color .15s}
+.apicon{width:34px;height:34px;border-radius:11px;background:#fff;color:var(--ink-faint);cursor:pointer;flex:none;border:1px solid var(--line);display:grid;place-items:center;padding:0;font-size:17px;line-height:1;transition:background .15s,color .15s,border-color .15s}
 .apicon:hover{background:var(--g-50);color:var(--g-700);border-color:var(--g-300)}
 .apicon:active{transform:scale(.94)}
 .apicon:focus-visible{outline:2px solid var(--g-400);outline-offset:1px}
 /* Gear stays lit while its panel is open, so the disclosure state is visible. */
 .apicon.on{background:var(--g-100);color:var(--g-700);border-color:var(--g-400)}
-.apicon svg{width:16px;height:16px;display:block}
+.apicon svg{width:17px;height:17px;display:block}
 .apicon:hover{background:var(--g-100)}
 /* Settings is a MODE, not a strip. It used to take 62% of the panel and leave the
    conversation crushed into the remainder, cut mid-sentence, with two scroll areas
@@ -489,6 +499,12 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .apavatar{width:34px;height:34px;border-radius:12px;background:linear-gradient(150deg,var(--g-400),var(--g-600));display:grid;place-items:center;flex:none;
   box-shadow:0 2px 8px rgba(31,138,86,.26),inset 0 1px 0 rgba(255,255,255,.28)}
 .apavatar svg{width:17px;height:17px}
+/* Two lines of different sizes need explicit line-heights, or the pair's optical centre
+   drifts below the avatar's and the header looks like it is sagging. 18+14 = 32, centred
+   against the 34px mark. */
+.aptitle{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
+.apname{font-size:13.5px;font-weight:720;line-height:18px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.apsub{font-size:10.5px;font-weight:600;line-height:14px;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .apicon svg{width:16px;height:16px}
 .apsettings .fl{margin-top:10px}
 .apsettings input{width:100%;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:11px;padding:9px 12px;background:#fff}
@@ -831,7 +847,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <button class="fab" id="agentFab" title="Mugen assistant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></button>
 <div class="agentpanel" id="agentPanel">
 <div class="aphd"><div class="apavatar"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
-<div style="flex:1"><div style="font-size:13.5px;font-weight:720">Mugen Assistant</div><div style="font-size:10.5px;color:var(--ink-faint)" id="agentBrain">Default brain</div></div>
+<div class="aptitle"><div class="apname">Mugen Assistant</div><div class="apsub" id="agentBrain">Default brain</div></div>
 <button class="apicon" id="agentCfgBtn" title="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
 <button class="apicon" id="agentClose" title="Close" aria-label="Close assistant"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
 <div class="apsettings" id="agentSettings">
@@ -2491,6 +2507,10 @@ function autoGrow(el){
   wrap.classList.toggle('over',over);
   // Hide the fade when scrolled to the very top — there is nothing above to dissolve.
   wrap.classList.toggle('fade',over&&el.scrollTop>2);
+  // Centre the row while the field is one line (so text and icons share a centre line),
+  // and bottom-align it once the text wraps, where pinning to the last line is correct.
+  const row=wrap.parentNode;
+  if(row&&row.classList.contains('cmprow'))row.classList.toggle('grown',want>40);
 }
 
 // The send button reflects whether pressing it would do anything — grey when there is
