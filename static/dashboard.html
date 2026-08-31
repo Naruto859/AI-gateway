@@ -383,7 +383,6 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
    exactly 36px tall, and the row centres them. `.grown` switches to bottom-alignment
    once the text has actually wrapped, which is where pinning to the last line is right. */
 .cmprow{display:flex;align-items:center;gap:4px}
-.cmprow.grown{align-items:flex-end}
 
 /* The field is wrapped so the fade can be painted on the wrapper: a mask on the
    scrolling element itself would travel with the content. */
@@ -395,17 +394,23 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
   /* 20px line-box + 8px top + 8px bottom = 36px, matching the buttons exactly, so a
      single line of text shares their centre line. */
   font:inherit;font-size:14px;line-height:20px;color:var(--ink);padding:8px 6px;
-  min-height:36px;max-height:132px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+  /* height, not just min-height: `rows="1"` leaves the UA free to compute a taller box
+     (two line boxes with this line-height), which made the field taller than the buttons
+     with its text pinned to the top. autoGrow overrides this the moment anything is typed. */
+  height:36px;min-height:36px;max-height:132px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
 .cmpfield textarea:focus{border:none;outline:none;box-shadow:none}
 .cmpfield textarea::-webkit-scrollbar{display:none}
 .cmpfield textarea::placeholder{color:var(--ink-faint)}
-/* Past the cap the text scrolls; fade the TOP edge so it dissolves upward instead of
-   being sliced off. Applied only while scrollable, so a short message has no fade.
-   Bottom stays crisp — that is the line being typed. */
-.cmpfield.over::before{content:"";position:absolute;left:0;right:0;top:0;height:26px;pointer-events:none;
-  background:linear-gradient(180deg,#fff 15%,rgba(255,255,255,0));
-  border-radius:24px 24px 0 0;opacity:0;transition:opacity .22s ease}
-.cmpfield.over.fade::before{opacity:1}
+/* Past the cap the text scrolls. A white overlay was tried first and read as a hard cut:
+   letters disappeared BEHIND a sheet. Masking the textarea instead fades the glyphs
+   themselves, so the text genuinely dissolves upward. The mask lives in the element's own
+   box, so it stays at the top edge while the content scrolls under it.
+   Three stops rather than two: the extra midpoint makes the falloff gradual instead of a
+   visible ramp. The bottom is left untouched — that is the line being typed. */
+.cmpfield textarea{-webkit-mask-image:none;mask-image:none;transition:-webkit-mask-image .2s ease,mask-image .2s ease}
+.cmpfield.fade textarea{
+  -webkit-mask-image:linear-gradient(180deg,transparent 0,rgba(0,0,0,.18) 14px,rgba(0,0,0,.72) 32px,#000 52px);
+  mask-image:linear-gradient(180deg,transparent 0,rgba(0,0,0,.18) 14px,rgba(0,0,0,.72) 32px,#000 52px)}
 
 .cmpbtn{width:36px;height:36px;flex:none;border:none;border-radius:50%;background:transparent;
   color:var(--ink-faint);cursor:pointer;display:grid;place-items:center;padding:0;
@@ -429,7 +434,9 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .cmpbtn.send svg{width:18px;height:18px}
 
 /* Attachment chips sit above the row, inside the same surface. */
-.attrow{display:flex;flex-wrap:wrap;gap:6px;padding:4px 4px 0}
+/* Chips stay centred as the composer grows: the column centres them, and the row itself
+   centres its own wrapped lines rather than left-packing them. */
+.attrow{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px;padding:4px 4px 0}
 .attchip{display:inline-flex;align-items:center;gap:6px;max-width:100%;font-size:11px;font-weight:640;line-height:17px;padding:4px 5px 4px 10px;border-radius:999px;background:var(--g-50);border:1px solid var(--g-300);color:var(--g-700)}
 .attchip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px}
 .attchip .sz{color:var(--ink-faint);font-weight:600;flex:none}
@@ -2310,6 +2317,7 @@ function agentBrainLabel(){return AG.cfg.mode==='custom'?('Custom · '+(AG.cfg.m
 function openAgent(){
   $('#agentPanel').classList.add('show');$('#agentFab').style.display='none';
   $('#agentBrain').textContent=agentBrainLabel();
+  autoGrow($('#agentInput'));
   if(!AG.welcomed){
     AG.welcomed=true;
     agentBubble('a','I can read the routing order, test and clean up proxies, add or reorder '
@@ -2503,14 +2511,10 @@ function autoGrow(el){
   // while scrollable, so a short message has no gradient sitting over it.
   const wrap=el.parentNode;
   if(!wrap||!wrap.classList.contains('cmpfield'))return;
-  const over=want>CAP+1;
-  wrap.classList.toggle('over',over);
-  // Hide the fade when scrolled to the very top — there is nothing above to dissolve.
-  wrap.classList.toggle('fade',over&&el.scrollTop>2);
-  // Centre the row while the field is one line (so text and icons share a centre line),
-  // and bottom-align it once the text wraps, where pinning to the last line is correct.
-  const row=wrap.parentNode;
-  if(row&&row.classList.contains('cmprow'))row.classList.toggle('grown',want>40);
+  // Fade whenever content is genuinely hidden above the viewport of the field. The earlier
+  // condition was scrollTop>2, which meant a field already scrolled to the bottom showed
+  // no fade at all even though lines were hidden above it.
+  wrap.classList.toggle('fade',el.scrollTop>1);
 }
 
 // The send button reflects whether pressing it would do anything — grey when there is
@@ -2528,6 +2532,10 @@ $('#agentInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey)
 $('#agentInput').addEventListener('input',e=>{autoGrow(e.target);syncSend();});
 $('#agentInput').addEventListener('scroll',e=>autoGrow(e.target));
 syncAgentCfgUI();syncSend();$$('#agentSettings .csel').forEach(initCsel);
+// Size both fields once at boot. Without this they keep the UA's rows="1" height, which
+// with a 20px line-height comes out taller than 36px — the field then sits taller than the
+// buttons with its text at the top, which is what read as "not centred".
+autoGrow($('#agentInput'));autoGrow($('#chatInput'));
 $('#agentSdk')&&($('#agentSdk')._cb=v=>{AG.cfg.sdk=v;});
 
 boot();
