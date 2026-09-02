@@ -269,8 +269,18 @@ _PROXY_LOCAL_MARKERS = (
     "waf", "non-sse", "truncated", "incomplete", "empty-stream", "proxy switch",
     "connecterror", "connecttimeout", "connectionerror", "readtimeout", "writetimeout",
     "pooltimeout", "readerror", "writeerror", "remoteprotocolerror", "proxyerror",
-    "sslerror", "timeoutexception", "conn",
+    "sslerror", "timeoutexception",
 )
+# Deliberately NOT in that tuple: a bare "conn". It was in the first version of
+# this fix and it was a mistake of my own — `detail` is built from the endpoint
+# NAME and the proxy URL (f"{tgt['name']} {status}", f"{type(e).__name__} via
+# {used_url}"), so a provider or proxy host with "conn" in it would have had its
+# real failures silently reclassified as transport faults and retried forever on
+# fresh IPs. It also earned nothing: every genuine case arrives as an httpx
+# exception class name, and all of those are listed explicitly above —
+# ProxyError already covers the phone-offline shape ("ProxyError: 500 Unable to
+# connect", measured 0.8 s when the target is unreachable). A loose marker that
+# can only misfire is worse than no marker.
 
 
 def _skip_backoff(detail):
