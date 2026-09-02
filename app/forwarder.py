@@ -370,6 +370,36 @@ def _match_failover(keywords, status, body_text):
     return False
 
 
+def _proxy_local(detail):
+    """True when this failure happened in OUR transport, not at the provider.
+
+    WAF pages, ConnectError, ReadError, ProxyError, truncated/incomplete streams
+    — these describe the exit IP we borrowed, and say nothing about whether the
+    provider is healthy. The right response is a different proxy, not a different
+    provider.
+
+    Why this matters (measured 2026-09-02): the failover ladder ended in a bare
+    `else: consecutive_5xx += 1`, so every one of these transport faults counted
+    as a strike AGAINST the endpoint. On Boss's gateway `failover_5xx_threshold`
+    is **2**, so two unlucky proxies retired a perfectly good provider — and
+    `max_retries=15` was never reached. A real trace of one large request:
+
+        att 1  justwoker  WAF via 100.97.11.41      -> strike 1
+        att 2  justwoker  502 via scrape.do         -> (matched proxy rule, ok)
+        att 3  justwoker  ConnectError via 8.211…   -> strike 2 -> ABANDONED
+        att 4  gorouter   WAF …                     -> strike 1
+        att 6  gorouter   ReadError …               -> strike 2 -> ABANDONED
+        att 7  agentrouter                          -> 200 OK
+
+    Three providers were walked and two written off, none of which had done
+    anything wrong. That is Boss's "kabhi max retry karta hai, kabhi switch kar
+    deta hai, aur logs mein kyun nahi dikhta" — the reason was never logged
+    because the code never knew it was making a decision.
+    """
+    d = (detail or "").lower()
+    return any(m in d for m in _PROXY_LOCAL_MARKERS)
+
+
 def _match_failover_detail(keywords, detail):
     """Same rules as _match_failover, for an internally-built retry reason.
 
@@ -1334,7 +1364,25 @@ async def forward(request, path):
                                                 if ev == "message_stop":
                                                     saw_stop = True
                                             obj = asm.result()
-                                            complete = bool(saw_stop and obj and obj.get("stop_reason") and obj.get("content"))
+                                            # A REFUSAL IS A COMPLETE ANSWER (Ciel,
+                                            # 2026-09-02). The test below used to require
+                                            # `obj.get("content")` to be non-empty, but a
+                                            # model declining to answer returns a valid
+                                            # message with content=[] and
+                                            # stop_reason="refusal" (measured on
+                                            # agentrouter: HTTP 200, 0 blocks,
+                                            # stop=refusal). Calling that "incomplete"
+                                            # blamed the proxy, marked it bad, and
+                                            # retried a DETERMINISTIC answer across every
+                                            # proxy and every provider — measured cost:
+                                            # 11 attempts, 5 providers, 75.8 s, while the
+                                            # client saw nothing but pings. A refusal is
+                                            # final: deliver it.
+                                            _stop = (obj or {}).get("stop_reason")
+                                            complete = bool(saw_stop and obj and _stop
+                                                            and (obj.get("content")
+                                                                 or _stop in ("refusal", "stop_sequence",
+                                                                              "max_tokens", "end_turn")))
                                             if complete:
                                                 for b in obj.get("content", []):
                                                     if b.get("type") == "tool_use" and "input" not in b:
@@ -1462,8 +1510,11 @@ async def forward(request, path):
                                 last_err = (503, {"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover keyword."}}, tgt["name"], used_url)
                                 upstream_rejected = True
                                 break
-                            elif _match_failover_detail(proxy_kws, detail):
-                                pass # Just retry proxy
+                            elif _match_failover_detail(proxy_kws, detail) or _proxy_local(detail):
+                                # Transport fault (WAF page, ConnectError, ReadError,
+                                # truncated stream). Rotate the exit IP; do NOT hold it
+                                # against the provider — see _proxy_local().
+                                pass
                             else:
                                 # Default counting for consecutive unknown errors
                                 consecutive_5xx += 1
@@ -1619,7 +1670,11 @@ async def forward(request, path):
                         _mark_used_bad(candidates, used_url, type(e).__name__)
                         _log(method=request.method, path=path, status=502, proxy=used_url, attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                         fail_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,RemoteProtocolError").split(",") if k.strip()]
-                        if _match_failover_detail(fail_kws, detail):
+                        # This arm is reached only from `except Exception` — i.e. the
+                        # request never got an HTTP answer, so it is transport by
+                        # definition. Counting it toward `failover_5xx_threshold`
+                        # retired healthy providers after 2 unlucky proxies.
+                        if _match_failover_detail(fail_kws, detail) and not _proxy_local(detail):
                             consecutive_5xx += 1
                             if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
                                 _log(method=request.method, path=path, status=503, proxy=used_url, attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"smart failover: {tgt['name']} returned 5xx {consecutive_5xx} times in a row", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
@@ -1737,7 +1792,8 @@ async def forward(request, path):
                 last = (503, "application/json", payload, tgt["name"], used_url)
                 upstream_rejected = True
                 break
-            elif _match_failover_detail(proxy_kws, detail):
+            elif _match_failover_detail(proxy_kws, detail) or _proxy_local(detail):
+                # Transport fault — rotate the exit IP, don't blame the provider.
                 pass
             else:
                 consecutive_5xx += 1
