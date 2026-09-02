@@ -345,6 +345,14 @@ def _init(c):
         # carries its own quota upstream, so exhausting one should move to the next
         # rather than abandoning the provider.
         c.execute("ALTER TABLE endpoints ADD COLUMN extra_keys TEXT DEFAULT '[]'")
+    if "fx_flags" not in ecols:
+        # Per-endpoint failure-diagnosis overrides as a JSON object, e.g.
+        # {"fx_size_refusal_stop": "0"}. Boss's point (2026-09-02): these describe
+        # how a PARTICULAR provider's failures should be read, so they belong to
+        # the endpoint, not to the global proxy settings. A premium/official
+        # endpoint wants fewer restrictions than a free relay. Empty = inherit
+        # every rule from the global settings row.
+        c.execute("ALTER TABLE endpoints ADD COLUMN fx_flags TEXT DEFAULT ''")
 
     _drop_endpoint_url_unique(c)
 
@@ -756,7 +764,7 @@ def add_endpoint(url, api_mode="anthropic_messages", api_key="", model_override=
 
 
 def update_endpoint(eid, **fields):
-    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords", "endpoint_failover_keywords", "scrape_do_token", "custom_proxies", "proxy_priority", "proxy_fallback", "extra_keys", "key_failover_keywords"}
+    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords", "endpoint_failover_keywords", "scrape_do_token", "custom_proxies", "proxy_priority", "proxy_fallback", "extra_keys", "key_failover_keywords", "fx_flags"}
     fields = {k: v for k, v in fields.items() if k in allowed_ENDPOINT_COLS}
     if not fields:
         return

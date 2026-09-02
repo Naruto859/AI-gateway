@@ -314,25 +314,45 @@ _REQUEST_FATAL_MARKERS = (
 )
 
 
-def _fx(key, default="1"):
-    """Is routing-fix `key` enabled? Every fix Ciel added is a live toggle.
+def _fx(key, tgt=None, default="1"):
+    """Is routing-fix `key` enabled — for THIS endpoint?
 
-    Boss's requirement (2026-09-02): "mujhe har cheez ka toggle chahiye, dynamic
-    hona chahiye" — nothing should be hardcoded behaviour he cannot switch off
-    from the settings page. Each fix therefore reads its own `fx_*` setting and
-    defaults to ON, so an upgrade changes behaviour immediately but stays
-    reversible without touching code.
+    Boss's correction (2026-09-02): "ye toggles endpoint settings ke andar hona
+    chahiye, na ki proxy settings ke andar — kyunki wo endpoint ki settings hai
+    na?" He is right: every one of these rules describes how a PARTICULAR
+    provider's failures should be read, so a single global switch is the wrong
+    shape. His example is the deciding one — an official/premium endpoint should
+    get *fewer* restrictions than a free relay, and a long real conversation on
+    it can legitimately repeat itself a lot.
 
-    Read per-call on purpose: `db.get_setting` is a cheap indexed lookup and the
-    operator must not have to restart the gateway for a toggle to take effect.
+    Resolution order:
+      1. this endpoint's own `fx_flags` JSON (only non-default values are stored)
+      2. the global `settings` row, which acts as the fleet-wide default
+      3. `default` — ON, the measured-correct behaviour
+
+    Read per call: `db.get_setting` is an indexed lookup and a toggle must take
+    effect without restarting the gateway.
     """
+    if isinstance(tgt, dict):
+        flags = tgt.get("_fx_flags")
+        if flags is None:
+            raw = tgt.get("fx_flags") or ""
+            try:
+                flags = json.loads(raw) if raw.strip() else {}
+            except Exception:
+                flags = {}
+            if not isinstance(flags, dict):
+                flags = {}
+            tgt["_fx_flags"] = flags       # parse once per request, not per check
+        if key in flags:
+            return str(flags[key]) != "0"
     try:
         return db.get_setting(key, default) != "0"
     except Exception:
         return default != "0"
 
 
-def _request_fatal(status, text):
+def _request_fatal(status, text, tgt=None):
     """Reason string when this refusal is about the REQUEST's size, else None.
 
     Correction (measured 2026-09-02, my first version of this was wrong): a size
@@ -347,7 +367,7 @@ def _request_fatal(status, text):
     """
     if status not in (400, 413, 422):
         return None
-    if not _fx("fx_size_refusal_stop"):
+    if not _fx("fx_size_refusal_stop", tgt):
         return None
     low = (text or "").lower()
     for m in _REQUEST_FATAL_MARKERS:
@@ -356,7 +376,7 @@ def _request_fatal(status, text):
     return None
 
 
-def _match_failover(keywords, status, body_text):
+def _match_failover(keywords, status, body_text, tgt=None):
     """Does this refusal match an operator failover rule?
 
     Replaces a bare `any(x in err_str for x in kws)` substring test where
@@ -380,7 +400,7 @@ def _match_failover(keywords, status, body_text):
     Toggle `fx_status_only_keywords` restores the old body-wide substring match.
     """
     low = (body_text or "").lower()
-    strict = _fx("fx_status_only_keywords")
+    strict = _fx("fx_status_only_keywords", tgt)
     for k in keywords:
         k = (k or "").strip()
         if not k:
@@ -395,7 +415,7 @@ def _match_failover(keywords, status, body_text):
     return False
 
 
-def _proxy_local(detail):
+def _proxy_local(detail, tgt=None):
     """True when this failure happened in OUR transport, not at the provider.
 
     WAF pages, ConnectError, ReadError, ProxyError, truncated/incomplete streams
@@ -423,13 +443,13 @@ def _proxy_local(detail):
 
     Toggle `fx_proxy_not_endpoint` turns this attribution off.
     """
-    if not _fx("fx_proxy_not_endpoint"):
+    if not _fx("fx_proxy_not_endpoint", tgt):
         return False
     d = (detail or "").lower()
     return any(m in d for m in _PROXY_LOCAL_MARKERS)
 
 
-def _match_failover_detail(keywords, detail):
+def _match_failover_detail(keywords, detail, tgt=None):
     """Same rules as _match_failover, for an internally-built retry reason.
 
     `detail` looks like "502 via http://1.2.3.4:8888" or "ConnectError via ...".
@@ -440,7 +460,7 @@ def _match_failover_detail(keywords, detail):
     d = (detail or "")
     lead = d.split(" ", 1)[0]
     status = int(lead) if lead.isdigit() else -1
-    return _match_failover(keywords, status, d)
+    return _match_failover(keywords, status, d, tgt)
 
 
 def _clip(text, n=100):
@@ -509,7 +529,7 @@ def _build_upstream_headers(request, upstream_key, kind):
     return headers
 
 
-def _is_waf(resp_headers, sniff=b"", status=None):
+def _is_waf(resp_headers, sniff=b"", status=None, tgt=None):
     """Does this response look like a WAF/bot-challenge page?
 
     Boss pushed back on this (2026-09-02): "mera mobile IP residential hai, usme
@@ -539,7 +559,7 @@ def _is_waf(resp_headers, sniff=b"", status=None):
         return True
     if "text/html" not in ct:
         return False
-    if not _fx("fx_strict_waf"):
+    if not _fx("fx_strict_waf", tgt):
         return True     # legacy: any HTML counts
     for m in (b"cf-browser-verification", b"cf_chl", b"just a moment",
               b"checking your browser", b"attention required", b"captcha",
@@ -621,7 +641,11 @@ def _targets(s):
             "scrape_do_token": e.get("scrape_do_token", ""),
             "custom_proxies": e.get("custom_proxies", "[]"),
             "proxy_priority": e.get("proxy_priority", "[]"),
-            "proxy_fallback": e.get("proxy_fallback", 1)
+            "proxy_fallback": e.get("proxy_fallback", 1),
+            # Per-endpoint failure-diagnosis overrides. Only keys the operator
+            # actually changed are stored; anything absent falls back to the
+            # global setting. See _fx().
+            "fx_flags": e.get("fx_flags", ""),
         }
 
     primary_custom = next((e for e in customs if e.get("is_primary")), None)
@@ -654,15 +678,15 @@ def _should_rotate_key(tgt, detail):
     d = (detail or "")
     lead = d.split(" ", 1)[0]
     status = int(lead) if lead.isdigit() else -1
-    if _request_fatal(status if status > 0 else 400, d):
+    if _request_fatal(status if status > 0 else 400, d, tgt):
         return False
     ep_kws = [k.strip() for k in (tgt.get("endpoint_failover_keywords") or "").split(",") if k.strip()]
-    if _match_failover(ep_kws, status, d):
+    if _match_failover(ep_kws, status, d, tgt):
         return False
     rules = [k.strip() for k in (tgt.get("key_failover_keywords") or "").split(",") if k.strip()]
     if not rules:
         return True
-    return _match_failover(rules, status, d)
+    return _match_failover(rules, status, d, tgt)
 
 
 def _target_url(base, path, mode):
@@ -1236,10 +1260,10 @@ async def forward(request, path):
     # they take a direct, method-correct path: first enabled endpoint, its own
     # key, no proxy hedging, no retry storm. If it fails we return the upstream's
     # own answer rather than fabricating a 404 from a different provider.
-    # Toggle: fx_method_passthrough.
-    if request.method in ("GET", "HEAD") and not body and _fx("fx_method_passthrough"):
+    # Toggle: fx_method_passthrough, read from the endpoint we are about to use.
+    if request.method in ("GET", "HEAD") and not body:
         tgts = _targets(s)
-        if tgts:
+        if tgts and _fx("fx_method_passthrough", tgts[0]):
             tgt = tgts[0]
             url = f"{tgt['base'].rstrip('/')}/{path}"
             hdrs = _target_headers(request, tgt, (tgt.get("keys") or [tgt.get("key", "")])[0])
@@ -1342,7 +1366,7 @@ async def forward(request, path):
                                     async with _build_client(candidates, timeout, hedge_id) as client:
                                         async with client.stream("POST", url, headers=theaders, content=up_body) as r:
                                             used = _race_used(candidates, hedge_id, attempted_pids)
-                                            if _is_waf(r.headers, status=r.status_code):
+                                            if _is_waf(r.headers, status=r.status_code, tgt=tgt):
                                                 _mark_used_bad(candidates, used, "waf")
                                                 return ("retry", f"WAF via {used}", used)
                                             ct = r.headers.get("content-type", "")
@@ -1372,7 +1396,7 @@ async def forward(request, path):
                                             # only used to decide how to READ the body.
                                             # Toggle: fx_status_over_contenttype.
                                             if r.status_code >= 400 and (
-                                                    _fx("fx_status_over_contenttype")
+                                                    _fx("fx_status_over_contenttype", tgt)
                                                     or "text/event-stream" not in ct):
                                                 raw = await r.aread()
                                                 err_str = str(r.status_code) + " " + raw[:300].decode('utf-8', 'replace')
@@ -1386,20 +1410,20 @@ async def forward(request, path):
                                                 # still accept it (different tokenizer), so this
                                                 # is an ("error", ...) — which fails over to the
                                                 # NEXT target — not a hard return.
-                                                if _request_fatal(r.status_code, body_str):
+                                                if _request_fatal(r.status_code, body_str, tgt):
                                                     _mark_used_good(candidates, used, int((time.time() - t0) * 1000))
                                                     try: err = json.loads(raw)
                                                     except Exception: err = {"type": "error", "error": {"message": body_str}}
                                                     return ("error", r.status_code, err, used)
 
-                                                if _match_failover(ep_kws, r.status_code, body_str):
+                                                if _match_failover(ep_kws, r.status_code, body_str, tgt):
                                                     # Endpoint's own content rejection — the proxy
                                                     # did its job, so it stays credited.
                                                     _mark_used_good(candidates, used, int((time.time() - t0) * 1000))
                                                     try: err = json.loads(raw)
                                                     except: err = {"type": "error", "error": {"message": err_str}}
                                                     return ("error", r.status_code, err, used)
-                                                elif _match_failover(proxy_kws, r.status_code, body_str):
+                                                elif _match_failover(proxy_kws, r.status_code, body_str, tgt):
                                                     _mark_used_bad(candidates, used, f"{r.status_code} proxy switch")
                                                     return ("retry", f"{r.status_code} proxy switch: {_clip(body_str)}", used)
                                                 else:
@@ -1446,7 +1470,7 @@ async def forward(request, path):
                                             # final: deliver it.
                                             # Toggle: fx_refusal_is_answer.
                                             _stop = (obj or {}).get("stop_reason")
-                                            _stop_ok = (_fx("fx_refusal_is_answer")
+                                            _stop_ok = (_fx("fx_refusal_is_answer", tgt)
                                                         and _stop in ("refusal", "stop_sequence",
                                                                       "max_tokens", "end_turn"))
                                             complete = bool(saw_stop and obj and _stop
@@ -1509,7 +1533,7 @@ async def forward(request, path):
                                     err = json.loads(_txt)
                                 except Exception:
                                     err = {"type": "error", "error": {"message": _txt[:400]}}
-                                _fatal = _request_fatal(400, _txt)
+                                _fatal = _request_fatal(400, _txt, tgt)
                                 _log(method=request.method, path=path, status=400,
                                      proxy=used_url, attempts=attempts, stream=1,
                                      redactions=redactions,
@@ -1529,7 +1553,7 @@ async def forward(request, path):
                                 # provider may still accept the same payload (tokenizers
                                 # differ — see _request_fatal), so we fail over to the
                                 # NEXT target rather than returning here.
-                                _fatal = _request_fatal(status, err_full)
+                                _fatal = _request_fatal(status, err_full, tgt)
                                 if _fatal:
                                     _log(method=request.method, path=path, status=status,
                                          proxy=used_url, attempts=attempts, stream=1,
@@ -1574,11 +1598,11 @@ async def forward(request, path):
                                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                                        ip=client_ip, model=current_model_log, endpoint=tgt["name"])
 
-                            if _match_failover_detail(ep_kws, detail):
+                            if _match_failover_detail(ep_kws, detail, tgt):
                                 last_err = (503, {"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover keyword."}}, tgt["name"], used_url)
                                 upstream_rejected = True
                                 break
-                            elif _match_failover_detail(proxy_kws, detail) or _proxy_local(detail):
+                            elif _match_failover_detail(proxy_kws, detail, tgt) or _proxy_local(detail, tgt):
                                 # Transport fault (WAF page, ConnectError, ReadError,
                                 # truncated stream). Rotate the exit IP; do NOT hold it
                                 # against the provider — see _proxy_local().
@@ -1659,7 +1683,7 @@ async def forward(request, path):
                         r = await client.send(req, stream=True)
                         used_url = _race_used(candidates, hedge_id, attempted_pids)
                         _ensure_progress(candidates, attempted_pids, pids_before)
-                        if _is_waf(r.headers, status=r.status_code) or r.status_code >= 500:
+                        if _is_waf(r.headers, status=r.status_code, tgt=tgt) or r.status_code >= 500:
                             await r.aclose(); await client.aclose()
                             _mark_used_bad(candidates, used_url, "waf/5xx")
                             # `detail` used to be assigned inside the `if type(...) == int:`
@@ -1667,7 +1691,7 @@ async def forward(request, path):
                             # the previous attempt's text — or was empty on attempt 1.
                             detail = f"{r.status_code} via {used_url}"
                             _log(method=request.method, path=path, status=502, proxy=used_url, attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
-                            if _is_waf(r.headers, status=r.status_code): pass
+                            if _is_waf(r.headers, status=r.status_code, tgt=tgt): pass
                             else:
                                 consecutive_5xx += 1
                                 if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
@@ -1692,7 +1716,7 @@ async def forward(request, path):
                             # provider's final verdict on these bytes — no other proxy
                             # or key of the same provider can change it. Break to the
                             # NEXT target instead of burning this one's budget.
-                            _fatal = _request_fatal(r.status_code, body_peek)
+                            _fatal = _request_fatal(r.status_code, body_peek, tgt)
                             if _fatal:
                                 _log(method=request.method, path=path, status=r.status_code,
                                      proxy=used_url, attempts=attempts, stream=1,
@@ -1742,7 +1766,7 @@ async def forward(request, path):
                         # request never got an HTTP answer, so it is transport by
                         # definition. Counting it toward `failover_5xx_threshold`
                         # retired healthy providers after 2 unlucky proxies.
-                        if _match_failover_detail(fail_kws, detail) and not _proxy_local(detail):
+                        if _match_failover_detail(fail_kws, detail, tgt) and not _proxy_local(detail, tgt):
                             consecutive_5xx += 1
                             if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
                                 _log(method=request.method, path=path, status=503, proxy=used_url, attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"smart failover: {tgt['name']} returned 5xx {consecutive_5xx} times in a row", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
@@ -1815,7 +1839,7 @@ async def forward(request, path):
                 # final verdict on these bytes, so stop burning its keys and proxies.
                 # Failover to the NEXT provider still happens (see _request_fatal —
                 # tokenizers differ), it just no longer costs 4 wasted proxy rounds.
-                _fatal = _request_fatal(status, err_full)
+                _fatal = _request_fatal(status, err_full, tgt)
                 if _fatal:
                     _log(method=request.method, path=path, status=status, proxy=used_url,
                          attempts=attempts, stream=0, redactions=redactions,
@@ -1855,12 +1879,12 @@ async def forward(request, path):
                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                        ip=client_ip, model=current_model_log, endpoint=tgt["name"])
 
-            if _match_failover_detail(ep_kws, detail):
+            if _match_failover_detail(ep_kws, detail, tgt):
                 payload = json.dumps({"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover."}}).encode()
                 last = (503, "application/json", payload, tgt["name"], used_url)
                 upstream_rejected = True
                 break
-            elif _match_failover_detail(proxy_kws, detail) or _proxy_local(detail):
+            elif _match_failover_detail(proxy_kws, detail, tgt) or _proxy_local(detail, tgt):
                 # Transport fault — rotate the exit IP, don't blame the provider.
                 pass
             else:
