@@ -284,6 +284,125 @@ def _skip_backoff(detail):
     """
     d = (detail or "").lower()
     return any(m in d for m in _PROXY_LOCAL_MARKERS)
+
+
+# Markers that identify a refusal caused by THE REQUEST'S SIZE. Retrying such a
+# request on another PROXY or another KEY of the SAME provider cannot succeed —
+# identical bytes reach the identical tokenizer, so the verdict is identical.
+# Failing over to a DIFFERENT provider is still worth doing: ceilings and
+# tokenizers differ (measured: the same 1,025 KB body was 1.06M tokens and
+# refused by api.justwoker.icu, but 288,753 tokens and accepted by
+# api.camel-hub.com).
+#
+# Measured on 2026-09-02 why this matters: one oversized Claude Code turn burned
+# 15 upstream attempts across 5 providers and 378 SECONDS of wall clock, most of
+# it re-sending the same payload through fresh proxies for a provider that had
+# already given its size verdict on attempt 1. Worst observed: 465 s / 23
+# attempts. The client saw only keepalive pings throughout, which is why
+# /compact appeared to "do nothing" — Claude Code never learned the context was
+# full, it just waited.
+_REQUEST_FATAL_MARKERS = (
+    "context window is full",
+    "请精简对话历史",              # new-api: "please condense the conversation history"
+    "缩小工具/文件输出",           # new-api: "reduce tool/file output"
+    "prompt is too long",
+    "maximum context length",
+    "context_length_exceeded",
+    "request_too_large",
+    "request entity too large",
+    "input length and `max_tokens` exceed",
+)
+
+
+def _request_fatal(status, text):
+    """Reason string when this refusal is about the REQUEST's size, else None.
+
+    Correction (measured 2026-09-02, my first version of this was wrong): a size
+    refusal is NOT hopeless across providers. The identical 1,025 KB body was
+    refused by api.justwoker.icu as "context window is full" and accepted by
+    api.camel-hub.com, which counted it as only 288,753 input tokens — a 3.6x
+    difference in tokenizer/ceiling for the same bytes. So this classifier must
+    only stop the retries that are provably pointless — another PROXY or another
+    KEY for the SAME provider, which re-sends identical bytes to the identical
+    tokenizer — and must still allow failover to the NEXT provider, which may
+    well accept it.
+    """
+    if status not in (400, 413, 422):
+        return None
+    low = (text or "").lower()
+    for m in _REQUEST_FATAL_MARKERS:
+        if m in low or m in (text or ""):
+            return m
+    return None
+
+
+def _match_failover(keywords, status, body_text):
+    """Does this refusal match an operator failover rule?
+
+    Replaces a bare `any(x in err_str for x in kws)` substring test where
+    `err_str` was the status code CONCATENATED WITH THE RESPONSE BODY. Because the
+    default rule lists are numeric ("500,501,502,503,504,524,401,403"), any digit
+    run inside the body matched them — and new-api upstreams embed a long numeric
+    request id in every error, e.g.
+
+        (request id: 202609011959144518501558268d9d65byLqCso)
+                                  ^^^^  contains "501"
+
+    Verified on the live log: 1 of 3 recorded context-full 400s contained such a
+    token, so an identical error was classified as a PROXY fault on one request
+    and an ENDPOINT fault on the next. That is exactly the "sometimes it retries,
+    sometimes it switches, and the log never says why" behaviour Boss reported —
+    it was never random, it depended on the digits in the upstream's request id.
+
+    Numeric keywords are therefore matched against the HTTP STATUS ONLY;
+    non-numeric keywords are matched against the body, case-insensitively.
+    """
+    low = (body_text or "").lower()
+    for k in keywords:
+        k = (k or "").strip()
+        if not k:
+            continue
+        if k.isdigit():
+            if int(k) == status:
+                return True
+        elif k.lower() in low:
+            return True
+    return False
+
+
+def _match_failover_detail(keywords, detail):
+    """Same rules as _match_failover, for an internally-built retry reason.
+
+    `detail` looks like "502 via http://1.2.3.4:8888" or "ConnectError via ...".
+    A numeric keyword must match the LEADING status token, never a digit run
+    inside a proxy host/port (a proxy on port 8501 otherwise matched the rule
+    "501"). Non-numeric keywords still match anywhere in the text.
+    """
+    d = (detail or "")
+    lead = d.split(" ", 1)[0]
+    status = int(lead) if lead.isdigit() else -1
+    return _match_failover(keywords, status, d)
+
+
+def _clip(text, n=100):
+    """Truncate for a log `note` without splitting a UTF-8 character.
+
+    The old `f"...{err_full[:100]}"` cut the Chinese context-full message
+    mid-codepoint, producing a mojibake tail AND hiding the English half of the
+    message — "(Context window is full — reduce conversation history, tool/file
+    output, or system prompt.)" never appeared in any log row, which is why the
+    real cause went undiagnosed. The full text now always goes to `detail`.
+    """
+    s = text if isinstance(text, str) else str(text)
+    if len(s) <= n:
+        return s
+    out = s[:n]
+    # Trim a trailing lone surrogate/partial sequence introduced by slicing.
+    while out and not out[-1].isprintable() and out[-1] not in " \t":
+        out = out[:-1]
+    return out
+
+
 HOP_BY_HOP = {
     "host", "content-length", "connection", "keep-alive", "proxy-authenticate",
     "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade",
@@ -433,18 +552,25 @@ def _should_rotate_key(tgt, detail):
 
     Endpoint-switch triggers always win: a refusal that a different key would repeat
     (blocked content, unknown model) must not burn every key first.
+
+    A SIZE refusal never rotates: the payload is identical, so every key of this
+    provider hits the same tokenizer and the same ceiling. Rotating there just
+    multiplies the wait by the number of spare keys.
     """
     if len(tgt.get("keys") or []) < 2:
         return False
     d = (detail or "")
+    lead = d.split(" ", 1)[0]
+    status = int(lead) if lead.isdigit() else -1
+    if _request_fatal(status if status > 0 else 400, d):
+        return False
     ep_kws = [k.strip() for k in (tgt.get("endpoint_failover_keywords") or "").split(",") if k.strip()]
-    if any(k in d for k in ep_kws):
+    if _match_failover(ep_kws, status, d):
         return False
     rules = [k.strip() for k in (tgt.get("key_failover_keywords") or "").split(",") if k.strip()]
     if not rules:
         return True
-    low = d.lower()
-    return any(k.lower() in low for k in rules)
+    return _match_failover(rules, status, d)
 
 
 def _target_url(base, path, mode):
@@ -1003,6 +1129,51 @@ async def forward(request, path):
     if "chat/completions" not in path:
         body, _thk = _strip_thinking(body)
 
+    # ---------- METHOD-PRESERVING PASSTHROUGH (Ciel, 2026-09-02) ----------
+    # Every upstream call site below is hardcoded to POST, because the whole
+    # retry/hedge/assemble machinery was written for /v1/messages. That silently
+    # broke every non-POST route: a client's `GET /v1/models` was forwarded as
+    # `POST /v1/models`, so all five providers answered
+    #   404 {"message":"Invalid URL (POST /v1/models)"}
+    # and the gateway then walked the ENTIRE endpoint list collecting the same
+    # 404 — 5 attempts, ~11 s, 78 such rows in one 8h window. The dashboard
+    # showed "Method: GET" next to an upstream complaining about POST, which is
+    # what made it look inexplicable.
+    #
+    # Body-less informational routes need none of the streaming machinery, so
+    # they take a direct, method-correct path: first enabled endpoint, its own
+    # key, no proxy hedging, no retry storm. If it fails we return the upstream's
+    # own answer rather than fabricating a 404 from a different provider.
+    if request.method in ("GET", "HEAD") and not body:
+        tgts = _targets(s)
+        if tgts:
+            tgt = tgts[0]
+            url = f"{tgt['base'].rstrip('/')}/{path}"
+            hdrs = _target_headers(request, tgt, (tgt.get("keys") or [tgt.get("key", "")])[0])
+            t_info = time.time()
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=conn_to, read=30.0,
+                                                                   write=30.0, pool=10.0),
+                                             follow_redirects=True) as c:
+                    r = await c.request(request.method, url, headers=hdrs)
+                raw = r.content
+                _log(method=request.method, path=path, status=r.status_code, proxy="direct",
+                     attempts=1, stream=0, redactions=0,
+                     ms=int((time.time() - t_info) * 1000),
+                     note=f"info passthrough ({request.method}) -> {tgt['name']}",
+                     ip=client_ip, model="", endpoint=tgt["name"],
+                     detail=raw[:1500].decode("utf-8", "replace"), final=True)
+                return Response(content=raw, status_code=r.status_code,
+                                media_type=r.headers.get("content-type", "application/json"))
+            except Exception as e:
+                _log(method=request.method, path=path, status=502, proxy="direct",
+                     attempts=1, stream=0, redactions=0,
+                     ms=int((time.time() - t_info) * 1000),
+                     note=f"info passthrough failed: {type(e).__name__}",
+                     ip=client_ip, model="", endpoint=tgt["name"],
+                     detail=str(e)[:1500], final=True)
+                return _err(f"Upstream unreachable for {request.method} {path}.", 502)
+
     try:
         client_wants_stream = bool(json.loads(body).get("stream"))
     except Exception:
@@ -1082,22 +1253,59 @@ async def forward(request, path):
                                                 _mark_used_bad(candidates, used, "waf")
                                                 return ("retry", f"WAF via {used}", used)
                                             ct = r.headers.get("content-type", "")
-                                            if r.status_code >= 400 and "text/event-stream" not in ct:
+                                            # ROOT CAUSE FIX (Ciel, 2026-09-02).
+                                            # This condition used to be
+                                            #   `if r.status_code >= 400 and "text/event-stream" not in ct:`
+                                            # which is wrong: new-api upstreams answer a
+                                            # REJECTED stream request with HTTP 400 but keep
+                                            # `content-type: text/event-stream`, while the body
+                                            # is plain JSON (verified against
+                                            # api.justwoker.icu — 400, ct=text/event-stream,
+                                            # body {"error":{...context window is full...}}).
+                                            # So the guard was false, the JSON error fell
+                                            # through to the SSE assembler, produced no
+                                            # frames, and was reported as
+                                            #   ("retry", "incomplete via <proxy>")
+                                            # i.e. a PROXY fault. Three consequences, all of
+                                            # which Boss saw and could not explain:
+                                            #   1. the real reason never reached the log — the
+                                            #      note said "incomplete via ...", so no row
+                                            #      ever explained why the endpoint switched;
+                                            #   2. a healthy proxy was marked bad for someone
+                                            #      else's 400, poisoning proxy health;
+                                            #   3. the request kept retrying instead of
+                                            #      surfacing a verdict the client could act on.
+                                            # The status code is authoritative; content-type is
+                                            # only used to decide how to READ the body.
+                                            if r.status_code >= 400:
                                                 raw = await r.aread()
                                                 err_str = str(r.status_code) + " " + raw[:300].decode('utf-8', 'replace')
+                                                body_str = raw[:400].decode('utf-8', 'replace')
                                                 proxy_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,401,403,unauthorized").split(",") if k.strip()]
                                                 ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key,new_api_error,预扣").split(",") if k.strip()]
-                                                
-                                                if any(x in err_str for x in ep_kws):
+
+                                                # Size/context refusal: this provider's verdict
+                                                # on these bytes is final, so stop spending its
+                                                # proxy and key budget. Another provider may
+                                                # still accept it (different tokenizer), so this
+                                                # is an ("error", ...) — which fails over to the
+                                                # NEXT target — not a hard return.
+                                                if _request_fatal(r.status_code, body_str):
+                                                    _mark_used_good(candidates, used, int((time.time() - t0) * 1000))
+                                                    try: err = json.loads(raw)
+                                                    except Exception: err = {"type": "error", "error": {"message": body_str}}
+                                                    return ("error", r.status_code, err, used)
+
+                                                if _match_failover(ep_kws, r.status_code, body_str):
                                                     # Endpoint's own content rejection — the proxy
                                                     # did its job, so it stays credited.
                                                     _mark_used_good(candidates, used, int((time.time() - t0) * 1000))
                                                     try: err = json.loads(raw)
                                                     except: err = {"type": "error", "error": {"message": err_str}}
                                                     return ("error", r.status_code, err, used)
-                                                elif any(x in err_str for x in proxy_kws):
+                                                elif _match_failover(proxy_kws, r.status_code, body_str):
                                                     _mark_used_bad(candidates, used, f"{r.status_code} proxy switch")
-                                                    return ("retry", f"{r.status_code} proxy switch: {err_str[:100]}", used)
+                                                    return ("retry", f"{r.status_code} proxy switch: {_clip(body_str)}", used)
                                                 else:
                                                     if r.status_code >= 500:
                                                         _mark_used_bad(candidates, used, "5xx")
@@ -1110,7 +1318,10 @@ async def forward(request, path):
                                             asm = AnthropicAssembler()
                                             saw_stop = False
                                             buf = b""
+                                            seen = b""   # first bytes, for diagnosing a non-SSE body
                                             async for chunk in r.aiter_bytes():
+                                                if len(seen) < 400:
+                                                    seen += chunk[:400]
                                                 buf += chunk
                                                 while b"\n\n" in buf:
                                                     block, buf = buf.split(b"\n\n", 1)
@@ -1129,7 +1340,18 @@ async def forward(request, path):
                                                     if b.get("type") == "tool_use" and "input" not in b:
                                                         complete = False; break
                                             if not complete:
+                                                # An HTTP-200 stream that yielded no usable
+                                                # frames is usually a JSON error body served
+                                                # with an event-stream content-type. Name that
+                                                # in the retry reason instead of the misleading
+                                                # "incomplete via <proxy>", which blamed the
+                                                # exit IP for the upstream's own answer and is
+                                                # why no log row ever explained the switch.
                                                 _mark_used_bad(candidates, used, "truncated")
+                                                if not obj or not obj.get("content"):
+                                                    _peek = seen.decode("utf-8", "replace").strip()
+                                                    if _peek.startswith("{"):
+                                                        return ("error_body", r.status_code, _peek, used)
                                                 return ("retry", f"incomplete via {used}", used)
                                             _mark_used_good(candidates, used, int((time.time() - t0) * 1000))
                                             return ("ok", obj, used)
@@ -1161,9 +1383,48 @@ async def forward(request, path):
                                            ip=client_ip, model=current_model_log, endpoint=tgt["name"], final=True)
                                 logged = True
                                 return
+                            if res[0] == "error_body":
+                                # HTTP 200 but the "stream" was a JSON error object.
+                                # Treat it exactly like a 4xx from this provider:
+                                # classify it, log the real text, then fail over to the
+                                # next target instead of retrying proxies for it.
+                                _, _st, _txt, _u = res
+                                try:
+                                    err = json.loads(_txt)
+                                except Exception:
+                                    err = {"type": "error", "error": {"message": _txt[:400]}}
+                                _fatal = _request_fatal(400, _txt)
+                                _log(method=request.method, path=path, status=400,
+                                     proxy=used_url, attempts=attempts, stream=1,
+                                     redactions=redactions,
+                                     ms=int((time.time() - t0) * 1000),
+                                     note=(f"size refusal in 200-stream ({_fatal})" if _fatal
+                                           else "error JSON served as event-stream") + f": {_clip(_txt)}",
+                                     ip=client_ip, model=current_model_log,
+                                     endpoint=tgt["name"], detail=_txt[:1500])
+                                last_err = (400, err, tgt["name"], used_url)
+                                upstream_rejected = True
+                                break
                             if res[0] == "error":
                                 _, status, err, _u = res
-                                err_full = json.dumps(err)
+                                err_full = json.dumps(err, ensure_ascii=False)
+                                # SIZE REFUSAL: this provider's verdict on these bytes is
+                                # final, so stop spending its proxies/keys. A different
+                                # provider may still accept the same payload (tokenizers
+                                # differ — see _request_fatal), so we fail over to the
+                                # NEXT target rather than returning here.
+                                _fatal = _request_fatal(status, err_full)
+                                if _fatal:
+                                    _log(method=request.method, path=path, status=status,
+                                         proxy=used_url, attempts=attempts, stream=1,
+                                         redactions=redactions,
+                                         ms=int((time.time() - t0) * 1000),
+                                         note=f"size refusal — skipping this endpoint's retries ({_fatal}): {_clip(err_full)}",
+                                         ip=client_ip, model=current_model_log,
+                                         endpoint=tgt["name"], detail=err_full[:1500])
+                                    last_err = (status, err, tgt["name"], used_url)
+                                    upstream_rejected = True
+                                    break
                                 # Per-key refusal (quota/credit): retry the identical
                                 # request on this provider's next key. Nothing has been
                                 # sent to the client yet, so the retry is invisible.
@@ -1180,8 +1441,10 @@ async def forward(request, path):
                                     continue
                                 _log(method=request.method, path=path, status=status, proxy=used_url,
                                      attempts=attempts, stream=1, redactions=redactions,
-                                     ms=int((time.time() - t0) * 1000), note=f"upstream rejected: {err_full[:100]}",
-                                     ip=client_ip, model=current_model_log, endpoint=tgt["name"])
+                                     ms=int((time.time() - t0) * 1000),
+                                     note=f"upstream rejected: {_clip(err_full)}",
+                                     ip=client_ip, model=current_model_log,
+                                     endpoint=tgt["name"], detail=err_full[:1500])
                                 last_err = (status, err, tgt["name"], used_url)
                                 upstream_rejected = True
                                 break  # this target rejected the content — try NEXT target
@@ -1195,11 +1458,11 @@ async def forward(request, path):
                                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                                        ip=client_ip, model=current_model_log, endpoint=tgt["name"])
 
-                            if any(x in detail for x in ep_kws):
+                            if _match_failover_detail(ep_kws, detail):
                                 last_err = (503, {"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover keyword."}}, tgt["name"], used_url)
                                 upstream_rejected = True
                                 break
-                            elif any(x in detail for x in proxy_kws):
+                            elif _match_failover_detail(proxy_kws, detail):
                                 pass # Just retry proxy
                             else:
                                 # Default counting for consecutive unknown errors
@@ -1306,6 +1569,21 @@ async def forward(request, path):
                                 body_peek = ""
                             await r.aclose(); await client.aclose()
                             _mark_used_good(candidates, used_url, int((time.time() - t0) * 1000))
+                            # STOP-ON-FATAL (raw relay path): a size refusal is this
+                            # provider's final verdict on these bytes — no other proxy
+                            # or key of the same provider can change it. Break to the
+                            # NEXT target instead of burning this one's budget.
+                            _fatal = _request_fatal(r.status_code, body_peek)
+                            if _fatal:
+                                _log(method=request.method, path=path, status=r.status_code,
+                                     proxy=used_url, attempts=attempts, stream=1,
+                                     redactions=redactions,
+                                     ms=int((time.time() - t0) * 1000),
+                                     note=f"size refusal — skipping this endpoint's retries ({_fatal}): {_clip(body_peek)}",
+                                     ip=client_ip, model=current_model_log,
+                                     endpoint=tgt["name"], detail=body_peek[:1500])
+                                detail = f"{tgt['name']} {r.status_code} size refusal"
+                                break
                             if key_idx + 1 < len(ep_keys) and _should_rotate_key(tgt, f"{r.status_code} {body_peek}"):
                                 key_idx += 1
                                 theaders = _target_headers(request, tgt, ep_keys[key_idx])
@@ -1341,7 +1619,7 @@ async def forward(request, path):
                         _mark_used_bad(candidates, used_url, type(e).__name__)
                         _log(method=request.method, path=path, status=502, proxy=used_url, attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                         fail_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,RemoteProtocolError").split(",") if k.strip()]
-                        if any(x in detail for x in fail_kws):
+                        if _match_failover_detail(fail_kws, detail):
                             consecutive_5xx += 1
                             if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
                                 _log(method=request.method, path=path, status=503, proxy=used_url, attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"smart failover: {tgt['name']} returned 5xx {consecutive_5xx} times in a row", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
@@ -1409,7 +1687,22 @@ async def forward(request, path):
                 # this refusal is one a DIFFERENT KEY could satisfy — a quota/credit
                 # error is per-key, so rotating is the whole point of extra_keys.
                 err_full = payload.decode('utf-8', 'replace') if isinstance(payload, bytes) else str(payload)
-                err_text = err_full[:100]
+                err_text = _clip(err_full)
+                # STOP-ON-FATAL (non-stream path): a size refusal is this provider's
+                # final verdict on these bytes, so stop burning its keys and proxies.
+                # Failover to the NEXT provider still happens (see _request_fatal —
+                # tokenizers differ), it just no longer costs 4 wasted proxy rounds.
+                _fatal = _request_fatal(status, err_full)
+                if _fatal:
+                    _log(method=request.method, path=path, status=status, proxy=used_url,
+                         attempts=attempts, stream=0, redactions=redactions,
+                         ms=int((time.time() - t0) * 1000),
+                         note=f"size refusal — skipping this endpoint's retries ({_fatal}): {err_text}",
+                         ip=client_ip, model=current_model_log, endpoint=tgt["name"],
+                         detail=err_full[:1500])
+                    last = (status, ct, payload, tgt["name"], used_url)
+                    upstream_rejected = True
+                    break
                 if key_idx + 1 < len(ep_keys) and _should_rotate_key(tgt, f"{status} {err_full}"):
                     key_idx += 1
                     theaders = _target_headers(request, tgt, ep_keys[key_idx])
@@ -1439,12 +1732,12 @@ async def forward(request, path):
                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                        ip=client_ip, model=current_model_log, endpoint=tgt["name"])
 
-            if any(x in detail for x in ep_kws):
+            if _match_failover_detail(ep_kws, detail):
                 payload = json.dumps({"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover."}}).encode()
                 last = (503, "application/json", payload, tgt["name"], used_url)
                 upstream_rejected = True
                 break
-            elif any(x in detail for x in proxy_kws):
+            elif _match_failover_detail(proxy_kws, detail):
                 pass
             else:
                 consecutive_5xx += 1
