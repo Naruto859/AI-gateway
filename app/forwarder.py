@@ -1339,6 +1339,24 @@ async def forward(request, path):
                 logged = False   # ensure we ALWAYS write a log, even if client disconnects
                 last_proxy = ""
                 last_tgt_name = ""
+                # Emit one keepalive ping BEFORE contacting any upstream.
+                #
+                # Measured 2026-09-02: a Cloudflare-proxied host held the response
+                # headers until the first body byte arrived (headers_at=70.0s on a
+                # 1.2M-char request), because CF buffers until the origin produces
+                # something. Cloudflare's free plan then aborts with 524 if that
+                # takes ~100s — so a slow first upstream killed even a STREAM, and
+                # the 417s stream that survived only survived because its headers
+                # happened to land at 70s. Sending a ping immediately starts the
+                # byte flow in milliseconds, after which the periodic pings keep
+                # the timer reset for as long as the generation needs.
+                #
+                # Safe by protocol: the Anthropic SDK explicitly ignores `ping`
+                # events, and StreamingResponse has already committed HTTP 200, so
+                # this changes nothing about how errors are delivered (they still
+                # arrive as an SSE `error` event, as before).
+                if _fx("fx_early_ping", targets[0] if targets else None):
+                    yield PING
                 try:
                     for tgt in targets:
                         current_model_log = tgt.get("model_override") or req_model
@@ -1665,6 +1683,13 @@ async def forward(request, path):
             attempts = 0
             forwarded = False
             detail = ""
+            # Same reasoning as the anthropic path: start the byte flow before the
+            # first upstream call so a CDN in front of us cannot time out waiting
+            # for headers. OpenAI-style clients tolerate a leading comment frame,
+            # which is the SSE-standard no-op (":" line), so use that rather than
+            # an `event: ping` they might not expect.
+            if client_wants_stream and _fx("fx_early_ping", targets[0] if targets else None):
+                yield b": keepalive\n\n"
             for tgt in targets:
                 current_model_log = tgt.get("model_override") or req_model
                 if client_wants_stream:

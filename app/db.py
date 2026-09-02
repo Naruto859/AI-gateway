@@ -122,7 +122,11 @@ DEFAULT_SETTINGS = {
     "fx_method_passthrough": "1",                  # GET/HEAD (e.g. /v1/models) go upstream as
                                                    # GET. OFF = old behaviour, forwarded as POST
                                                    # and every provider answered 404
-    "fx_strict_waf": "1",                          # only a real challenge page counts as WAF.
+    "fx_strict_waf": "1",
+    # Send one SSE keepalive before contacting any upstream, so a CDN in front
+    # of the gateway cannot 524 while waiting for the first byte. Measured: CF
+    # held headers until 70s on a large request and aborts at ~100s.
+    "fx_early_ping": "1",                          # only a real challenge page counts as WAF.
                                                    # OFF = any text/html response counts, which
                                                    # mislabelled ordinary nginx error pages
 }

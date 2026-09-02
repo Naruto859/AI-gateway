@@ -1620,6 +1620,7 @@ function openEndpointSettings(e){
 <div class="fsect">
   <div class="fsect-hd">Failure diagnosis toggles</div>
   <div class="fsect-sub">These rules decide whether a failure belongs to this endpoint, its proxy, or the request. They are endpoint-specific — different providers may need different handling. Changes apply immediately, without restart.</div>
+  <div class="field"><div class="meta"><div class="lbl">Early keepalive</div><div class="desc">Send one SSE ping before calling the upstream, so a CDN (Cloudflare) cannot time out at ~100s waiting for the first byte.</div></div><div class="ctrl"><div class="tg" id="esFxPing"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Trust HTTP status</div><div class="desc">Read 400/502 from the provider even when it incorrectly says the reply is a stream.</div></div><div class="ctrl"><div class="tg" id="esFxStatusCt"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Match number rules on status only</div><div class="desc">Prevents request IDs accidentally matching rules like 501.</div></div><div class="ctrl"><div class="tg" id="esFxKw"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Stop on context-size refusal</div><div class="desc">Skip remaining proxies/keys for this endpoint, then try the next provider.</div></div><div class="ctrl"><div class="tg" id="esFxSize"></div></div></div>
@@ -1878,6 +1879,7 @@ function openEndpointSettings(e){
   // still reaches every endpoint that never opted out.
   const EP_FX=[
     ['esFxStatusCt','fx_status_over_contenttype'],
+    ['esFxPing','fx_early_ping'],
     ['esFxKw','fx_status_only_keywords'],
     ['esFxSize','fx_size_refusal_stop'],
     ['esFxProxy','fx_proxy_not_endpoint'],
