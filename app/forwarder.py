@@ -38,8 +38,12 @@ from . import db, proxy_pool, filters, hedger
 # not the proxy's, and must not take a good proxy out of rotation.
 # ---------------------------------------------------------------------------
 _DED_COOLDOWN = {}
+# Exact exception/marker names only. A loose fragment like "conn" would also match
+# endpoint names and proxy hostnames that merely contain those letters, turning an
+# upstream's own verdict into a fake transport fault — the exact bug class this file
+# was cleaned of on 2026-09-02. Keep these specific.
 _DED_COOLDOWN_MARKERS = ("connecterror", "connecttimeout", "connectionerror",
-                         "proxyerror", "connect-failed", "conn")
+                         "proxyerror", "connect-failed")
 
 
 def _ded_cooldown_sec():
@@ -47,6 +51,87 @@ def _ded_cooldown_sec():
         return float(db.get_setting("dedicated_cooldown", "60") or 60)
     except (TypeError, ValueError):
         return 60.0
+
+
+# ---------------------------------------------------------------------------
+# Endpoint cooldown.
+#
+# Measured on the live gateway 2026-09-02: the priority-0 provider's OWN database
+# was down, answering every request with
+#   500 {"error":{"type":"new_api_error","message":"failed to connect to
+#        `user=newapi database=new-api` ... (postgres): tls error"}}
+# Failover worked — the next provider served the request — but nothing REMEMBERED
+# the outage, so all 4 requests in that window paid the same toll: hit the dead
+# provider first, wait ~5s, log a scary 500, then start over. Boss saw a dashboard
+# full of red rows for requests that actually succeeded, and every one of those
+# rows was avoidable.
+#
+# So remember it. An endpoint that just condemned ITSELF — its database is down,
+# it has no channel for the model, its key is invalid — will condemn itself again
+# a second later. Push it to the BACK of the target order for a short window.
+#
+# Deliberately a reorder and not a skip: if every endpoint is in cooldown the
+# original priority order is still walked in full, so this can never turn a
+# recoverable request into a hard failure. Worst case it costs the same as today.
+# ---------------------------------------------------------------------------
+_EP_COOLDOWN = {}
+
+# Failures that are properties of the ENDPOINT and will repeat immediately.
+# Deliberately excludes size/context refusals (a property of the payload, so the
+# next request may be fine) and anything transport-level (that is the proxy's
+# fault — see _proxy_local).
+_EP_COOLDOWN_MARKERS = (
+    "new_api_error", "model_not_found", "invalid_api_key", "no available channel",
+    "database error", "预扣", "订阅额度不足", "quota has been exhausted",
+    "insufficient_quota", "billing", "无可用渠道",
+)
+
+
+def _ep_cooldown_sec():
+    try:
+        return float(db.get_setting("endpoint_cooldown", "120") or 120)
+    except (TypeError, ValueError):
+        return 120.0
+
+
+def _note_endpoint_reject(tgt, text):
+    """Arm the cooldown when an endpoint's own failure will obviously repeat."""
+    if not tgt or not tgt.get("id"):
+        return
+    if not _fx("fx_endpoint_cooldown", tgt):
+        return
+    d = (text or "").lower()
+    if any(m in d for m in _EP_COOLDOWN_MARKERS):
+        _EP_COOLDOWN[tgt["id"]] = time.time() + _ep_cooldown_sec()
+
+
+def _ep_in_cooldown(eid):
+    until = _EP_COOLDOWN.get(eid)
+    if until is None:
+        return False
+    if until <= time.time():
+        _EP_COOLDOWN.pop(eid, None)
+        return False
+    return True
+
+
+def _order_targets(targets):
+    """Healthy endpoints first, recently self-condemned ones last.
+
+    Relative order is preserved inside each group, so an operator's priority
+    column still decides everything among healthy endpoints.
+    """
+    if not targets:
+        return targets
+    hot = [t for t in targets if not _ep_in_cooldown(t.get("id"))]
+    cold = [t for t in targets if _ep_in_cooldown(t.get("id"))]
+    return hot + cold if hot else targets
+
+
+def endpoint_cooldown_state():
+    """Seconds remaining per endpoint id — for the dashboard."""
+    now = time.time()
+    return {k: max(0, round(v - now)) for k, v in _EP_COOLDOWN.items() if v > now}
 
 
 def note_dedicated_failure(pid, detail):
@@ -970,7 +1055,8 @@ class OpenAIAssembler:
         return self.obj
 
 
-async def _consume_assemble(candidates, url, headers, body, timeout, kind, attempted_pids=None):
+async def _consume_assemble(candidates, url, headers, body, timeout, kind,
+                            attempted_pids=None, tgt=None):
     """Open an upstream STREAM through `proxy`, assemble the final object.
 
     Returns ("respond", status, content_type, body_bytes, used_url) or
@@ -998,6 +1084,22 @@ async def _consume_assemble(candidates, url, headers, body, timeout, kind, attem
                 # pass it straight through.
                 if "text/event-stream" not in ct:
                     raw = await r.aread()
+                    # A 2xx whose body is not a usable message is NOT a success.
+                    #
+                    # Measured 2026-09-02: proxy 3.122.224.70:15182 is an open
+                    # "echo" server — it answers CONNECT with 200 OK (Server: Oracle
+                    # Containers for J2EE) and returns its own diagnostic text
+                    # (`REMOTE_ADDR = ... REQUEST_METHOD = POST`) instead of relaying
+                    # to the provider at all. The gateway logged five of those as
+                    # `ok(assembled)` HTTP 200 in 0.1s and handed the client an
+                    # unusable body. An empty or non-JSON 2xx on an API route is a
+                    # broken exit, not an answer: retry on another proxy.
+                    # Toggle: fx_reject_empty_2xx.
+                    if (200 <= r.status_code < 300 and _fx("fx_reject_empty_2xx", tgt)
+                            and raw[:1] not in (b"{", b"[")):
+                        _mark_used_bad(candidates, used, "non-json-2xx")
+                        _peek = raw[:60].decode("utf-8", "replace").replace("\n", " ")
+                        return ("retry", f"non-json 2xx via {used}: {_peek!r}", used)
                     out_ct = "application/json" if raw[:1] in (b"{", b"[") else (ct or "application/json")
                     return ("respond", r.status_code, out_ct, raw, used)
                 asm = OpenAIAssembler() if kind == "openai" else AnthropicAssembler()
@@ -1307,7 +1409,7 @@ async def forward(request, path):
         client_wants_stream = "text/event-stream" in request.headers.get("accept", "")
 
     kind = "openai" if "chat/completions" in path else "anthropic"
-    targets = _targets(s)
+    targets = _order_targets(_targets(s))
     base_candidates = proxy_pool.ordered_for_request(max_retries)
     if not base_candidates:
         db.add_log(final=1, method=request.method, path=path, status=503, proxy="", attempts=0,
@@ -1613,6 +1715,9 @@ async def forward(request, path):
                                      note=f"upstream rejected: {_clip(err_full)}",
                                      ip=client_ip, model=current_model_log,
                                      endpoint=tgt["name"], detail=err_full[:1500])
+                                # This provider just condemned itself; remember it so
+                                # the next request does not pay the same toll first.
+                                _note_endpoint_reject(tgt, err_full)
                                 last_err = (status, err, tgt["name"], used_url)
                                 upstream_rejected = True
                                 break  # this target rejected the content — try NEXT target
@@ -1851,7 +1956,7 @@ async def forward(request, path):
             pids_before = len(attempted_pids)
             attempts += 1
             res = await _consume_assemble(candidates, url, theaders, up_body, timeout,
-                                          tgt_kind, attempted_pids)
+                                          tgt_kind, attempted_pids, tgt)
             _ensure_progress(candidates, attempted_pids, pids_before)
             # The proxy that actually carried the request — with hedging this is the
             # race winner, not necessarily candidates[0]. Logs used to name the wrong
@@ -1901,6 +2006,7 @@ async def forward(request, path):
                      attempts=attempts, stream=0, redactions=redactions,
                      ms=int((time.time() - t0) * 1000), note=f"upstream rejected: {err_text}",
                      ip=client_ip, model=current_model_log, endpoint=tgt["name"])
+                _note_endpoint_reject(tgt, err_full)
                 last = (status, ct, payload, tgt["name"], used_url)
                 upstream_rejected = True
                 break

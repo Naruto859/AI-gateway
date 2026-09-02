@@ -68,6 +68,8 @@ DEFAULT_SETTINGS = {
                                                   # is skipped after a connect-level failure.
                                                   # It has no DB row, so without this every
                                                   # request re-discovers that the phone is off
+    "endpoint_cooldown": "120",                   # seconds a self-condemned endpoint (DB down,
+                                                  # model_not_found, invalid key) is ordered LAST
     "proxy_scanner_enabled": "1",                 # 1 = background TCP scanner active (UI toggle read this before it existed)
     "proxy_scanner_interval": "5",
     "proxy_scanner_batch": "150",
@@ -122,13 +124,21 @@ DEFAULT_SETTINGS = {
     "fx_method_passthrough": "1",                  # GET/HEAD (e.g. /v1/models) go upstream as
                                                    # GET. OFF = old behaviour, forwarded as POST
                                                    # and every provider answered 404
-    "fx_strict_waf": "1",
+    "fx_strict_waf": "1",                          # only a real challenge page counts as WAF.
+                                                   # OFF = any text/html response counts, which
+                                                   # mislabelled ordinary nginx error pages
     # Send one SSE keepalive before contacting any upstream, so a CDN in front
     # of the gateway cannot 524 while waiting for the first byte. Measured: CF
     # held headers until 70s on a large request and aborts at ~100s.
-    "fx_early_ping": "1",                          # only a real challenge page counts as WAF.
-                                                   # OFF = any text/html response counts, which
-                                                   # mislabelled ordinary nginx error pages
+    "fx_early_ping": "1",
+    # Remember an endpoint that just condemned itself (its DB is down, no channel
+    # for the model, invalid key) and order it LAST for endpoint_cooldown seconds,
+    # instead of paying the same failed first hop on every single request.
+    "fx_endpoint_cooldown": "1",
+    # A 2xx whose body is not JSON is not an answer. Open "echo" proxies return
+    # 200 with their own diagnostic text and never reach the provider; without
+    # this the client got an unusable 200 and the log said ok.
+    "fx_reject_empty_2xx": "1",
 }
 
 
@@ -152,7 +162,8 @@ CREATE TABLE endpoints_new (
     proxy_priority            TEXT    DEFAULT '[]',
     proxy_fallback            INTEGER DEFAULT 1,
     key_failover_keywords     TEXT    DEFAULT '',
-    extra_keys                TEXT    DEFAULT '[]'
+    extra_keys                TEXT    DEFAULT '[]',
+    fx_flags                  TEXT    DEFAULT ''
 )
 """
 
@@ -359,6 +370,16 @@ def _init(c):
         c.execute("ALTER TABLE endpoints ADD COLUMN fx_flags TEXT DEFAULT ''")
 
     _drop_endpoint_url_unique(c)
+
+    # The rebuild above recreates `endpoints` from _ENDPOINTS_DDL and copies only the
+    # columns both versions share, so a column added by ALTER *before* the rebuild is
+    # dropped again on the way through. Measured 2026-09-02 on the staging gateway:
+    # fx_flags was ALTERed in, then silently lost, and every per-endpoint toggle
+    # override became impossible to save while the UI happily displayed them.
+    # Re-assert after the rebuild; ALTER is a no-op when the column already exists.
+    ecols = [r[1] for r in c.execute("PRAGMA table_info(endpoints)").fetchall()]
+    if "fx_flags" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN fx_flags TEXT DEFAULT ''")
 
     # logs: add ip / model / detail for the log-detail view
     lcols = [r[1] for r in c.execute("PRAGMA table_info(logs)").fetchall()]

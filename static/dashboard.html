@@ -1620,6 +1620,8 @@ function openEndpointSettings(e){
 <div class="fsect">
   <div class="fsect-hd">Failure diagnosis toggles</div>
   <div class="fsect-sub">These rules decide whether a failure belongs to this endpoint, its proxy, or the request. They are endpoint-specific — different providers may need different handling. Changes apply immediately, without restart.</div>
+  <div class="field"><div class="meta"><div class="lbl">Reject fake success</div><div class="desc">A 200 whose body is not a real reply (some free proxies answer with their own text) is treated as a bad exit and retried elsewhere.</div></div><div class="ctrl"><div class="tg" id="esFxEmpty2xx"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Remember a broken endpoint</div><div class="desc">If this provider says its own database is down, has no channel for the model, or the key is invalid, try it LAST for a short while instead of first on every request.</div></div><div class="ctrl"><div class="tg" id="esFxEpCool"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Early keepalive</div><div class="desc">Send one SSE ping before calling the upstream, so a CDN (Cloudflare) cannot time out at ~100s waiting for the first byte.</div></div><div class="ctrl"><div class="tg" id="esFxPing"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Trust HTTP status</div><div class="desc">Read 400/502 from the provider even when it incorrectly says the reply is a stream.</div></div><div class="ctrl"><div class="tg" id="esFxStatusCt"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Match number rules on status only</div><div class="desc">Prevents request IDs accidentally matching rules like 501.</div></div><div class="ctrl"><div class="tg" id="esFxKw"></div></div></div>
@@ -1880,6 +1882,8 @@ function openEndpointSettings(e){
   const EP_FX=[
     ['esFxStatusCt','fx_status_over_contenttype'],
     ['esFxPing','fx_early_ping'],
+    ['esFxEpCool','fx_endpoint_cooldown'],
+    ['esFxEmpty2xx','fx_reject_empty_2xx'],
     ['esFxKw','fx_status_only_keywords'],
     ['esFxSize','fx_size_refusal_stop'],
     ['esFxProxy','fx_proxy_not_endpoint'],
