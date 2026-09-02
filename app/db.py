@@ -92,6 +92,39 @@ DEFAULT_SETTINGS = {
     "keepalive_idle": "15",                       # seconds idle before first probe
     "keepalive_intvl": "3",                       # seconds between probes
     "keepalive_cnt": "200",                       # probe count (idle + intvl*cnt = total coverage)
+    # --- routing-fix toggles (Ciel, 2026-09-02) ---------------------------------
+    # Boss's requirement: "mujhe har cheez ka toggle chahiye, dynamic hona
+    # chahiye". Each fix below changed how a failure is CLASSIFIED, so each one
+    # gets its own switch — default ON (the measured-correct behaviour), set to
+    # "0" to fall back to the old behaviour without editing or redeploying code.
+    # Read live per request, so a toggle takes effect with no restart.
+    "fx_status_over_contenttype": "1",             # trust the HTTP status when an upstream
+                                                   # returns 400 with content-type
+                                                   # text/event-stream (new-api does this).
+                                                   # OFF = the old guard, which fed that JSON
+                                                   # error into the SSE assembler and blamed
+                                                   # the proxy for "incomplete"
+    "fx_status_only_keywords": "1",                # numeric failover keywords match the HTTP
+                                                   # STATUS only. OFF = old substring match on
+                                                   # the whole body, where an upstream request
+                                                   # id like ...518501558... matched rule "501"
+    "fx_size_refusal_stop": "1",                   # a "context window is full" refusal stops
+                                                   # THIS endpoint's proxy/key retries (other
+                                                   # providers are still tried). OFF = spend the
+                                                   # full budget re-sending identical bytes
+    "fx_proxy_not_endpoint": "1",                  # WAF/ConnectError/ReadError/truncated count
+                                                   # against the PROXY, not the provider. OFF =
+                                                   # old behaviour, where 2 bad proxies retired
+                                                   # a healthy endpoint via failover_5xx_threshold
+    "fx_refusal_is_answer": "1",                   # stop_reason=refusal with empty content is a
+                                                   # complete answer. OFF = treat it as a
+                                                   # truncated stream and retry everywhere
+    "fx_method_passthrough": "1",                  # GET/HEAD (e.g. /v1/models) go upstream as
+                                                   # GET. OFF = old behaviour, forwarded as POST
+                                                   # and every provider answered 404
+    "fx_strict_waf": "1",                          # only a real challenge page counts as WAF.
+                                                   # OFF = any text/html response counts, which
+                                                   # mislabelled ordinary nginx error pages
 }
 
 

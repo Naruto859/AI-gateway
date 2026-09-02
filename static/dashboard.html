@@ -646,6 +646,17 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 </div>
 </div>
 <div class="card">
+<h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2v6M12 16v6M4.9 4.9l4.2 4.2M14.9 14.9l4.2 4.2M2 12h6M16 12h6"/><circle cx="12" cy="12" r="3"/></svg></span>Failure Diagnosis <span style="margin-left:auto;font-size:11px;font-weight:700;padding:3px 9px;border-radius:7px;background:var(--g-100);color:var(--g-700)">7 rules</span></h2>
+<p class="sub">How the gateway decides WHOSE fault a failed request was: the proxy, the endpoint, or the request itself. Getting this wrong is what caused retry storms and endpoints being dropped for no reason. All ON is the measured-correct setting — turn one OFF only to compare behaviour.</p>
+<div class="field"><div class="meta"><div class="lbl">Trust status over content-type</div><div class="desc">Some providers reject a streaming request with HTTP 400 but still label it as a stream. ON = believe the 400. OFF = the old behaviour, where that error was reported as a broken proxy and the real reason never reached the log.</div></div><div class="ctrl"><div class="tg" id="tgFxStatusCt"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Match number rules on status only</div><div class="desc">Failover rules like 502 or 401 are status codes. ON = compare them to the response status. OFF = search them anywhere in the reply, where a provider's request id such as …518501558… accidentally matched "501" and made identical errors behave differently each time.</div></div><div class="ctrl"><div class="tg" id="tgFxKw"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Stop retrying an oversized request</div><div class="desc">ON = when a provider says the conversation is too long, skip its remaining proxies and keys and move straight to the next provider. OFF = keep resending the same oversized message, which measured 15 attempts and 465 seconds for one request.</div></div><div class="ctrl"><div class="tg" id="tgFxSize"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Blame the proxy, not the endpoint</div><div class="desc">ON = connection errors, read errors and blocked pages count against the exit IP, so a bad network never retires a healthy provider. OFF = old behaviour, where two unlucky proxies dropped a working endpoint and the retry limit was never reached.</div></div><div class="ctrl"><div class="tg" id="tgFxProxy"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Treat a refusal as an answer</div><div class="desc">When the model declines to reply it sends a valid but empty answer. ON = deliver it. OFF = call it a broken stream and retry it on every proxy and provider — measured 11 attempts and 75 seconds for an answer that arrived on the first try.</div></div><div class="ctrl"><div class="tg" id="tgFxRefusal"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Keep the request method</div><div class="desc">ON = an info request such as the model list is sent upstream as GET. OFF = old behaviour, sent as POST, so every provider answered "Invalid URL" 404.</div></div><div class="ctrl"><div class="tg" id="tgFxMethod"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Strict bot-block detection</div><div class="desc">ON = only a real challenge page counts as blocked. OFF = any web page counts, which labelled ordinary server error pages as "WAF" and hid what actually failed. Cloudflare in front of a provider is normal and is not a block.</div></div><div class="ctrl"><div class="tg" id="tgFxWaf"></div></div></div>
+</div>
+<div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></span>Hot Pool Engine <span id="hpStatus" style="margin-left:auto;font-size:11px;font-weight:700;padding:3px 9px;border-radius:7px;background:var(--g-100);color:var(--g-700)"></span></h2>
 <p class="sub">Pre-verified fast proxies kept in memory for instant use. Reduces latency dramatically.</p>
 <div class="field"><div class="meta"><div class="lbl">Hot Pool</div><div class="desc">ON = keep a pool of verified proxies in memory, refresh periodically. OFF = use DB proxies directly (for premium/paid proxies).</div></div><div class="ctrl"><div class="tg" id="tgHotPool"></div></div></div>
@@ -1155,6 +1166,21 @@ bindToggle('tgHotPool','hot_pool_enabled','Hot Pool',on=>{
 });
 bindToggle('tgHotPoolApi','hot_pool_api_test','API testing');
 
+// --- Failure Diagnosis rules (Ciel, 2026-09-02) ---------------------------
+// Each entry is one classification fix, exposed so Boss can switch any of them
+// back to the old behaviour without a redeploy. Kept as a table rather than
+// seven hand-written lines so adding a rule stays a one-line change.
+const FX_TOGGLES=[
+  ['tgFxStatusCt','fx_status_over_contenttype','Trust status over content-type'],
+  ['tgFxKw','fx_status_only_keywords','Number rules on status only'],
+  ['tgFxSize','fx_size_refusal_stop','Stop retrying oversized requests'],
+  ['tgFxProxy','fx_proxy_not_endpoint','Blame the proxy, not the endpoint'],
+  ['tgFxRefusal','fx_refusal_is_answer','Refusal is an answer'],
+  ['tgFxMethod','fx_method_passthrough','Keep the request method'],
+  ['tgFxWaf','fx_strict_waf','Strict bot-block detection'],
+];
+FX_TOGGLES.forEach(([id,key,label])=>bindToggle(id,key,label));
+
 bindToggle('tgScanner','proxy_scanner_enabled','Scanner',on=>{
   if($('#scanSettingsWrap'))$('#scanSettingsWrap').style.display=on?'block':'none';
 });
@@ -1243,6 +1269,12 @@ function render(){
   $('#tgHotPool').classList.toggle('on',s.hot_pool_enabled==='1');
   if($('#hpSettingsWrap')) $('#hpSettingsWrap').style.display=s.hot_pool_enabled==='1'?'block':'none';
     $('#tgHotPoolApi').classList.toggle('on',s.hot_pool_api_test!=='0');
+  // Failure Diagnosis rules: default ON, so anything that is not the string '0'
+  // shows as enabled (covers a DB row that has not been written yet).
+  if(typeof FX_TOGGLES!=='undefined')FX_TOGGLES.forEach(([id,key])=>{
+    const el=$('#'+id);
+    if(el)el.classList.toggle('on',(s[key]??'1')!=='0');
+  });
   
   const scanOn=(s.proxy_scanner_enabled??'1')!=='0';
   $('#tgScanner').classList.toggle('on',scanOn);

@@ -314,6 +314,24 @@ _REQUEST_FATAL_MARKERS = (
 )
 
 
+def _fx(key, default="1"):
+    """Is routing-fix `key` enabled? Every fix Ciel added is a live toggle.
+
+    Boss's requirement (2026-09-02): "mujhe har cheez ka toggle chahiye, dynamic
+    hona chahiye" — nothing should be hardcoded behaviour he cannot switch off
+    from the settings page. Each fix therefore reads its own `fx_*` setting and
+    defaults to ON, so an upgrade changes behaviour immediately but stays
+    reversible without touching code.
+
+    Read per-call on purpose: `db.get_setting` is a cheap indexed lookup and the
+    operator must not have to restart the gateway for a toggle to take effect.
+    """
+    try:
+        return db.get_setting(key, default) != "0"
+    except Exception:
+        return default != "0"
+
+
 def _request_fatal(status, text):
     """Reason string when this refusal is about the REQUEST's size, else None.
 
@@ -328,6 +346,8 @@ def _request_fatal(status, text):
     well accept it.
     """
     if status not in (400, 413, 422):
+        return None
+    if not _fx("fx_size_refusal_stop"):
         return None
     low = (text or "").lower()
     for m in _REQUEST_FATAL_MARKERS:
@@ -356,8 +376,11 @@ def _match_failover(keywords, status, body_text):
 
     Numeric keywords are therefore matched against the HTTP STATUS ONLY;
     non-numeric keywords are matched against the body, case-insensitively.
+
+    Toggle `fx_status_only_keywords` restores the old body-wide substring match.
     """
     low = (body_text or "").lower()
+    strict = _fx("fx_status_only_keywords")
     for k in keywords:
         k = (k or "").strip()
         if not k:
@@ -365,6 +388,8 @@ def _match_failover(keywords, status, body_text):
         if k.isdigit():
             if int(k) == status:
                 return True
+            if not strict and k in low:
+                return True     # legacy behaviour: digits matched anywhere
         elif k.lower() in low:
             return True
     return False
@@ -395,7 +420,11 @@ def _proxy_local(detail):
     anything wrong. That is Boss's "kabhi max retry karta hai, kabhi switch kar
     deta hai, aur logs mein kyun nahi dikhta" — the reason was never logged
     because the code never knew it was making a decision.
+
+    Toggle `fx_proxy_not_endpoint` turns this attribution off.
     """
+    if not _fx("fx_proxy_not_endpoint"):
+        return False
     d = (detail or "").lower()
     return any(m in d for m in _PROXY_LOCAL_MARKERS)
 
@@ -480,13 +509,46 @@ def _build_upstream_headers(request, upstream_key, kind):
     return headers
 
 
-def _is_waf(resp_headers, sniff=b""):
+def _is_waf(resp_headers, sniff=b"", status=None):
+    """Does this response look like a WAF/bot-challenge page?
+
+    Boss pushed back on this (2026-09-02): "mera mobile IP residential hai, usme
+    Cloudflare nahi aata" — yet the log was full of `WAF via
+    http://100.97.11.41:8888`. He was right. Direct tests through that exact
+    proxy returned `application/json` 200 three times (500 B, 293 KB, 1,025 KB),
+    each with `server: cloudflare` — Cloudflare fronting the provider is normal
+    and is NOT a challenge.
+
+    The old rule was `"text/html" in content-type -> WAF`, which also catches an
+    nginx 502/413 error PAGE, a captive-portal page from a flaky phone network,
+    and any provider that returns HTML for an ordinary error. Those are transport
+    or endpoint faults, not bot challenges, so the "WAF" label buried the real
+    cause in every log row it touched.
+
+    Strict rules now:
+      * a known challenge fingerprint in the body -> WAF, whatever the status;
+      * HTML with a 2xx status -> WAF (a JSON API answering 200 with a web page
+        means something intercepted the request);
+      * HTML with a 4xx/5xx status -> NOT WAF, because the status path already
+        classifies it correctly and reports the real reason.
+    `fx_strict_waf=0` restores the old any-HTML behaviour.
+    """
     ct = resp_headers.get("content-type", "")
-    if "text/html" in ct:
+    low = sniff[:1200].lower()
+    if b"aliyun_waf" in low:
         return True
-    if b"aliyun_waf" in sniff[:600]:
-        return True
-    return False
+    if "text/html" not in ct:
+        return False
+    if not _fx("fx_strict_waf"):
+        return True     # legacy: any HTML counts
+    for m in (b"cf-browser-verification", b"cf_chl", b"just a moment",
+              b"checking your browser", b"attention required", b"captcha",
+              b"ddos-guard", b"__cf_bm", b"security check", b"incapsula"):
+        if m in low:
+            return True
+    if status is None:
+        return True     # no status to reason with: keep the old, safer verdict
+    return 200 <= int(status) < 300
 
 
 def _err(message, status=503, etype="api_error"):
@@ -891,7 +953,7 @@ async def _consume_assemble(candidates, url, headers, body, timeout, kind, attem
             async with client.stream("POST", url, headers=headers, content=body) as r:
                 ct = r.headers.get("content-type", "")
                 used = _race_used(candidates, hedge_id, attempted_pids)
-                if _is_waf(r.headers):
+                if _is_waf(r.headers, status=r.status_code):
                     _mark_used_bad(candidates, used, "waf")
                     return ("retry", "waf", used)
                 if r.status_code >= 500:
@@ -1056,7 +1118,7 @@ async def test_endpoint(url, api_mode, api_key, model, message, history=None, ma
                 # depends on WHO answered: an Aliyun WAF block page means this exit IP
                 # is refused, so rotate; a JSON API error means the endpoint refused
                 # the request itself and a different IP will not help.
-                waf = _is_waf(r.headers, r.content[:600])
+                waf = _is_waf(r.headers, r.content[:600], status=r.status_code)
                 if waf:
                     detail = f"WAF block ({r.status_code}) — this exit IP is refused by the endpoint's firewall"
                     last_status = r.status_code
@@ -1174,7 +1236,8 @@ async def forward(request, path):
     # they take a direct, method-correct path: first enabled endpoint, its own
     # key, no proxy hedging, no retry storm. If it fails we return the upstream's
     # own answer rather than fabricating a 404 from a different provider.
-    if request.method in ("GET", "HEAD") and not body:
+    # Toggle: fx_method_passthrough.
+    if request.method in ("GET", "HEAD") and not body and _fx("fx_method_passthrough"):
         tgts = _targets(s)
         if tgts:
             tgt = tgts[0]
@@ -1279,7 +1342,7 @@ async def forward(request, path):
                                     async with _build_client(candidates, timeout, hedge_id) as client:
                                         async with client.stream("POST", url, headers=theaders, content=up_body) as r:
                                             used = _race_used(candidates, hedge_id, attempted_pids)
-                                            if _is_waf(r.headers):
+                                            if _is_waf(r.headers, status=r.status_code):
                                                 _mark_used_bad(candidates, used, "waf")
                                                 return ("retry", f"WAF via {used}", used)
                                             ct = r.headers.get("content-type", "")
@@ -1307,7 +1370,10 @@ async def forward(request, path):
                                             #      surfacing a verdict the client could act on.
                                             # The status code is authoritative; content-type is
                                             # only used to decide how to READ the body.
-                                            if r.status_code >= 400:
+                                            # Toggle: fx_status_over_contenttype.
+                                            if r.status_code >= 400 and (
+                                                    _fx("fx_status_over_contenttype")
+                                                    or "text/event-stream" not in ct):
                                                 raw = await r.aread()
                                                 err_str = str(r.status_code) + " " + raw[:300].decode('utf-8', 'replace')
                                                 body_str = raw[:400].decode('utf-8', 'replace')
@@ -1378,11 +1444,13 @@ async def forward(request, path):
                                             # 11 attempts, 5 providers, 75.8 s, while the
                                             # client saw nothing but pings. A refusal is
                                             # final: deliver it.
+                                            # Toggle: fx_refusal_is_answer.
                                             _stop = (obj or {}).get("stop_reason")
+                                            _stop_ok = (_fx("fx_refusal_is_answer")
+                                                        and _stop in ("refusal", "stop_sequence",
+                                                                      "max_tokens", "end_turn"))
                                             complete = bool(saw_stop and obj and _stop
-                                                            and (obj.get("content")
-                                                                 or _stop in ("refusal", "stop_sequence",
-                                                                              "max_tokens", "end_turn")))
+                                                            and (obj.get("content") or _stop_ok))
                                             if complete:
                                                 for b in obj.get("content", []):
                                                     if b.get("type") == "tool_use" and "input" not in b:
@@ -1591,7 +1659,7 @@ async def forward(request, path):
                         r = await client.send(req, stream=True)
                         used_url = _race_used(candidates, hedge_id, attempted_pids)
                         _ensure_progress(candidates, attempted_pids, pids_before)
-                        if _is_waf(r.headers) or r.status_code >= 500:
+                        if _is_waf(r.headers, status=r.status_code) or r.status_code >= 500:
                             await r.aclose(); await client.aclose()
                             _mark_used_bad(candidates, used_url, "waf/5xx")
                             # `detail` used to be assigned inside the `if type(...) == int:`
@@ -1599,7 +1667,7 @@ async def forward(request, path):
                             # the previous attempt's text — or was empty on attempt 1.
                             detail = f"{r.status_code} via {used_url}"
                             _log(method=request.method, path=path, status=502, proxy=used_url, attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
-                            if _is_waf(r.headers): pass
+                            if _is_waf(r.headers, status=r.status_code): pass
                             else:
                                 consecutive_5xx += 1
                                 if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
