@@ -22,7 +22,7 @@ import socket
 import asyncio
 import httpx
 from starlette.responses import StreamingResponse, Response, JSONResponse
-from . import db, proxy_pool, filters, hedger
+from . import db, proxy_pool, filters, hedger, translate
 
 # ---------------------------------------------------------------------------
 # Dedicated-proxy cooldown.
@@ -38,8 +38,12 @@ from . import db, proxy_pool, filters, hedger
 # not the proxy's, and must not take a good proxy out of rotation.
 # ---------------------------------------------------------------------------
 _DED_COOLDOWN = {}
+# Exact exception/marker names only. A loose fragment like "conn" would also match
+# endpoint names and proxy hostnames that merely contain those letters, turning an
+# upstream's own verdict into a fake transport fault — the exact bug class this file
+# was cleaned of on 2026-09-02. Keep these specific.
 _DED_COOLDOWN_MARKERS = ("connecterror", "connecttimeout", "connectionerror",
-                         "proxyerror", "connect-failed", "conn")
+                         "proxyerror", "connect-failed")
 
 
 def _ded_cooldown_sec():
@@ -47,6 +51,87 @@ def _ded_cooldown_sec():
         return float(db.get_setting("dedicated_cooldown", "60") or 60)
     except (TypeError, ValueError):
         return 60.0
+
+
+# ---------------------------------------------------------------------------
+# Endpoint cooldown.
+#
+# Measured on the live gateway 2026-09-02: the priority-0 provider's OWN database
+# was down, answering every request with
+#   500 {"error":{"type":"new_api_error","message":"failed to connect to
+#        `user=newapi database=new-api` ... (postgres): tls error"}}
+# Failover worked — the next provider served the request — but nothing REMEMBERED
+# the outage, so all 4 requests in that window paid the same toll: hit the dead
+# provider first, wait ~5s, log a scary 500, then start over. Boss saw a dashboard
+# full of red rows for requests that actually succeeded, and every one of those
+# rows was avoidable.
+#
+# So remember it. An endpoint that just condemned ITSELF — its database is down,
+# it has no channel for the model, its key is invalid — will condemn itself again
+# a second later. Push it to the BACK of the target order for a short window.
+#
+# Deliberately a reorder and not a skip: if every endpoint is in cooldown the
+# original priority order is still walked in full, so this can never turn a
+# recoverable request into a hard failure. Worst case it costs the same as today.
+# ---------------------------------------------------------------------------
+_EP_COOLDOWN = {}
+
+# Failures that are properties of the ENDPOINT and will repeat immediately.
+# Deliberately excludes size/context refusals (a property of the payload, so the
+# next request may be fine) and anything transport-level (that is the proxy's
+# fault — see _proxy_local).
+_EP_COOLDOWN_MARKERS = (
+    "new_api_error", "model_not_found", "invalid_api_key", "no available channel",
+    "database error", "预扣", "订阅额度不足", "quota has been exhausted",
+    "insufficient_quota", "billing", "无可用渠道",
+)
+
+
+def _ep_cooldown_sec():
+    try:
+        return float(db.get_setting("endpoint_cooldown", "120") or 120)
+    except (TypeError, ValueError):
+        return 120.0
+
+
+def _note_endpoint_reject(tgt, text):
+    """Arm the cooldown when an endpoint's own failure will obviously repeat."""
+    if not tgt or not tgt.get("id"):
+        return
+    if not _fx("fx_endpoint_cooldown", tgt):
+        return
+    d = (text or "").lower()
+    if any(m in d for m in _EP_COOLDOWN_MARKERS):
+        _EP_COOLDOWN[tgt["id"]] = time.time() + _ep_cooldown_sec()
+
+
+def _ep_in_cooldown(eid):
+    until = _EP_COOLDOWN.get(eid)
+    if until is None:
+        return False
+    if until <= time.time():
+        _EP_COOLDOWN.pop(eid, None)
+        return False
+    return True
+
+
+def _order_targets(targets):
+    """Healthy endpoints first, recently self-condemned ones last.
+
+    Relative order is preserved inside each group, so an operator's priority
+    column still decides everything among healthy endpoints.
+    """
+    if not targets:
+        return targets
+    hot = [t for t in targets if not _ep_in_cooldown(t.get("id"))]
+    cold = [t for t in targets if _ep_in_cooldown(t.get("id"))]
+    return hot + cold if hot else targets
+
+
+def endpoint_cooldown_state():
+    """Seconds remaining per endpoint id — for the dashboard."""
+    now = time.time()
+    return {k: max(0, round(v - now)) for k, v in _EP_COOLDOWN.items() if v > now}
 
 
 def note_dedicated_failure(pid, detail):
@@ -140,12 +225,61 @@ def _keepalive_opts():
         cnt = int(float(db.get_setting("keepalive_cnt", "174") or 174))
     except (TypeError, ValueError):
         idle, intvl, cnt = 30, 5, 174
+    # Linux rejects TCP_KEEPCNT above 127 with EINVAL, and setsockopt failing takes
+    # the WHOLE connection down (httpcore raises ConnectError: [Errno 22] Invalid
+    # argument), not just the option. The shipped default of 174 — and the 200 in
+    # every live DB — are both over that limit, so these options could only ever
+    # have worked by never being applied. Clamp instead of erroring: a caller asking
+    # for "probe basically forever" gets the longest the kernel allows.
+    # TCP_KEEPIDLE/INTVL are 1..32767 seconds.
+    idle = max(1, min(idle, 32767))
+    intvl = max(1, min(intvl, 32767))
+    cnt = max(1, min(cnt, 127))
     return [
         (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
         (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, idle),
         (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, intvl),
         (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, cnt),
     ]
+
+
+class _KeepaliveBackend:
+    """Applies socket options to proxied connections, which httpcore does not.
+
+    `httpx.AsyncHTTPTransport(socket_options=...)` looks like it covers every
+    connection, but httpcore's `AsyncHTTPProxy.create_connection()` builds
+    AsyncForwardHTTPConnection / AsyncTunnelHTTPConnection WITHOUT passing
+    `socket_options` down (verified in httpcore 1.0.9), even though both classes
+    accept it. Only the direct, proxy-less pool honours it.
+
+    Every upstream call in this gateway goes through a proxy, so in practice TCP
+    keepalive was configured and never actually applied: the sockets carried the
+    system default SO_KEEPALIVE=0 / idle 7200s. A silent tunnel could therefore be
+    dropped by any middlebox while a model was still thinking, and the resulting
+    clean EOF is indistinguishable from the provider truncating the stream.
+
+    This wrapper sits at the network-backend layer, below that branch, and fills in
+    the options when the caller passed none.
+    """
+
+    def __init__(self, inner, opts):
+        self._inner = inner
+        self._opts = opts
+
+    async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        return await self._inner.connect_tcp(
+            host, port, timeout=timeout, local_address=local_address,
+            socket_options=socket_options if socket_options else self._opts,
+        )
+
+    async def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        return await self._inner.connect_unix_socket(
+            path, timeout=timeout,
+            socket_options=socket_options if socket_options else self._opts,
+        )
+
+    async def sleep(self, seconds):
+        return await self._inner.sleep(seconds)
 
 
 def _build_client(candidates, timeout, hedge_id=None):
@@ -163,7 +297,15 @@ def _build_client(candidates, timeout, hedge_id=None):
         proxy = httpx.Proxy(f"http://127.0.0.1:{hedger.hedger_port()}", headers=hdrs)
     else:
         proxy = candidates[0]["url"]
-    transport = httpx.AsyncHTTPTransport(proxy=proxy, verify=False, socket_options=_keepalive_opts())
+    opts = _keepalive_opts()
+    transport = httpx.AsyncHTTPTransport(proxy=proxy, verify=False, socket_options=opts)
+    # httpcore drops socket_options on the proxied path (see _KeepaliveBackend), and
+    # every request here is proxied — so wrap the pool's network backend to apply
+    # them for real. Guarded by hasattr so a future httpcore that changes this
+    # internal name degrades to the old behaviour instead of crashing.
+    pool = getattr(transport, "_pool", None)
+    if pool is not None and hasattr(pool, "_network_backend"):
+        pool._network_backend = _KeepaliveBackend(pool._network_backend, opts)
     return httpx.AsyncClient(verify=False, transport=transport, timeout=timeout)
 
 
@@ -269,8 +411,49 @@ _PROXY_LOCAL_MARKERS = (
     "waf", "non-sse", "truncated", "incomplete", "empty-stream", "proxy switch",
     "connecterror", "connecttimeout", "connectionerror", "readtimeout", "writetimeout",
     "pooltimeout", "readerror", "writeerror", "remoteprotocolerror", "proxyerror",
-    "sslerror", "timeoutexception", "conn",
+    "sslerror", "timeoutexception",
 )
+
+# A SUBSET of the above that CANNOT be the exit IP's fault when it repeats across
+# DIFFERENT exit IPs (Ciel, 2026-09-05 — this is Boss's "credit to tha, phir sab
+# fail kyun hua" root cause).
+#
+# Measured on 2026-09-04 18:16-18:39: api.justwoker.icu returned HTTP 200 SSE
+# streams that ended with no `message_stop` on ALL FOUR of its proxies in turn
+# (OPPO, the 164.68 relay, POCO, scrape.do), then gorouter.app did exactly the
+# same on all four. Four unrelated exit IPs producing one identical verdict is
+# the upstream's own behaviour — the provider was cutting streams mid-generation.
+# But `_proxy_local()` classified each one as a transport fault, so the endpoint
+# was never blamed and the router dutifully spent every proxy it had: 8 attempts
+# and ~300 SECONDS before it even reached the third provider. The client then saw
+# tabitoken's 403 (out of credit) and Boss reasonably concluded "the credit story
+# does not add up" — it did not, because the 403 was the last domino, not the
+# first.
+#
+# A CONNECT-level failure is deliberately NOT here: a switched-off phone really
+# is proxy-local, and rotating away from it is correct.
+_UPSTREAM_STREAM_MARKERS = ("incomplete", "truncated", "empty-stream", "non-sse")
+
+
+def _fault_class(detail):
+    """Name the transport verdict, or None when it is not one of ours."""
+    d = (detail or "").lower()
+    for m in _UPSTREAM_STREAM_MARKERS:
+        if m in d:
+            return m
+    return None
+
+
+# Deliberately NOT in _PROXY_LOCAL_MARKERS: a bare "conn". It was in the first
+# version of this fix and it was a mistake of my own — `detail` is built from the
+# endpoint NAME and the proxy URL (f"{tgt['name']} {status}", f"{type(e).__name__} via
+# {used_url}"), so a provider or proxy host with "conn" in it would have had its
+# real failures silently reclassified as transport faults and retried forever on
+# fresh IPs. It also earned nothing: every genuine case arrives as an httpx
+# exception class name, and all of those are listed explicitly above —
+# ProxyError already covers the phone-offline shape ("ProxyError: 500 Unable to
+# connect", measured 0.8 s when the target is unreachable). A loose marker that
+# can only misfire is worse than no marker.
 
 
 def _skip_backoff(detail):
@@ -284,6 +467,204 @@ def _skip_backoff(detail):
     """
     d = (detail or "").lower()
     return any(m in d for m in _PROXY_LOCAL_MARKERS)
+
+
+# Markers that identify a refusal caused by THE REQUEST'S SIZE. Retrying such a
+# request on another PROXY or another KEY of the SAME provider cannot succeed —
+# identical bytes reach the identical tokenizer, so the verdict is identical.
+# Failing over to a DIFFERENT provider is still worth doing: ceilings and
+# tokenizers differ (measured: the same 1,025 KB body was 1.06M tokens and
+# refused by api.justwoker.icu, but 288,753 tokens and accepted by
+# api.camel-hub.com).
+#
+# Measured on 2026-09-02 why this matters: one oversized Claude Code turn burned
+# 15 upstream attempts across 5 providers and 378 SECONDS of wall clock, most of
+# it re-sending the same payload through fresh proxies for a provider that had
+# already given its size verdict on attempt 1. Worst observed: 465 s / 23
+# attempts. The client saw only keepalive pings throughout, which is why
+# /compact appeared to "do nothing" — Claude Code never learned the context was
+# full, it just waited.
+_REQUEST_FATAL_MARKERS = (
+    "context window is full",
+    "请精简对话历史",              # new-api: "please condense the conversation history"
+    "缩小工具/文件输出",           # new-api: "reduce tool/file output"
+    "prompt is too long",
+    "maximum context length",
+    "context_length_exceeded",
+    "request_too_large",
+    "request entity too large",
+    "input length and `max_tokens` exceed",
+)
+
+
+def _fx(key, tgt=None, default="1"):
+    """Is routing-fix `key` enabled — for THIS endpoint?
+
+    Boss's correction (2026-09-02): "ye toggles endpoint settings ke andar hona
+    chahiye, na ki proxy settings ke andar — kyunki wo endpoint ki settings hai
+    na?" He is right: every one of these rules describes how a PARTICULAR
+    provider's failures should be read, so a single global switch is the wrong
+    shape. His example is the deciding one — an official/premium endpoint should
+    get *fewer* restrictions than a free relay, and a long real conversation on
+    it can legitimately repeat itself a lot.
+
+    Resolution order:
+      1. this endpoint's own `fx_flags` JSON (only non-default values are stored)
+      2. the global `settings` row, which acts as the fleet-wide default
+      3. `default` — ON, the measured-correct behaviour
+
+    Read per call: `db.get_setting` is an indexed lookup and a toggle must take
+    effect without restarting the gateway.
+    """
+    if isinstance(tgt, dict):
+        flags = tgt.get("_fx_flags")
+        if flags is None:
+            raw = tgt.get("fx_flags") or ""
+            try:
+                flags = json.loads(raw) if raw.strip() else {}
+            except Exception:
+                flags = {}
+            if not isinstance(flags, dict):
+                flags = {}
+            tgt["_fx_flags"] = flags       # parse once per request, not per check
+        if key in flags:
+            return str(flags[key]) != "0"
+    try:
+        return db.get_setting(key, default) != "0"
+    except Exception:
+        return default != "0"
+
+
+def _request_fatal(status, text, tgt=None):
+    """Reason string when this refusal is about the REQUEST's size, else None.
+
+    Correction (measured 2026-09-02, my first version of this was wrong): a size
+    refusal is NOT hopeless across providers. The identical 1,025 KB body was
+    refused by api.justwoker.icu as "context window is full" and accepted by
+    api.camel-hub.com, which counted it as only 288,753 input tokens — a 3.6x
+    difference in tokenizer/ceiling for the same bytes. So this classifier must
+    only stop the retries that are provably pointless — another PROXY or another
+    KEY for the SAME provider, which re-sends identical bytes to the identical
+    tokenizer — and must still allow failover to the NEXT provider, which may
+    well accept it.
+    """
+    if status not in (400, 413, 422):
+        return None
+    if not _fx("fx_size_refusal_stop", tgt):
+        return None
+    low = (text or "").lower()
+    for m in _REQUEST_FATAL_MARKERS:
+        if m in low or m in (text or ""):
+            return m
+    return None
+
+
+def _match_failover(keywords, status, body_text, tgt=None):
+    """Does this refusal match an operator failover rule?
+
+    Replaces a bare `any(x in err_str for x in kws)` substring test where
+    `err_str` was the status code CONCATENATED WITH THE RESPONSE BODY. Because the
+    default rule lists are numeric ("500,501,502,503,504,524,401,403"), any digit
+    run inside the body matched them — and new-api upstreams embed a long numeric
+    request id in every error, e.g.
+
+        (request id: 202609011959144518501558268d9d65byLqCso)
+                                  ^^^^  contains "501"
+
+    Verified on the live log: 1 of 3 recorded context-full 400s contained such a
+    token, so an identical error was classified as a PROXY fault on one request
+    and an ENDPOINT fault on the next. That is exactly the "sometimes it retries,
+    sometimes it switches, and the log never says why" behaviour Boss reported —
+    it was never random, it depended on the digits in the upstream's request id.
+
+    Numeric keywords are therefore matched against the HTTP STATUS ONLY;
+    non-numeric keywords are matched against the body, case-insensitively.
+
+    Toggle `fx_status_only_keywords` restores the old body-wide substring match.
+    """
+    low = (body_text or "").lower()
+    strict = _fx("fx_status_only_keywords", tgt)
+    for k in keywords:
+        k = (k or "").strip()
+        if not k:
+            continue
+        if k.isdigit():
+            if int(k) == status:
+                return True
+            if not strict and k in low:
+                return True     # legacy behaviour: digits matched anywhere
+        elif k.lower() in low:
+            return True
+    return False
+
+
+def _proxy_local(detail, tgt=None):
+    """True when this failure happened in OUR transport, not at the provider.
+
+    WAF pages, ConnectError, ReadError, ProxyError, truncated/incomplete streams
+    — these describe the exit IP we borrowed, and say nothing about whether the
+    provider is healthy. The right response is a different proxy, not a different
+    provider.
+
+    Why this matters (measured 2026-09-02): the failover ladder ended in a bare
+    `else: consecutive_5xx += 1`, so every one of these transport faults counted
+    as a strike AGAINST the endpoint. On Boss's gateway `failover_5xx_threshold`
+    is **2**, so two unlucky proxies retired a perfectly good provider — and
+    `max_retries=15` was never reached. A real trace of one large request:
+
+        att 1  justwoker  WAF via 100.97.11.41      -> strike 1
+        att 2  justwoker  502 via scrape.do         -> (matched proxy rule, ok)
+        att 3  justwoker  ConnectError via 8.211…   -> strike 2 -> ABANDONED
+        att 4  gorouter   WAF …                     -> strike 1
+        att 6  gorouter   ReadError …               -> strike 2 -> ABANDONED
+        att 7  agentrouter                          -> 200 OK
+
+    Three providers were walked and two written off, none of which had done
+    anything wrong. That is Boss's "kabhi max retry karta hai, kabhi switch kar
+    deta hai, aur logs mein kyun nahi dikhta" — the reason was never logged
+    because the code never knew it was making a decision.
+
+    Toggle `fx_proxy_not_endpoint` turns this attribution off.
+    """
+    if not _fx("fx_proxy_not_endpoint", tgt):
+        return False
+    d = (detail or "").lower()
+    return any(m in d for m in _PROXY_LOCAL_MARKERS)
+
+
+def _match_failover_detail(keywords, detail, tgt=None):
+    """Same rules as _match_failover, for an internally-built retry reason.
+
+    `detail` looks like "502 via http://1.2.3.4:8888" or "ConnectError via ...".
+    A numeric keyword must match the LEADING status token, never a digit run
+    inside a proxy host/port (a proxy on port 8501 otherwise matched the rule
+    "501"). Non-numeric keywords still match anywhere in the text.
+    """
+    d = (detail or "")
+    lead = d.split(" ", 1)[0]
+    status = int(lead) if lead.isdigit() else -1
+    return _match_failover(keywords, status, d, tgt)
+
+
+def _clip(text, n=100):
+    """Truncate for a log `note` without splitting a UTF-8 character.
+
+    The old `f"...{err_full[:100]}"` cut the Chinese context-full message
+    mid-codepoint, producing a mojibake tail AND hiding the English half of the
+    message — "(Context window is full — reduce conversation history, tool/file
+    output, or system prompt.)" never appeared in any log row, which is why the
+    real cause went undiagnosed. The full text now always goes to `detail`.
+    """
+    s = text if isinstance(text, str) else str(text)
+    if len(s) <= n:
+        return s
+    out = s[:n]
+    # Trim a trailing lone surrogate/partial sequence introduced by slicing.
+    while out and not out[-1].isprintable() and out[-1] not in " \t":
+        out = out[:-1]
+    return out
+
+
 HOP_BY_HOP = {
     "host", "content-length", "connection", "keep-alive", "proxy-authenticate",
     "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade",
@@ -331,13 +712,46 @@ def _build_upstream_headers(request, upstream_key, kind):
     return headers
 
 
-def _is_waf(resp_headers, sniff=b""):
+def _is_waf(resp_headers, sniff=b"", status=None, tgt=None):
+    """Does this response look like a WAF/bot-challenge page?
+
+    Boss pushed back on this (2026-09-02): "mera mobile IP residential hai, usme
+    Cloudflare nahi aata" — yet the log was full of `WAF via
+    http://100.97.11.41:8888`. He was right. Direct tests through that exact
+    proxy returned `application/json` 200 three times (500 B, 293 KB, 1,025 KB),
+    each with `server: cloudflare` — Cloudflare fronting the provider is normal
+    and is NOT a challenge.
+
+    The old rule was `"text/html" in content-type -> WAF`, which also catches an
+    nginx 502/413 error PAGE, a captive-portal page from a flaky phone network,
+    and any provider that returns HTML for an ordinary error. Those are transport
+    or endpoint faults, not bot challenges, so the "WAF" label buried the real
+    cause in every log row it touched.
+
+    Strict rules now:
+      * a known challenge fingerprint in the body -> WAF, whatever the status;
+      * HTML with a 2xx status -> WAF (a JSON API answering 200 with a web page
+        means something intercepted the request);
+      * HTML with a 4xx/5xx status -> NOT WAF, because the status path already
+        classifies it correctly and reports the real reason.
+    `fx_strict_waf=0` restores the old any-HTML behaviour.
+    """
     ct = resp_headers.get("content-type", "")
-    if "text/html" in ct:
+    low = sniff[:1200].lower()
+    if b"aliyun_waf" in low:
         return True
-    if b"aliyun_waf" in sniff[:600]:
-        return True
-    return False
+    if "text/html" not in ct:
+        return False
+    if not _fx("fx_strict_waf", tgt):
+        return True     # legacy: any HTML counts
+    for m in (b"cf-browser-verification", b"cf_chl", b"just a moment",
+              b"checking your browser", b"attention required", b"captcha",
+              b"ddos-guard", b"__cf_bm", b"security check", b"incapsula"):
+        if m in low:
+            return True
+    if status is None:
+        return True     # no status to reason with: keep the old, safer verdict
+    return 200 <= int(status) < 300
 
 
 def _err(message, status=503, etype="api_error"):
@@ -410,7 +824,11 @@ def _targets(s):
             "scrape_do_token": e.get("scrape_do_token", ""),
             "custom_proxies": e.get("custom_proxies", "[]"),
             "proxy_priority": e.get("proxy_priority", "[]"),
-            "proxy_fallback": e.get("proxy_fallback", 1)
+            "proxy_fallback": e.get("proxy_fallback", 1),
+            # Per-endpoint failure-diagnosis overrides. Only keys the operator
+            # actually changed are stored; anything absent falls back to the
+            # global setting. See _fx().
+            "fx_flags": e.get("fx_flags", ""),
         }
 
     primary_custom = next((e for e in customs if e.get("is_primary")), None)
@@ -433,18 +851,25 @@ def _should_rotate_key(tgt, detail):
 
     Endpoint-switch triggers always win: a refusal that a different key would repeat
     (blocked content, unknown model) must not burn every key first.
+
+    A SIZE refusal never rotates: the payload is identical, so every key of this
+    provider hits the same tokenizer and the same ceiling. Rotating there just
+    multiplies the wait by the number of spare keys.
     """
     if len(tgt.get("keys") or []) < 2:
         return False
     d = (detail or "")
+    lead = d.split(" ", 1)[0]
+    status = int(lead) if lead.isdigit() else -1
+    if _request_fatal(status if status > 0 else 400, d, tgt):
+        return False
     ep_kws = [k.strip() for k in (tgt.get("endpoint_failover_keywords") or "").split(",") if k.strip()]
-    if any(k in d for k in ep_kws):
+    if _match_failover(ep_kws, status, d, tgt):
         return False
     rules = [k.strip() for k in (tgt.get("key_failover_keywords") or "").split(",") if k.strip()]
     if not rules:
         return True
-    low = d.lower()
-    return any(k.lower() in low for k in rules)
+    return _match_failover(rules, status, d, tgt)
 
 
 def _target_url(base, path, mode):
@@ -484,6 +909,92 @@ def _mutate_body(body_bytes, want_stream=None, model_override=None):
     if model_override:
         d["model"] = model_override
     return json.dumps(d, ensure_ascii=False).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# FORMAT TRANSLATION (Ciel, 2026-09-06)
+#
+# Until now an endpoint could only serve clients that already spoke its dialect:
+# `_target_url` rewrote the PATH (/v1/messages -> /v1/chat/completions) and
+# `_target_headers` swapped the AUTH shape, but the body went upstream verbatim.
+# So an Anthropic-shaped body arriving at an OpenAI-mode endpoint was rejected by
+# the upstream's own validator, and the failure looked like a routing fault.
+#
+# Why this matters here specifically (measured 2026-09-05): on api.justwoker.icu
+# the two routes are NOT equally reachable from this box — `/v1/chat/completions`
+# is Cloudflare-blocked (403 direct, 0/3 via free proxies, scrape.do
+# ROTATION_FAILED) while `/v1/messages` answers 200 in 1.4s with the same key.
+# Translation turns that from "this endpoint is dead for this client" into "send
+# it down the route that actually works".
+#
+# Shape rules:
+#   * The CLIENT shape is decided by the inbound path (`kind`).
+#   * The ENDPOINT shape is `tgt["mode"]`.
+#   * Translation happens only when they differ, and only when the toggle is on.
+# Toggle: fx_translate_format (per-endpoint, defaults ON) — a premium endpoint
+# that must receive byte-exact bodies can opt out without touching the others.
+# ---------------------------------------------------------------------------
+
+def _tgt_kind(tgt):
+    return "openai" if (tgt or {}).get("mode") == "openai" else "anthropic"
+
+
+def _xlate_on(client_kind, tgt):
+    """Should this request be translated for THIS target?"""
+    return (_tgt_kind(tgt) != client_kind) and _fx("fx_translate_format", tgt)
+
+
+def _xlate_request(body_bytes, client_kind, tgt):
+    """Translate the request body into the target's dialect.
+
+    Returns (body_bytes, translated: bool). A body that cannot be parsed is
+    passed through untouched — never guess at bytes we do not understand.
+    """
+    if not _xlate_on(client_kind, tgt):
+        return body_bytes, False
+    try:
+        d = json.loads(body_bytes)
+    except Exception:
+        return body_bytes, False
+    if not isinstance(d, dict):
+        return body_bytes, False
+    try:
+        if client_kind == "anthropic":
+            out = translate.anthropic_request_to_oai(d)
+        else:
+            out = translate.oai_request_to_anthropic(d)
+    except Exception:
+        # A translation bug must not eat the request: fall back to verbatim and
+        # let the upstream's own verdict be logged, as before.
+        return body_bytes, False
+    return json.dumps(out, ensure_ascii=False).encode("utf-8"), True
+
+
+def _xlate_object(obj, client_kind, tgt):
+    """Translate an ASSEMBLED response object into the client's dialect."""
+    if obj is None or not _xlate_on(client_kind, tgt):
+        return obj
+    try:
+        if client_kind == "anthropic":
+            return translate.oai_response_to_anthropic(obj)
+        return translate.anthropic_response_to_oai(obj)
+    except Exception:
+        return obj
+
+
+def _stream_ended(up_kind, ev, data):
+    """Did this frame end the upstream stream, in the UPSTREAM's dialect?
+
+    The completeness guard used to test `ev == "message_stop"` only, which is the
+    Anthropic terminator. When translation sends an Anthropic client to an
+    OpenAI-mode endpoint, the upstream ends with `data: [DONE]` and no event
+    name — so a perfectly complete answer would be scored "truncated", the proxy
+    blamed, and the whole provider retried. Recognise both terminators.
+    """
+    if up_kind == "openai":
+        return bool(data) and data.strip() == "[DONE]"
+    return ev == "message_stop"
+
 
 
 def _strip_thinking(body_bytes):
@@ -677,13 +1188,24 @@ def _message_to_sse(msg):
 
 
 class OpenAIAssembler:
-    """Rebuild a /v1/chat/completions object from its SSE stream (best-effort)."""
+    """Rebuild a /v1/chat/completions object from its SSE stream.
+
+    TOOL CALLS (Ciel, 2026-09-06): this used to accumulate `content` only, so an
+    upstream that answered with tool calls assembled to an EMPTY message. That was
+    harmless while the assembler only ever served openai-client→openai-endpoint
+    traffic (the raw relay handled streams), but format translation now routes
+    Anthropic clients through here — and an agentic client whose tool call
+    silently vanished would hang. OpenAI streams tool calls as sparse deltas: the
+    first carries index+id+name, later ones append `arguments` fragments, so they
+    must be merged per index rather than replaced.
+    """
     def __init__(self):
         self.obj = None
         self.content = ""
         self.role = "assistant"
         self.finish = None
         self.usage = None
+        self.tools = {}      # index -> {"id","name","arguments"}
 
     def feed(self, event, data):
         if not data or data == "[DONE]":
@@ -692,17 +1214,31 @@ class OpenAIAssembler:
             o = json.loads(data)
         except Exception:
             return
+        if not isinstance(o, dict):
+            return
         if self.obj is None:
             self.obj = {"id": o.get("id"), "object": "chat.completion",
                         "created": o.get("created"), "model": o.get("model"),
                         "choices": [{"index": 0, "message": {"role": "assistant", "content": ""},
                                      "finish_reason": None}]}
         for ch in o.get("choices", []):
-            d = ch.get("delta", {})
+            d = ch.get("delta", {}) or {}
             if d.get("role"):
                 self.role = d["role"]
             if d.get("content"):
                 self.content += d["content"]
+            for tc in d.get("tool_calls") or []:
+                if not isinstance(tc, dict):
+                    continue
+                idx = tc.get("index", 0)
+                slot = self.tools.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    slot["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["arguments"] += fn["arguments"]
             if ch.get("finish_reason"):
                 self.finish = ch["finish_reason"]
         if o.get("usage"):
@@ -711,14 +1247,23 @@ class OpenAIAssembler:
     def result(self):
         if self.obj is None:
             return None
-        self.obj["choices"][0]["message"] = {"role": self.role, "content": self.content}
-        self.obj["choices"][0]["finish_reason"] = self.finish or "stop"
+        msg = {"role": self.role, "content": self.content}
+        if self.tools:
+            msg["tool_calls"] = [
+                {"id": t["id"], "type": "function",
+                 "function": {"name": t["name"], "arguments": t["arguments"]}}
+                for _i, t in sorted(self.tools.items())
+            ]
+        self.obj["choices"][0]["message"] = msg
+        self.obj["choices"][0]["finish_reason"] = (
+            self.finish or ("tool_calls" if self.tools else "stop"))
         if self.usage:
             self.obj["usage"] = self.usage
         return self.obj
 
 
-async def _consume_assemble(candidates, url, headers, body, timeout, kind, attempted_pids=None):
+async def _consume_assemble(candidates, url, headers, body, timeout, kind,
+                            attempted_pids=None, tgt=None):
     """Open an upstream STREAM through `proxy`, assemble the final object.
 
     Returns ("respond", status, content_type, body_bytes, used_url) or
@@ -735,7 +1280,7 @@ async def _consume_assemble(candidates, url, headers, body, timeout, kind, attem
             async with client.stream("POST", url, headers=headers, content=body) as r:
                 ct = r.headers.get("content-type", "")
                 used = _race_used(candidates, hedge_id, attempted_pids)
-                if _is_waf(r.headers):
+                if _is_waf(r.headers, status=r.status_code):
                     _mark_used_bad(candidates, used, "waf")
                     return ("retry", "waf", used)
                 if r.status_code >= 500:
@@ -746,6 +1291,22 @@ async def _consume_assemble(candidates, url, headers, body, timeout, kind, attem
                 # pass it straight through.
                 if "text/event-stream" not in ct:
                     raw = await r.aread()
+                    # A 2xx whose body is not a usable message is NOT a success.
+                    #
+                    # Measured 2026-09-02: proxy 3.122.224.70:15182 is an open
+                    # "echo" server — it answers CONNECT with 200 OK (Server: Oracle
+                    # Containers for J2EE) and returns its own diagnostic text
+                    # (`REMOTE_ADDR = ... REQUEST_METHOD = POST`) instead of relaying
+                    # to the provider at all. The gateway logged five of those as
+                    # `ok(assembled)` HTTP 200 in 0.1s and handed the client an
+                    # unusable body. An empty or non-JSON 2xx on an API route is a
+                    # broken exit, not an answer: retry on another proxy.
+                    # Toggle: fx_reject_empty_2xx.
+                    if (200 <= r.status_code < 300 and _fx("fx_reject_empty_2xx", tgt)
+                            and raw[:1] not in (b"{", b"[")):
+                        _mark_used_bad(candidates, used, "non-json-2xx")
+                        _peek = raw[:60].decode("utf-8", "replace").replace("\n", " ")
+                        return ("retry", f"non-json 2xx via {used}: {_peek!r}", used)
                     out_ct = "application/json" if raw[:1] in (b"{", b"[") else (ct or "application/json")
                     return ("respond", r.status_code, out_ct, raw, used)
                 asm = OpenAIAssembler() if kind == "openai" else AnthropicAssembler()
@@ -900,7 +1461,7 @@ async def test_endpoint(url, api_mode, api_key, model, message, history=None, ma
                 # depends on WHO answered: an Aliyun WAF block page means this exit IP
                 # is refused, so rotate; a JSON API error means the endpoint refused
                 # the request itself and a different IP will not help.
-                waf = _is_waf(r.headers, r.content[:600])
+                waf = _is_waf(r.headers, r.content[:600], status=r.status_code)
                 if waf:
                     detail = f"WAF block ({r.status_code}) — this exit IP is refused by the endpoint's firewall"
                     last_status = r.status_code
@@ -1003,13 +1564,59 @@ async def forward(request, path):
     if "chat/completions" not in path:
         body, _thk = _strip_thinking(body)
 
+    # ---------- METHOD-PRESERVING PASSTHROUGH (Ciel, 2026-09-02) ----------
+    # Every upstream call site below is hardcoded to POST, because the whole
+    # retry/hedge/assemble machinery was written for /v1/messages. That silently
+    # broke every non-POST route: a client's `GET /v1/models` was forwarded as
+    # `POST /v1/models`, so all five providers answered
+    #   404 {"message":"Invalid URL (POST /v1/models)"}
+    # and the gateway then walked the ENTIRE endpoint list collecting the same
+    # 404 — 5 attempts, ~11 s, 78 such rows in one 8h window. The dashboard
+    # showed "Method: GET" next to an upstream complaining about POST, which is
+    # what made it look inexplicable.
+    #
+    # Body-less informational routes need none of the streaming machinery, so
+    # they take a direct, method-correct path: first enabled endpoint, its own
+    # key, no proxy hedging, no retry storm. If it fails we return the upstream's
+    # own answer rather than fabricating a 404 from a different provider.
+    # Toggle: fx_method_passthrough, read from the endpoint we are about to use.
+    if request.method in ("GET", "HEAD") and not body:
+        tgts = _targets(s)
+        if tgts and _fx("fx_method_passthrough", tgts[0]):
+            tgt = tgts[0]
+            url = f"{tgt['base'].rstrip('/')}/{path}"
+            hdrs = _target_headers(request, tgt, (tgt.get("keys") or [tgt.get("key", "")])[0])
+            t_info = time.time()
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=conn_to, read=30.0,
+                                                                   write=30.0, pool=10.0),
+                                             follow_redirects=True) as c:
+                    r = await c.request(request.method, url, headers=hdrs)
+                raw = r.content
+                _log(method=request.method, path=path, status=r.status_code, proxy="direct",
+                     attempts=1, stream=0, redactions=0,
+                     ms=int((time.time() - t_info) * 1000),
+                     note=f"info passthrough ({request.method}) -> {tgt['name']}",
+                     ip=client_ip, model="", endpoint=tgt["name"],
+                     detail=raw[:1500].decode("utf-8", "replace"), final=True)
+                return Response(content=raw, status_code=r.status_code,
+                                media_type=r.headers.get("content-type", "application/json"))
+            except Exception as e:
+                _log(method=request.method, path=path, status=502, proxy="direct",
+                     attempts=1, stream=0, redactions=0,
+                     ms=int((time.time() - t_info) * 1000),
+                     note=f"info passthrough failed: {type(e).__name__}",
+                     ip=client_ip, model="", endpoint=tgt["name"],
+                     detail=str(e)[:1500], final=True)
+                return _err(f"Upstream unreachable for {request.method} {path}.", 502)
+
     try:
         client_wants_stream = bool(json.loads(body).get("stream"))
     except Exception:
         client_wants_stream = "text/event-stream" in request.headers.get("accept", "")
 
     kind = "openai" if "chat/completions" in path else "anthropic"
-    targets = _targets(s)
+    targets = _order_targets(_targets(s))
     base_candidates = proxy_pool.ordered_for_request(max_retries)
     if not base_candidates:
         db.add_log(final=1, method=request.method, path=path, status=503, proxy="", attempts=0,
@@ -1041,14 +1648,52 @@ async def forward(request, path):
                 logged = False   # ensure we ALWAYS write a log, even if client disconnects
                 last_proxy = ""
                 last_tgt_name = ""
+                # Emit one keepalive ping BEFORE contacting any upstream.
+                #
+                # Measured 2026-09-02: a Cloudflare-proxied host held the response
+                # headers until the first body byte arrived (headers_at=70.0s on a
+                # 1.2M-char request), because CF buffers until the origin produces
+                # something. Cloudflare's free plan then aborts with 524 if that
+                # takes ~100s — so a slow first upstream killed even a STREAM, and
+                # the 417s stream that survived only survived because its headers
+                # happened to land at 70s. Sending a ping immediately starts the
+                # byte flow in milliseconds, after which the periodic pings keep
+                # the timer reset for as long as the generation needs.
+                #
+                # Safe by protocol: the Anthropic SDK explicitly ignores `ping`
+                # events, and StreamingResponse has already committed HTTP 200, so
+                # this changes nothing about how errors are delivered (they still
+                # arrive as an SSE `error` event, as before).
+                if _fx("fx_early_ping", targets[0] if targets else None):
+                    yield PING
                 try:
+                    _chain = []   # one line per target: what this provider actually did
                     for tgt in targets:
                         current_model_log = tgt.get("model_override") or req_model
                         up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
+                        # Speak the endpoint's dialect (see FORMAT TRANSLATION above).
+                        # An OpenAI-mode endpoint gets an OpenAI-shaped body and its
+                        # SSE is translated back to Anthropic before the client sees
+                        # it, so `kind` stays the CLIENT's contract throughout.
+                        up_body, _xl = _xlate_request(up_body, "anthropic", tgt)
+                        _up_kind = _tgt_kind(tgt) if _xl else "anthropic"
                         url = _target_url(tgt["base"], path, tgt["mode"])
                         attempted_pids = set()
                         upstream_rejected = False
                         consecutive_5xx = 0
+                        # Distinct exit IPs that produced the same stream verdict for
+                        # THIS endpoint. See _UPSTREAM_STREAM_MARKERS.
+                        _stream_faults = {}
+                        # This target's own last word, for the chain summary. MUST be
+                        # initialised here: `detail` is only bound inside the retry
+                        # branch, so a target that fails via the upstream-error path
+                        # (size refusal, 403, content-blocked) would otherwise read a
+                        # previous target's detail — or raise NameError on target #1.
+                        _tgt_verdict = ""
+                        # `detail` must exist before the first inner iteration too: the
+                        # per-target summary below reads it even when the very first
+                        # attempt raised before assignment.
+                        detail = ""
                         ep_keys = tgt.get("keys") or [tgt.get("key", "")]
                         key_idx = 0
                         theaders = _target_headers(request, tgt, ep_keys[0])
@@ -1067,9 +1712,14 @@ async def forward(request, path):
                             last_proxy = p["url"]
                             last_tgt_name = tgt["name"]
                             hedge_id = _new_hedge_id(candidates)
+                            # Side channel for stream evidence (see the "incomplete"
+                            # branch inside consume()). Fresh per attempt, so one
+                            # attempt's numbers can never be logged against another.
+                            _ev_box = {}
 
                             async def consume(p=p, url=url, theaders=theaders,
-                                              candidates=candidates, hedge_id=hedge_id):
+                                              candidates=candidates, hedge_id=hedge_id,
+                                              _ev_box=_ev_box):
                                 # `used` is the proxy that actually won the race; every
                                 # health update and log line below must name it, not
                                 # candidates[0].
@@ -1078,26 +1728,66 @@ async def forward(request, path):
                                     async with _build_client(candidates, timeout, hedge_id) as client:
                                         async with client.stream("POST", url, headers=theaders, content=up_body) as r:
                                             used = _race_used(candidates, hedge_id, attempted_pids)
-                                            if _is_waf(r.headers):
+                                            if _is_waf(r.headers, status=r.status_code, tgt=tgt):
                                                 _mark_used_bad(candidates, used, "waf")
                                                 return ("retry", f"WAF via {used}", used)
                                             ct = r.headers.get("content-type", "")
-                                            if r.status_code >= 400 and "text/event-stream" not in ct:
+                                            # ROOT CAUSE FIX (Ciel, 2026-09-02).
+                                            # This condition used to be
+                                            #   `if r.status_code >= 400 and "text/event-stream" not in ct:`
+                                            # which is wrong: new-api upstreams answer a
+                                            # REJECTED stream request with HTTP 400 but keep
+                                            # `content-type: text/event-stream`, while the body
+                                            # is plain JSON (verified against
+                                            # api.justwoker.icu — 400, ct=text/event-stream,
+                                            # body {"error":{...context window is full...}}).
+                                            # So the guard was false, the JSON error fell
+                                            # through to the SSE assembler, produced no
+                                            # frames, and was reported as
+                                            #   ("retry", "incomplete via <proxy>")
+                                            # i.e. a PROXY fault. Three consequences, all of
+                                            # which Boss saw and could not explain:
+                                            #   1. the real reason never reached the log — the
+                                            #      note said "incomplete via ...", so no row
+                                            #      ever explained why the endpoint switched;
+                                            #   2. a healthy proxy was marked bad for someone
+                                            #      else's 400, poisoning proxy health;
+                                            #   3. the request kept retrying instead of
+                                            #      surfacing a verdict the client could act on.
+                                            # The status code is authoritative; content-type is
+                                            # only used to decide how to READ the body.
+                                            # Toggle: fx_status_over_contenttype.
+                                            if r.status_code >= 400 and (
+                                                    _fx("fx_status_over_contenttype", tgt)
+                                                    or "text/event-stream" not in ct):
                                                 raw = await r.aread()
                                                 err_str = str(r.status_code) + " " + raw[:300].decode('utf-8', 'replace')
+                                                body_str = raw[:400].decode('utf-8', 'replace')
                                                 proxy_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,401,403,unauthorized").split(",") if k.strip()]
                                                 ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key,new_api_error,预扣").split(",") if k.strip()]
-                                                
-                                                if any(x in err_str for x in ep_kws):
+
+                                                # Size/context refusal: this provider's verdict
+                                                # on these bytes is final, so stop spending its
+                                                # proxy and key budget. Another provider may
+                                                # still accept it (different tokenizer), so this
+                                                # is an ("error", ...) — which fails over to the
+                                                # NEXT target — not a hard return.
+                                                if _request_fatal(r.status_code, body_str, tgt):
+                                                    _mark_used_good(candidates, used, int((time.time() - t0) * 1000))
+                                                    try: err = json.loads(raw)
+                                                    except Exception: err = {"type": "error", "error": {"message": body_str}}
+                                                    return ("error", r.status_code, err, used)
+
+                                                if _match_failover(ep_kws, r.status_code, body_str, tgt):
                                                     # Endpoint's own content rejection — the proxy
                                                     # did its job, so it stays credited.
                                                     _mark_used_good(candidates, used, int((time.time() - t0) * 1000))
                                                     try: err = json.loads(raw)
                                                     except: err = {"type": "error", "error": {"message": err_str}}
                                                     return ("error", r.status_code, err, used)
-                                                elif any(x in err_str for x in proxy_kws):
+                                                elif _match_failover(proxy_kws, r.status_code, body_str, tgt):
                                                     _mark_used_bad(candidates, used, f"{r.status_code} proxy switch")
-                                                    return ("retry", f"{r.status_code} proxy switch: {err_str[:100]}", used)
+                                                    return ("retry", f"{r.status_code} proxy switch: {_clip(body_str)}", used)
                                                 else:
                                                     if r.status_code >= 500:
                                                         _mark_used_bad(candidates, used, "5xx")
@@ -1107,29 +1797,116 @@ async def forward(request, path):
                                                         try: err = json.loads(raw)
                                                         except: err = {"type": "error", "error": {"message": err_str}}
                                                         return ("error", r.status_code, err, used)
-                                            asm = AnthropicAssembler()
+                                            asm = (OpenAIAssembler() if _up_kind == "openai"
+                                                   else AnthropicAssembler())
                                             saw_stop = False
                                             buf = b""
+                                            seen = b""   # first bytes, for diagnosing a non-SSE body
+                                            # EVIDENCE FOR AN INCOMPLETE STREAM (Ciel, 2026-09-05).
+                                            # Every "incomplete via <proxy>" row Boss ever saw had an
+                                            # EMPTY detail column (measured: 36/36 on 2026-09-04), so
+                                            # the one question that matters — did the upstream stop
+                                            # talking, or did it say something we threw away? — was
+                                            # unanswerable after the fact. These four counters cost
+                                            # nothing and make the row self-explaining.
+                                            _n_bytes = 0
+                                            _n_frames = 0
+                                            _last_ev = None
+                                            _tail = b""
                                             async for chunk in r.aiter_bytes():
+                                                if len(seen) < 400:
+                                                    seen += chunk[:400]
+                                                _n_bytes += len(chunk)
+                                                _tail = (_tail + chunk)[-400:]
                                                 buf += chunk
                                                 while b"\n\n" in buf:
                                                     block, buf = buf.split(b"\n\n", 1)
                                                     ev, data = _parse_block(block)
+                                                    _n_frames += 1
+                                                    if ev:
+                                                        _last_ev = ev
                                                     asm.feed(ev, data)
-                                                    if ev == "message_stop":
+                                                    if _stream_ended(_up_kind, ev, data):
                                                         saw_stop = True
                                             if buf.strip():
                                                 ev, data = _parse_block(buf); asm.feed(ev, data)
-                                                if ev == "message_stop":
+                                                if _stream_ended(_up_kind, ev, data):
                                                     saw_stop = True
                                             obj = asm.result()
-                                            complete = bool(saw_stop and obj and obj.get("stop_reason") and obj.get("content"))
+                                            # Back into the CLIENT's dialect before any
+                                            # completeness check: every guard below is
+                                            # written against the Anthropic Message shape
+                                            # (stop_reason / content blocks), so judging a
+                                            # raw OpenAI object with them would call every
+                                            # good answer "incomplete".
+                                            obj = _xlate_object(obj, "anthropic", tgt)
+                                            # A REFUSAL IS A COMPLETE ANSWER (Ciel,
+                                            # 2026-09-02). The test below used to require
+                                            # `obj.get("content")` to be non-empty, but a
+                                            # model declining to answer returns a valid
+                                            # message with content=[] and
+                                            # stop_reason="refusal" (measured on
+                                            # agentrouter: HTTP 200, 0 blocks,
+                                            # stop=refusal). Calling that "incomplete"
+                                            # blamed the proxy, marked it bad, and
+                                            # retried a DETERMINISTIC answer across every
+                                            # proxy and every provider — measured cost:
+                                            # 11 attempts, 5 providers, 75.8 s, while the
+                                            # client saw nothing but pings. A refusal is
+                                            # final: deliver it.
+                                            # Toggle: fx_refusal_is_answer.
+                                            _stop = (obj or {}).get("stop_reason")
+                                            _stop_ok = (_fx("fx_refusal_is_answer", tgt)
+                                                        and _stop in ("refusal", "stop_sequence",
+                                                                      "max_tokens", "end_turn"))
+                                            complete = bool(saw_stop and obj and _stop
+                                                            and (obj.get("content") or _stop_ok))
                                             if complete:
                                                 for b in obj.get("content", []):
                                                     if b.get("type") == "tool_use" and "input" not in b:
                                                         complete = False; break
                                             if not complete:
+                                                # An HTTP-200 stream that yielded no usable
+                                                # frames is usually a JSON error body served
+                                                # with an event-stream content-type. Name that
+                                                # in the retry reason instead of the misleading
+                                                # "incomplete via <proxy>", which blamed the
+                                                # exit IP for the upstream's own answer and is
+                                                # why no log row ever explained the switch.
                                                 _mark_used_bad(candidates, used, "truncated")
+                                                if not obj or not obj.get("content"):
+                                                    _peek = seen.decode("utf-8", "replace").strip()
+                                                    if _peek.startswith("{"):
+                                                        return ("error_body", r.status_code, _peek, used)
+                                                # Carry the stream's own vital signs back to the
+                                                # caller so the log row can say WHY it was
+                                                # incomplete. Without this the note is
+                                                # unfalsifiable — see the 2026-09-05 audit where
+                                                # all 36 such rows had detail=''.
+                                                #
+                                                # It goes in a side box, NOT in the tuple and NOT
+                                                # in the reason string. Two hard reasons:
+                                                #   * every caller reads `res[-1]` as the proxy
+                                                #     URL, and the ("error", status, err, used)
+                                                #     shape is already 4 long — appending a 4th
+                                                #     element to the retry shape would silently
+                                                #     make the evidence dict be treated as a
+                                                #     proxy URL;
+                                                #   * `detail` (= res[1]) is keyword-matched by
+                                                #     _match_failover_detail / _proxy_local, so
+                                                #     splicing upstream text into it could make a
+                                                #     stray "403" or "unauthorized" in the tail
+                                                #     trigger a failover rule. That is exactly the
+                                                #     numeric-substring defect fixed on 2026-09-02.
+                                                _ev_box.update({
+                                                    "bytes": _n_bytes,
+                                                    "frames": _n_frames,
+                                                    "last_event": _last_ev,
+                                                    "stop_reason": _stop,
+                                                    "blocks": len((obj or {}).get("content") or []),
+                                                    "saw_stop": saw_stop,
+                                                    "tail": _tail.decode("utf-8", "replace")[-220:],
+                                                })
                                                 return ("retry", f"incomplete via {used}", used)
                                             _mark_used_good(candidates, used, int((time.time() - t0) * 1000))
                                             return ("ok", obj, used)
@@ -1161,9 +1938,51 @@ async def forward(request, path):
                                            ip=client_ip, model=current_model_log, endpoint=tgt["name"], final=True)
                                 logged = True
                                 return
+                            if res[0] == "error_body":
+                                # HTTP 200 but the "stream" was a JSON error object.
+                                # Treat it exactly like a 4xx from this provider:
+                                # classify it, log the real text, then fail over to the
+                                # next target instead of retrying proxies for it.
+                                _, _st, _txt, _u = res
+                                try:
+                                    err = json.loads(_txt)
+                                except Exception:
+                                    err = {"type": "error", "error": {"message": _txt[:400]}}
+                                _fatal = _request_fatal(400, _txt, tgt)
+                                _log(method=request.method, path=path, status=400,
+                                     proxy=used_url, attempts=attempts, stream=1,
+                                     redactions=redactions,
+                                     ms=int((time.time() - t0) * 1000),
+                                     note=(f"size refusal in 200-stream ({_fatal})" if _fatal
+                                           else "error JSON served as event-stream") + f": {_clip(_txt)}",
+                                     ip=client_ip, model=current_model_log,
+                                     endpoint=tgt["name"], detail=_txt[:1500])
+                                last_err = (400, err, tgt["name"], used_url)
+                                _tgt_verdict = (f"size refusal ({_fatal})" if _fatal
+                                                else "error JSON as event-stream") + f": {_clip(_txt, 70)}"
+                                upstream_rejected = True
+                                break
                             if res[0] == "error":
                                 _, status, err, _u = res
-                                err_full = json.dumps(err)
+                                err_full = json.dumps(err, ensure_ascii=False)
+                                # SIZE REFUSAL: this provider's verdict on these bytes is
+                                # final, so stop spending its proxies/keys. A different
+                                # provider may still accept the same payload (tokenizers
+                                # differ — see _request_fatal), so we fail over to the
+                                # NEXT target rather than returning here.
+                                _fatal = _request_fatal(status, err_full, tgt)
+                                if _fatal:
+                                    _log(method=request.method, path=path, status=status,
+                                         proxy=used_url, attempts=attempts, stream=1,
+                                         redactions=redactions,
+                                         ms=int((time.time() - t0) * 1000),
+                                         note=f"size refusal — skipping this endpoint's retries ({_fatal}): {_clip(err_full)}",
+                                         ip=client_ip, model=current_model_log,
+                                         endpoint=tgt["name"], detail=err_full[:1500])
+                                    last_err = (status, err, tgt["name"], used_url)
+                                    _tgt_verdict = f"size refusal ({_fatal}): {_clip(err_full, 70)}"
+                                    upstream_rejected = True
+                                    break
                                 # Per-key refusal (quota/credit): retry the identical
                                 # request on this provider's next key. Nothing has been
                                 # sent to the client yet, so the retry is invisible.
@@ -1180,9 +1999,15 @@ async def forward(request, path):
                                     continue
                                 _log(method=request.method, path=path, status=status, proxy=used_url,
                                      attempts=attempts, stream=1, redactions=redactions,
-                                     ms=int((time.time() - t0) * 1000), note=f"upstream rejected: {err_full[:100]}",
-                                     ip=client_ip, model=current_model_log, endpoint=tgt["name"])
+                                     ms=int((time.time() - t0) * 1000),
+                                     note=f"upstream rejected: {_clip(err_full)}",
+                                     ip=client_ip, model=current_model_log,
+                                     endpoint=tgt["name"], detail=err_full[:1500])
+                                # This provider just condemned itself; remember it so
+                                # the next request does not pay the same toll first.
+                                _note_endpoint_reject(tgt, err_full)
                                 last_err = (status, err, tgt["name"], used_url)
+                                _tgt_verdict = f"upstream rejected {status}: {_clip(err_full, 70)}"
                                 upstream_rejected = True
                                 break  # this target rejected the content — try NEXT target
                             detail = res[1]  # ("retry", reason, used) -> next proxy, same target
@@ -1190,45 +2015,127 @@ async def forward(request, path):
                             proxy_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,401,403,unauthorized").split(",") if k.strip()]
                             ep_kws = [k.strip() for k in tgt.get("endpoint_failover_keywords", "Thinking,model_not_found,invalid_api_key,new_api_error,预扣").split(",") if k.strip()]
                             
+                            # WRITE THE EVIDENCE (Ciel, 2026-09-05). `detail` stays
+                            # untouched — it is keyword-matched below — so the stream's
+                            # vital signs go into the `detail` COLUMN of the log row
+                            # only, which nothing classifies on. Now the row answers
+                            # "did the upstream go quiet, or did it say something?":
+                            #   bytes/frames  — how much actually arrived
+                            #   last_event    — where the stream stopped
+                            #   stop_reason   — None = cut mid-generation
+                            #   tail          — the upstream's own last words
+                            _evidence = ""
+                            if _ev_box:
+                                try:
+                                    _evidence = json.dumps(_ev_box, ensure_ascii=False)[:1500]
+                                except Exception:
+                                    _evidence = str(_ev_box)[:1500]
                             _log(method=request.method, path=path, status=502, proxy=used_url,
                                        attempts=attempts, stream=1, redactions=redactions,
                                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
-                                       ip=client_ip, model=current_model_log, endpoint=tgt["name"])
+                                       ip=client_ip, model=current_model_log, endpoint=tgt["name"],
+                                       detail=_evidence)
 
-                            if any(x in detail for x in ep_kws):
+                            if _match_failover_detail(ep_kws, detail, tgt):
                                 last_err = (503, {"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover keyword."}}, tgt["name"], used_url)
+                                _tgt_verdict = f"failover keyword: {_clip(detail, 70)}"
                                 upstream_rejected = True
                                 break
-                            elif any(x in detail for x in proxy_kws):
-                                pass # Just retry proxy
+                            elif _match_failover_detail(proxy_kws, detail, tgt) or _proxy_local(detail, tgt):
+                                # Transport fault (WAF page, ConnectError, ReadError,
+                                # truncated stream). Rotate the exit IP; do NOT hold it
+                                # against the provider — see _proxy_local().
+                                #
+                                # ...UNLESS the same STREAM verdict has now repeated on
+                                # several different exit IPs. One proxy cutting a stream
+                                # is transport; four unrelated proxies cutting it the
+                                # same way is the provider. Keep rotating until the
+                                # threshold, then move on instead of burning the rest of
+                                # the chain's time (measured cost of not doing this:
+                                # 8 attempts / ~300s before provider #3 was tried).
+                                # Toggle: fx_stream_fault_is_endpoint.
+                                _fc = _fault_class(detail)
+                                if _fc and _fx("fx_stream_fault_is_endpoint", tgt):
+                                    _stream_faults.setdefault(_fc, set()).add(used_url)
+                                    try:
+                                        _thr = int(db.get_setting("stream_fault_threshold", "2") or 2)
+                                    except (TypeError, ValueError):
+                                        _thr = 2
+                                    if len(_stream_faults[_fc]) >= max(2, _thr):
+                                        _ips = len(_stream_faults[_fc])
+                                        _msg = (f"Endpoint {tgt['name']} returned '{_fc}' streams "
+                                                f"on {_ips} different exit IPs — treating as an "
+                                                f"upstream fault, not a proxy fault.")
+                                        _log(method=request.method, path=path, status=502,
+                                             proxy=used_url, attempts=attempts, stream=1,
+                                             redactions=redactions,
+                                             ms=int((time.time() - t0) * 1000),
+                                             note=f"endpoint fault: {_msg}",
+                                             ip=client_ip, model=current_model_log,
+                                             endpoint=tgt["name"],
+                                             detail=json.dumps(sorted(_stream_faults[_fc]))[:1500])
+                                        _EP_COOLDOWN[tgt["id"]] = time.time() + _ep_cooldown_sec()
+                                        last_err = (503, {"error": {"type": "api_error", "message": _msg}}, tgt["name"], used_url)
+                                        _tgt_verdict = f"'{_fc}' on {_ips} exit IPs (upstream fault)"
+                                        upstream_rejected = True
+                                        break
+                                pass
                             else:
                                 # Default counting for consecutive unknown errors
                                 consecutive_5xx += 1
                                 if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
                                     last_err = (503, {"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} failed consecutively."}}, tgt["name"], used_url)
+                                    _tgt_verdict = f"{consecutive_5xx} consecutive unknown errors: {_clip(detail, 60)}"
                                     upstream_rejected = True
                                     break
 
                             if not _skip_backoff(detail):
                                 await _retry_backoff(attempts)
                         # finished this target (upstream-rejected or all proxies failed) -> next target
-                        if not upstream_rejected:
-                            detail = detail or f"all proxies failed for {tgt['name']}"
+                        # Record this provider's verdict for the FINAL row (Ciel,
+                        # 2026-09-05). Boss's complaint — "sab fail kyun hua, credit
+                        # to tha" — was unanswerable because the client-visible row
+                        # named only the LAST provider in the chain (tabitoken 403),
+                        # while the 300 seconds actually burned upstream of it left no
+                        # trace anywhere except scattered intermediate rows. One
+                        # compact chain summary makes the whole cascade readable from
+                        # the single row the dashboard shows by default.
+                        #
+                        # `_tgt_verdict` is set on every break path above; when the
+                        # target ran out of proxies instead, say so with the attempt
+                        # count — "how many exits did we burn here" is the number that
+                        # was missing.
+                        if not _tgt_verdict:
+                            _n_ips = len(attempted_pids) or 1
+                            _tgt_verdict = (f"all {_n_ips} exit IP(s) failed: "
+                                            f"{_clip(detail or 'no detail', 70)}")
+                        _chain.append(f"{tgt['name']}={_tgt_verdict}")
                     # all targets exhausted
                     if last_err:
                         status, err, tname, purl = last_err
+                        # The client-visible row now carries the WHOLE chain, not just
+                        # the last provider's verdict. Kept in `detail` (never in the
+                        # note) so no classifier can match on it.
+                        _cd = json.dumps({"final": err, "chain": _chain}, ensure_ascii=False)[:1500]
                         _log(method=request.method, path=path, status=status, proxy=purl,
                                    attempts=attempts, stream=1, redactions=redactions,
-                                   ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last: {tname} {status})",
+                                   ms=int((time.time() - t0) * 1000), note=f"all targets rejected (last error: {tname} {status}) — chain: {_clip(' | '.join(_chain), 260)}",
                                    ip=client_ip, model=current_model_log, endpoint=tname,
-                                   detail=json.dumps(err)[:1500], final=True)
+                                   detail=_cd, final=True)
                         logged = True
                         yield _sse("error", err)
                         return
+                    # No target ever produced an upstream verdict — every one of them
+                    # ran out of exit IPs. Same reasoning as the `last_err` row above:
+                    # show the whole chain, not just whichever target happened to be
+                    # last, so "kaun kitna time kha gaya" is answerable from one row.
+                    _cd2 = json.dumps({"final": str(detail), "chain": _chain}, ensure_ascii=False)[:1500]
                     _log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                                stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000),
-                               note=f"all targets failed: {detail}",
-                               ip=client_ip, model=current_model_log, endpoint="", detail=str(detail)[:1500], final=True)
+                               note=(f"all targets failed (no upstream answered) — chain: "
+                                     f"{_clip(' | '.join(_chain), 260)}" if _chain
+                                     else f"all targets failed: {detail}"),
+                               ip=client_ip, model=current_model_log, endpoint="", detail=_cd2, final=True)
                     logged = True
                     yield _sse("error", {"type": "error", "error": {"type": "api_error",
                               "message": f"All proxies failed. {detail}"}})
@@ -1249,12 +2156,27 @@ async def forward(request, path):
             attempts = 0
             forwarded = False
             detail = ""
+            # Same reasoning as the anthropic path: start the byte flow before the
+            # first upstream call so a CDN in front of us cannot time out waiting
+            # for headers. OpenAI-style clients tolerate a leading comment frame,
+            # which is the SSE-standard no-op (":" line), so use that rather than
+            # an `event: ping` they might not expect.
+            if client_wants_stream and _fx("fx_early_ping", targets[0] if targets else None):
+                yield b": keepalive\n\n"
             for tgt in targets:
                 current_model_log = tgt.get("model_override") or req_model
                 if client_wants_stream:
                     up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
                 else:
                     up_body = _mutate_body(body, want_stream=False, model_override=tgt.get("model_override"))
+                # Speak the endpoint's dialect (see FORMAT TRANSLATION above). This is
+                # the leg that matters most in practice: measured 2026-09-05,
+                # api.justwoker.icu serves /v1/messages 200 in 1.4s while its
+                # /v1/chat/completions is Cloudflare-blocked (403 direct, 0/3 via free
+                # proxies), so an OpenAI-shaped client could not reach a provider that
+                # was perfectly healthy on its other route.
+                up_body, _xl = _xlate_request(up_body, "openai", tgt)
+                _up_kind = _tgt_kind(tgt) if _xl else "openai"
                 url = _target_url(tgt["base"], path, tgt["mode"])
                 attempted_pids = set()
                 consecutive_5xx = 0
@@ -1277,7 +2199,7 @@ async def forward(request, path):
                         r = await client.send(req, stream=True)
                         used_url = _race_used(candidates, hedge_id, attempted_pids)
                         _ensure_progress(candidates, attempted_pids, pids_before)
-                        if _is_waf(r.headers) or r.status_code >= 500:
+                        if _is_waf(r.headers, status=r.status_code, tgt=tgt) or r.status_code >= 500:
                             await r.aclose(); await client.aclose()
                             _mark_used_bad(candidates, used_url, "waf/5xx")
                             # `detail` used to be assigned inside the `if type(...) == int:`
@@ -1285,7 +2207,7 @@ async def forward(request, path):
                             # the previous attempt's text — or was empty on attempt 1.
                             detail = f"{r.status_code} via {used_url}"
                             _log(method=request.method, path=path, status=502, proxy=used_url, attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
-                            if _is_waf(r.headers): pass
+                            if _is_waf(r.headers, status=r.status_code, tgt=tgt): pass
                             else:
                                 consecutive_5xx += 1
                                 if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
@@ -1306,6 +2228,21 @@ async def forward(request, path):
                                 body_peek = ""
                             await r.aclose(); await client.aclose()
                             _mark_used_good(candidates, used_url, int((time.time() - t0) * 1000))
+                            # STOP-ON-FATAL (raw relay path): a size refusal is this
+                            # provider's final verdict on these bytes — no other proxy
+                            # or key of the same provider can change it. Break to the
+                            # NEXT target instead of burning this one's budget.
+                            _fatal = _request_fatal(r.status_code, body_peek, tgt)
+                            if _fatal:
+                                _log(method=request.method, path=path, status=r.status_code,
+                                     proxy=used_url, attempts=attempts, stream=1,
+                                     redactions=redactions,
+                                     ms=int((time.time() - t0) * 1000),
+                                     note=f"size refusal — skipping this endpoint's retries ({_fatal}): {_clip(body_peek)}",
+                                     ip=client_ip, model=current_model_log,
+                                     endpoint=tgt["name"], detail=body_peek[:1500])
+                                detail = f"{tgt['name']} {r.status_code} size refusal"
+                                break
                             if key_idx + 1 < len(ep_keys) and _should_rotate_key(tgt, f"{r.status_code} {body_peek}"):
                                 key_idx += 1
                                 theaders = _target_headers(request, tgt, ep_keys[key_idx])
@@ -1320,13 +2257,42 @@ async def forward(request, path):
                             detail = f"{tgt['name']} {r.status_code}"
                             break
                         _mark_used_good(candidates, used_url, int((time.time() - t0) * 1000))
-                        async for chunk in r.aiter_raw():
-                            forwarded = True
-                            yield chunk
+                        if _up_kind == "openai":
+                            # Same dialect: relay the bytes verbatim, as before.
+                            async for chunk in r.aiter_raw():
+                                forwarded = True
+                                yield chunk
+                        else:
+                            # TRANSLATED STREAM (Anthropic upstream -> OpenAI client).
+                            # Translate frame by frame so the client still streams —
+                            # buffering the whole answer here would undo the entire
+                            # point of a streaming route.
+                            _tr = translate.AnthropicToOaiStream(model=current_model_log)
+                            _buf = b""
+                            async for chunk in r.aiter_bytes():
+                                _buf += chunk
+                                _frames, _buf = translate.iter_sse_frames(_buf)
+                                for _ev, _data in _frames:
+                                    for _out in _tr.feed(_ev, _data):
+                                        forwarded = True
+                                        yield _out
+                            if _buf.strip():
+                                _frames, _ = translate.iter_sse_frames(_buf + b"\n\n")
+                                for _ev, _data in _frames:
+                                    for _out in _tr.feed(_ev, _data):
+                                        forwarded = True
+                                        yield _out
+                            # An upstream that cut the stream without a terminator must
+                            # still leave the client with a valid, closed OpenAI stream.
+                            for _out in _tr.finalize():
+                                forwarded = True
+                                yield _out
                         await r.aclose(); await client.aclose()
                         _log(method=request.method, path=path, status=200, proxy=used_url,
                                    attempts=attempts, stream=1, redactions=redactions,
-                                   ms=int((time.time() - t0) * 1000), note="ok(relay)",
+                                   ms=int((time.time() - t0) * 1000),
+                                   note=("ok(relay)" if _up_kind == "openai"
+                                         else f"ok(translated {_up_kind}->openai)"),
                                    ip=client_ip, model=current_model_log, endpoint=tgt["name"], final=True)
                         return
                     except Exception as e:
@@ -1341,7 +2307,11 @@ async def forward(request, path):
                         _mark_used_bad(candidates, used_url, type(e).__name__)
                         _log(method=request.method, path=path, status=502, proxy=used_url, attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
                         fail_kws = [k.strip() for k in tgt.get("failover_trigger_keywords", "500,501,502,503,504,524,RemoteProtocolError").split(",") if k.strip()]
-                        if any(x in detail for x in fail_kws):
+                        # This arm is reached only from `except Exception` — i.e. the
+                        # request never got an HTTP answer, so it is transport by
+                        # definition. Counting it toward `failover_5xx_threshold`
+                        # retired healthy providers after 2 unlucky proxies.
+                        if _match_failover_detail(fail_kws, detail, tgt) and not _proxy_local(detail, tgt):
                             consecutive_5xx += 1
                             if consecutive_5xx >= int(db.get_setting("failover_5xx_threshold", "3")):
                                 _log(method=request.method, path=path, status=503, proxy=used_url, attempts=attempts, stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000), note=f"smart failover: {tgt['name']} returned 5xx {consecutive_5xx} times in a row", ip=client_ip, model=current_model_log, endpoint=tgt["name"])
@@ -1372,6 +2342,11 @@ async def forward(request, path):
             up_body = _mutate_body(body, want_stream=True, model_override=tgt.get("model_override"))
         else:
             up_body = _mutate_body(body, want_stream=False, model_override=tgt.get("model_override"))
+        # Speak the endpoint's dialect (see FORMAT TRANSLATION above). `tgt_kind`
+        # below is what the UPSTREAM speaks, which is exactly what the assembler
+        # and the completeness guard need; the answer is translated back to the
+        # client's dialect at the return site.
+        up_body, _xl = _xlate_request(up_body, kind, tgt)
         url = _target_url(tgt["base"], path, tgt["mode"])
         tgt_kind = "openai" if tgt["mode"] == "openai" else "anthropic"
         upstream_rejected = False
@@ -1391,7 +2366,7 @@ async def forward(request, path):
             pids_before = len(attempted_pids)
             attempts += 1
             res = await _consume_assemble(candidates, url, theaders, up_body, timeout,
-                                          tgt_kind, attempted_pids)
+                                          tgt_kind, attempted_pids, tgt)
             _ensure_progress(candidates, attempted_pids, pids_before)
             # The proxy that actually carried the request — with hedging this is the
             # race winner, not necessarily candidates[0]. Logs used to name the wrong
@@ -1400,16 +2375,43 @@ async def forward(request, path):
             if res[0] == "respond":
                 _, status, ct, payload, _u = res
                 if 200 <= status < 300:
+                    # Back into the client's dialect. Only a successful, assembled
+                    # JSON body is translated — an upstream ERROR body is the
+                    # upstream's own words and must reach the log/client unaltered.
+                    _note = "ok(assembled)"
+                    if _xl and ct == "application/json":
+                        try:
+                            _obj = json.loads(payload)
+                            _obj = _xlate_object(_obj, kind, tgt)
+                            payload = json.dumps(_obj, ensure_ascii=False).encode("utf-8")
+                            _note = f"ok(assembled, translated {tgt_kind}->{kind})"
+                        except Exception:
+                            pass
                     _log(method=request.method, path=path, status=status, proxy=used_url,
                                attempts=attempts, stream=0, redactions=redactions,
-                               ms=int((time.time() - t0) * 1000), note="ok(assembled)",
+                               ms=int((time.time() - t0) * 1000), note=_note,
                                ip=client_ip, model=current_model_log, endpoint=tgt["name"], final=True)
                     return Response(content=payload, status_code=status, media_type=ct)
                 # Upstream refused (4xx). Before abandoning the provider, see whether
                 # this refusal is one a DIFFERENT KEY could satisfy — a quota/credit
                 # error is per-key, so rotating is the whole point of extra_keys.
                 err_full = payload.decode('utf-8', 'replace') if isinstance(payload, bytes) else str(payload)
-                err_text = err_full[:100]
+                err_text = _clip(err_full)
+                # STOP-ON-FATAL (non-stream path): a size refusal is this provider's
+                # final verdict on these bytes, so stop burning its keys and proxies.
+                # Failover to the NEXT provider still happens (see _request_fatal —
+                # tokenizers differ), it just no longer costs 4 wasted proxy rounds.
+                _fatal = _request_fatal(status, err_full, tgt)
+                if _fatal:
+                    _log(method=request.method, path=path, status=status, proxy=used_url,
+                         attempts=attempts, stream=0, redactions=redactions,
+                         ms=int((time.time() - t0) * 1000),
+                         note=f"size refusal — skipping this endpoint's retries ({_fatal}): {err_text}",
+                         ip=client_ip, model=current_model_log, endpoint=tgt["name"],
+                         detail=err_full[:1500])
+                    last = (status, ct, payload, tgt["name"], used_url)
+                    upstream_rejected = True
+                    break
                 if key_idx + 1 < len(ep_keys) and _should_rotate_key(tgt, f"{status} {err_full}"):
                     key_idx += 1
                     theaders = _target_headers(request, tgt, ep_keys[key_idx])
@@ -1426,6 +2428,7 @@ async def forward(request, path):
                      attempts=attempts, stream=0, redactions=redactions,
                      ms=int((time.time() - t0) * 1000), note=f"upstream rejected: {err_text}",
                      ip=client_ip, model=current_model_log, endpoint=tgt["name"])
+                _note_endpoint_reject(tgt, err_full)
                 last = (status, ct, payload, tgt["name"], used_url)
                 upstream_rejected = True
                 break
@@ -1439,12 +2442,13 @@ async def forward(request, path):
                        ms=int((time.time() - t0) * 1000), note=f"retry failed: {detail}",
                        ip=client_ip, model=current_model_log, endpoint=tgt["name"])
 
-            if any(x in detail for x in ep_kws):
+            if _match_failover_detail(ep_kws, detail, tgt):
                 payload = json.dumps({"error": {"type": "api_error", "message": f"Endpoint {tgt['name']} triggered endpoint failover."}}).encode()
                 last = (503, "application/json", payload, tgt["name"], used_url)
                 upstream_rejected = True
                 break
-            elif any(x in detail for x in proxy_kws):
+            elif _match_failover_detail(proxy_kws, detail, tgt) or _proxy_local(detail, tgt):
+                # Transport fault — rotate the exit IP, don't blame the provider.
                 pass
             else:
                 consecutive_5xx += 1

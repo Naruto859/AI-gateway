@@ -1155,6 +1155,7 @@ bindToggle('tgHotPool','hot_pool_enabled','Hot Pool',on=>{
 });
 bindToggle('tgHotPoolApi','hot_pool_api_test','API testing');
 
+
 bindToggle('tgScanner','proxy_scanner_enabled','Scanner',on=>{
   if($('#scanSettingsWrap'))$('#scanSettingsWrap').style.display=on?'block':'none';
 });
@@ -1617,6 +1618,23 @@ function openEndpointSettings(e){
 </div>
 
 <div class="fsect">
+  <div class="fsect-hd">Failure diagnosis toggles</div>
+  <div class="fsect-sub">These rules decide whether a failure belongs to this endpoint, its proxy, or the request. They are endpoint-specific — different providers may need different handling. Changes apply immediately, without restart.</div>
+  <div class="field"><div class="meta"><div class="lbl">Reject fake success</div><div class="desc">A 200 whose body is not a real reply (some free proxies answer with their own text) is treated as a bad exit and retried elsewhere.</div></div><div class="ctrl"><div class="tg" id="esFxEmpty2xx"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Remember a broken endpoint</div><div class="desc">If this provider says its own database is down, has no channel for the model, or the key is invalid, try it LAST for a short while instead of first on every request.</div></div><div class="ctrl"><div class="tg" id="esFxEpCool"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Early keepalive</div><div class="desc">Send one SSE ping before calling the upstream, so a CDN (Cloudflare) cannot time out at ~100s waiting for the first byte.</div></div><div class="ctrl"><div class="tg" id="esFxPing"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Trust HTTP status</div><div class="desc">Read 400/502 from the provider even when it incorrectly says the reply is a stream.</div></div><div class="ctrl"><div class="tg" id="esFxStatusCt"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Match number rules on status only</div><div class="desc">Prevents request IDs accidentally matching rules like 501.</div></div><div class="ctrl"><div class="tg" id="esFxKw"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Stop on context-size refusal</div><div class="desc">Skip remaining proxies/keys for this endpoint, then try the next provider.</div></div><div class="ctrl"><div class="tg" id="esFxSize"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Blame proxy, not endpoint</div><div class="desc">Connection/WAF/read failures only replace the bad route, not this provider.</div></div><div class="ctrl"><div class="tg" id="esFxProxy"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Repeated cut streams = this provider</div><div class="desc">If this endpoint returns a 200 stream that ends without finishing on <b>two or more different exit IPs</b>, stop rotating proxies and move to the next provider. One proxy cutting a stream is the route's fault; several unrelated routes cutting it the same way is the provider's. Off = keep trying every proxy (which cost ~300s per request on 2026-09-04).</div></div><div class="ctrl"><div class="tg" id="esFxStreamEp"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Treat refusal as a complete answer</div><div class="desc">Do not resend a valid model refusal 9 times through every provider.</div></div><div class="ctrl"><div class="tg" id="esFxRefusal"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Preserve GET/HEAD method</div><div class="desc">Keeps model-list requests as GET instead of changing them to POST.</div></div><div class="ctrl"><div class="tg" id="esFxMethod"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Strict bot-block detection</div><div class="desc">Only a real challenge page counts as WAF; ordinary HTML errors do not.</div></div><div class="ctrl"><div class="tg" id="esFxWaf"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Translate request format</div><div class="desc">Let this endpoint serve a client that speaks the <b>other</b> dialect: an OpenAI-shaped request is converted to Anthropic <code>/v1/messages</code> and back (and the reverse), including tool calls, tool results, images and streaming. Useful when only one of the two routes is reachable — measured 2026-09-05, <code>api.justwoker.icu</code> answers <code>/v1/messages</code> in 1.4s while its <code>/v1/chat/completions</code> is Cloudflare-blocked. Off = forward the body exactly as the client sent it (an endpoint that needs byte-identical bodies).</div></div><div class="ctrl"><div class="tg" id="esFxXlate"></div></div></div>
+</div>
+
+<div class="fsect">
   <div class="fsect-hd">Failover rules</div>
   <div class="fsect-sub">Three independent lists, checked in this order. Each phrase is
     matched anywhere in the upstream's response text.</div>
@@ -1856,6 +1874,44 @@ function openEndpointSettings(e){
   renderProxies();
   renderPriority();
 
+  // --- Per-endpoint failure-diagnosis toggles -------------------------------
+  // Three states matter here, and collapsing them loses information:
+  //   endpoint says ON  -> stored as "1"
+  //   endpoint says OFF -> stored as "0"
+  //   endpoint says nothing -> key absent, inherits the global default
+  // Only explicit overrides are written, so changing a global default later
+  // still reaches every endpoint that never opted out.
+  const EP_FX=[
+    ['esFxStatusCt','fx_status_over_contenttype'],
+    ['esFxPing','fx_early_ping'],
+    ['esFxEpCool','fx_endpoint_cooldown'],
+    ['esFxEmpty2xx','fx_reject_empty_2xx'],
+    ['esFxKw','fx_status_only_keywords'],
+    ['esFxSize','fx_size_refusal_stop'],
+    ['esFxProxy','fx_proxy_not_endpoint'],
+    ['esFxStreamEp','fx_stream_fault_is_endpoint'],
+    ['esFxRefusal','fx_refusal_is_answer'],
+    ['esFxMethod','fx_method_passthrough'],
+    ['esFxWaf','fx_strict_waf'],
+    ['esFxXlate','fx_translate_format'],
+  ];
+  let _epFx={};
+  try{ _epFx=e.fx_flags?JSON.parse(e.fx_flags):{}; }catch(_){ _epFx={}; }
+  if(typeof _epFx!=='object'||_epFx===null)_epFx={};
+  EP_FX.forEach(([id,key])=>{
+    const el=$('#'+id);
+    if(!el)return;
+    // Fall back to the global setting so the switch shows what is actually in
+    // force for this endpoint, not a hardcoded ON.
+    const eff=(key in _epFx)?_epFx[key]:((ST.settings&&ST.settings[key])??'1');
+    el.classList.toggle('on',String(eff)!=='0');
+    el.onclick=()=>{
+      const on=!el.classList.contains('on');
+      el.classList.toggle('on',on);
+      _epFx[key]=on?'1':'0';   // written on Save, with the rest of the form
+    };
+  });
+
   openModal('epSetModal');
   $('#esSave').onclick=async()=>{
     const btn=$('#esSave');
@@ -1892,7 +1948,8 @@ function openEndpointSettings(e){
       proxy_priority: JSON.stringify(finalPriority),
       proxy_fallback: finalFallback,
       extra_keys: JSON.stringify(finalExtraKeys),
-      key_failover_keywords: ($('#esKeyKw') ? $('#esKeyKw').value.trim() : '')
+      key_failover_keywords: ($('#esKeyKw') ? $('#esKeyKw').value.trim() : ''),
+      fx_flags: JSON.stringify(_epFx)
     });
     // The dialog deliberately stays open. This is a settings surface — the operator is
     // often adjusting several fields, and closing it the moment one save lands both hides

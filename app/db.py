@@ -68,6 +68,8 @@ DEFAULT_SETTINGS = {
                                                   # is skipped after a connect-level failure.
                                                   # It has no DB row, so without this every
                                                   # request re-discovers that the phone is off
+    "endpoint_cooldown": "120",                   # seconds a self-condemned endpoint (DB down,
+                                                  # model_not_found, invalid key) is ordered LAST
     "proxy_scanner_enabled": "1",                 # 1 = background TCP scanner active (UI toggle read this before it existed)
     "proxy_scanner_interval": "5",
     "proxy_scanner_batch": "150",
@@ -92,6 +94,69 @@ DEFAULT_SETTINGS = {
     "keepalive_idle": "15",                       # seconds idle before first probe
     "keepalive_intvl": "3",                       # seconds between probes
     "keepalive_cnt": "200",                       # probe count (idle + intvl*cnt = total coverage)
+    # --- routing-fix toggles (Ciel, 2026-09-02) ---------------------------------
+    # Boss's requirement: "mujhe har cheez ka toggle chahiye, dynamic hona
+    # chahiye". Each fix below changed how a failure is CLASSIFIED, so each one
+    # gets its own switch — default ON (the measured-correct behaviour), set to
+    # "0" to fall back to the old behaviour without editing or redeploying code.
+    # Read live per request, so a toggle takes effect with no restart.
+    "fx_status_over_contenttype": "1",             # trust the HTTP status when an upstream
+                                                   # returns 400 with content-type
+                                                   # text/event-stream (new-api does this).
+                                                   # OFF = the old guard, which fed that JSON
+                                                   # error into the SSE assembler and blamed
+                                                   # the proxy for "incomplete"
+    "fx_status_only_keywords": "1",                # numeric failover keywords match the HTTP
+                                                   # STATUS only. OFF = old substring match on
+                                                   # the whole body, where an upstream request
+                                                   # id like ...518501558... matched rule "501"
+    "fx_size_refusal_stop": "1",                   # a "context window is full" refusal stops
+                                                   # THIS endpoint's proxy/key retries (other
+                                                   # providers are still tried). OFF = spend the
+                                                   # full budget re-sending identical bytes
+    "fx_proxy_not_endpoint": "1",                  # WAF/ConnectError/ReadError/truncated count
+                                                   # against the PROXY, not the provider. OFF =
+                                                   # old behaviour, where 2 bad proxies retired
+                                                   # a healthy endpoint via failover_5xx_threshold
+    "fx_refusal_is_answer": "1",                   # stop_reason=refusal with empty content is a
+                                                   # complete answer. OFF = treat it as a
+                                                   # truncated stream and retry everywhere
+    "fx_method_passthrough": "1",                  # GET/HEAD (e.g. /v1/models) go upstream as
+                                                   # GET. OFF = old behaviour, forwarded as POST
+                                                   # and every provider answered 404
+    "fx_strict_waf": "1",                          # only a real challenge page counts as WAF.
+                                                   # OFF = any text/html response counts, which
+                                                   # mislabelled ordinary nginx error pages
+    # Send one SSE keepalive before contacting any upstream, so a CDN in front
+    # of the gateway cannot 524 while waiting for the first byte. Measured: CF
+    # held headers until 70s on a large request and aborts at ~100s.
+    "fx_early_ping": "1",
+    # Remember an endpoint that just condemned itself (its DB is down, no channel
+    # for the model, invalid key) and order it LAST for endpoint_cooldown seconds,
+    # instead of paying the same failed first hop on every single request.
+    "fx_endpoint_cooldown": "1",
+    # A 2xx whose body is not JSON is not an answer. Open "echo" proxies return
+    # 200 with their own diagnostic text and never reach the provider; without
+    # this the client got an unusable 200 and the log said ok.
+    "fx_reject_empty_2xx": "1",
+    # When the SAME stream verdict (incomplete/truncated/empty-stream) repeats on
+    # N DIFFERENT exit IPs for one endpoint, stop calling it a proxy fault and move
+    # to the next provider. Measured 2026-09-04: justwoker cut its 200-streams on
+    # all 4 of its proxies, then gorouter did the same on all 4 — 8 attempts and
+    # ~300s before the third provider was even tried, and the client only ever saw
+    # the LAST provider's 403. 0 = off (old behaviour, burn every proxy).
+    "fx_stream_fault_is_endpoint": "1",
+    "stream_fault_threshold": "2",
+    # Translate the request/response between OpenAI's chat-completions shape and
+    # Anthropic's messages shape when the client and the endpoint speak different
+    # dialects. Before this, `_target_url` rewrote the PATH and `_target_headers`
+    # swapped the AUTH, but the BODY went upstream verbatim — so a mismatched
+    # endpoint could only ever answer 400, and the request looked like a routing
+    # failure. It also unlocks a route that is reachable when the other is not:
+    # measured 2026-09-05, api.justwoker.icu answers /v1/messages 200 in 1.4s
+    # while its /v1/chat/completions is Cloudflare-blocked (403 direct, 0 of 3
+    # free proxies, scrape.do ROTATION_FAILED). 0 = old verbatim behaviour.
+    "fx_translate_format": "1",
 }
 
 
@@ -115,7 +180,8 @@ CREATE TABLE endpoints_new (
     proxy_priority            TEXT    DEFAULT '[]',
     proxy_fallback            INTEGER DEFAULT 1,
     key_failover_keywords     TEXT    DEFAULT '',
-    extra_keys                TEXT    DEFAULT '[]'
+    extra_keys                TEXT    DEFAULT '[]',
+    fx_flags                  TEXT    DEFAULT ''
 )
 """
 
@@ -312,8 +378,26 @@ def _init(c):
         # carries its own quota upstream, so exhausting one should move to the next
         # rather than abandoning the provider.
         c.execute("ALTER TABLE endpoints ADD COLUMN extra_keys TEXT DEFAULT '[]'")
+    if "fx_flags" not in ecols:
+        # Per-endpoint failure-diagnosis overrides as a JSON object, e.g.
+        # {"fx_size_refusal_stop": "0"}. Boss's point (2026-09-02): these describe
+        # how a PARTICULAR provider's failures should be read, so they belong to
+        # the endpoint, not to the global proxy settings. A premium/official
+        # endpoint wants fewer restrictions than a free relay. Empty = inherit
+        # every rule from the global settings row.
+        c.execute("ALTER TABLE endpoints ADD COLUMN fx_flags TEXT DEFAULT ''")
 
     _drop_endpoint_url_unique(c)
+
+    # The rebuild above recreates `endpoints` from _ENDPOINTS_DDL and copies only the
+    # columns both versions share, so a column added by ALTER *before* the rebuild is
+    # dropped again on the way through. Measured 2026-09-02 on the staging gateway:
+    # fx_flags was ALTERed in, then silently lost, and every per-endpoint toggle
+    # override became impossible to save while the UI happily displayed them.
+    # Re-assert after the rebuild; ALTER is a no-op when the column already exists.
+    ecols = [r[1] for r in c.execute("PRAGMA table_info(endpoints)").fetchall()]
+    if "fx_flags" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN fx_flags TEXT DEFAULT ''")
 
     # logs: add ip / model / detail for the log-detail view
     lcols = [r[1] for r in c.execute("PRAGMA table_info(logs)").fetchall()]
@@ -723,7 +807,7 @@ def add_endpoint(url, api_mode="anthropic_messages", api_key="", model_override=
 
 
 def update_endpoint(eid, **fields):
-    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords", "endpoint_failover_keywords", "scrape_do_token", "custom_proxies", "proxy_priority", "proxy_fallback", "extra_keys", "key_failover_keywords"}
+    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords", "endpoint_failover_keywords", "scrape_do_token", "custom_proxies", "proxy_priority", "proxy_fallback", "extra_keys", "key_failover_keywords", "fx_flags"}
     fields = {k: v for k, v in fields.items() if k in allowed_ENDPOINT_COLS}
     if not fields:
         return
