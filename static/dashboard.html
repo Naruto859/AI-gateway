@@ -1627,6 +1627,7 @@ function openEndpointSettings(e){
   <div class="field"><div class="meta"><div class="lbl">Match number rules on status only</div><div class="desc">Prevents request IDs accidentally matching rules like 501.</div></div><div class="ctrl"><div class="tg" id="esFxKw"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Stop on context-size refusal</div><div class="desc">Skip remaining proxies/keys for this endpoint, then try the next provider.</div></div><div class="ctrl"><div class="tg" id="esFxSize"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Blame proxy, not endpoint</div><div class="desc">Connection/WAF/read failures only replace the bad route, not this provider.</div></div><div class="ctrl"><div class="tg" id="esFxProxy"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Repeated cut streams = this provider</div><div class="desc">If this endpoint returns a 200 stream that ends without finishing on <b>two or more different exit IPs</b>, stop rotating proxies and move to the next provider. One proxy cutting a stream is the route's fault; several unrelated routes cutting it the same way is the provider's. Off = keep trying every proxy (which cost ~300s per request on 2026-09-04).</div></div><div class="ctrl"><div class="tg" id="esFxStreamEp"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Treat refusal as a complete answer</div><div class="desc">Do not resend a valid model refusal 9 times through every provider.</div></div><div class="ctrl"><div class="tg" id="esFxRefusal"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Preserve GET/HEAD method</div><div class="desc">Keeps model-list requests as GET instead of changing them to POST.</div></div><div class="ctrl"><div class="tg" id="esFxMethod"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Strict bot-block detection</div><div class="desc">Only a real challenge page counts as WAF; ordinary HTML errors do not.</div></div><div class="ctrl"><div class="tg" id="esFxWaf"></div></div></div>
@@ -1887,6 +1888,7 @@ function openEndpointSettings(e){
     ['esFxKw','fx_status_only_keywords'],
     ['esFxSize','fx_size_refusal_stop'],
     ['esFxProxy','fx_proxy_not_endpoint'],
+    ['esFxStreamEp','fx_stream_fault_is_endpoint'],
     ['esFxRefusal','fx_refusal_is_answer'],
     ['esFxMethod','fx_method_passthrough'],
     ['esFxWaf','fx_strict_waf'],

@@ -139,6 +139,14 @@ DEFAULT_SETTINGS = {
     # 200 with their own diagnostic text and never reach the provider; without
     # this the client got an unusable 200 and the log said ok.
     "fx_reject_empty_2xx": "1",
+    # When the SAME stream verdict (incomplete/truncated/empty-stream) repeats on
+    # N DIFFERENT exit IPs for one endpoint, stop calling it a proxy fault and move
+    # to the next provider. Measured 2026-09-04: justwoker cut its 200-streams on
+    # all 4 of its proxies, then gorouter did the same on all 4 — 8 attempts and
+    # ~300s before the third provider was even tried, and the client only ever saw
+    # the LAST provider's 403. 0 = off (old behaviour, burn every proxy).
+    "fx_stream_fault_is_endpoint": "1",
+    "stream_fault_threshold": "2",
 }
 
 
