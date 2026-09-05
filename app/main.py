@@ -571,3 +571,64 @@ async def get_log_tags(x_admin_token: str = Header(default="")):
                methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def proxy_v1(path: str, request: Request):
     return await forwarder.forward(request, f"v1/{path}")
+
+
+# ---------------- root-level aliases (Ciel, 2026-09-05) ----------------
+# A client configured with the BARE host — no `/v1` suffix — asks for
+# `GET /models`, `POST /chat/completions`, `POST /messages`. Only `/v1/{path}`
+# was mounted, so FastAPI answered 404 {"detail":"Not Found"} and the request
+# never reached forwarder.forward — meaning it left NO row in the gateway log
+# either, which is why this looked like nothing had happened at all.
+#
+# Concrete symptom it produced: Hermes Agent's desktop onboarding
+# ("Local / custom endpoint") probes `{base_url}/models`, parses the 404 body as
+# an empty model list, and refuses to connect with
+#   "Connected to <url>, but it advertised no models at /v1/models.
+#    Start a model on that endpoint and try again."
+# The gateway was healthy the whole time; only the URL shape differed.
+#
+# Aliased EXPLICITLY, one route per known surface, instead of a root catch-all:
+# `@app.api_route("/{path:path}")` would shadow `/` (dashboard), `/app.js`,
+# `/health` and every `/admin/*` route, since a path-converter route matches
+# everything. Auth, logging, retries and failover are unchanged — each alias is
+# the same forwarder call the `/v1` route makes.
+_ALIAS_PATHS = (
+    "models",
+    "chat/completions",
+    "completions",
+    "messages",
+    "messages/count_tokens",
+    "embeddings",
+    "responses",
+    "props",
+)
+# Deliberately the SAME method list as the /v1 route above — an alias that
+# accepts a method the real path rejects is a behaviour change, not an alias.
+# (Adding HEAD here made `HEAD /models` return the upstream's 404 while
+# `HEAD /v1/models` returned a local 405.)
+_ALIAS_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+
+
+def _register_v1_alias(sub: str) -> None:
+    async def _alias(request: Request):
+        return await forwarder.forward(request, f"v1/{sub}")
+
+    app.add_api_route(
+        f"/{sub}",
+        _alias,
+        methods=_ALIAS_METHODS,
+        include_in_schema=False,
+        name="alias_" + sub.replace("/", "_"),
+    )
+
+
+for _alias_sub in _ALIAS_PATHS:
+    _register_v1_alias(_alias_sub)
+
+
+# `GET /models/<id>` (single-model lookup) needs its own route: the loop above
+# registers exact paths only. GET-only, matching what `/v1/models/<id>` allows
+# in practice.
+@app.api_route("/models/{model_id:path}", methods=["GET"], include_in_schema=False)
+async def alias_model_detail(model_id: str, request: Request):
+    return await forwarder.forward(request, f"v1/models/{model_id}")
