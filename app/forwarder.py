@@ -873,8 +873,25 @@ def _should_rotate_key(tgt, detail):
 
 
 def _target_url(base, path, mode):
-    """Compose the full upstream URL for a target given the inbound path."""
+    """Compose the full upstream URL for a target given the inbound path.
+
+    ROUTE follows the ENDPOINT's dialect, not the client's path (Ciel, 2026-09-06).
+    The anthropic branch used to be a blind `base + "/" + path`, so an OpenAI-shaped
+    client hitting `/v1/chat/completions` was sent to
+    `https://<anthropic-endpoint>/v1/chat/completions` — the wrong route on that
+    provider. Measured consequence on phoenix, where all 9 endpoints are
+    anthropic_messages: the translated body was correct but went to the OpenAI path,
+    which on api.justwoker.icu is the Cloudflare-blocked one, and new-api answered
+    `401 Invalid token` because that route wants a Bearer header while an
+    anthropic-mode target sends `x-api-key`. 13 attempts, 39.6s, "all targets
+    failed" — for a request every endpoint could have served.
+
+    Only the two chat routes are remapped. Informational paths (`v1/models` and
+    friends) still pass through verbatim, because those are the same on both
+    dialects and rewriting them would break the model picker.
+    """
     base = base.rstrip("/")
+    p = (path or "").strip("/")
     if mode == "openai":
         # OpenAI providers expose /chat/completions; map any messages path to it
         if base.endswith("/chat/completions"):
@@ -885,6 +902,10 @@ def _target_url(base, path, mode):
     # anthropic: agentrouter & compatibles expose /v1/messages
     if base.endswith("/v1/messages"):
         return base
+    if p.endswith("chat/completions"):
+        # An OpenAI-shaped client on an Anthropic endpoint: its body is translated,
+        # so its ROUTE must be too.
+        return f"{base}/v1/messages"
     return f"{base}/{path}"
 
 
