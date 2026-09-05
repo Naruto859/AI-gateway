@@ -1,5 +1,6 @@
 import os
 import asyncio
+import socket
 import time
 import urllib.parse
 import logging
@@ -71,6 +72,33 @@ async def test_proxy(proxy_url, target_host, target_port):
     writer = None
     try:
         reader, writer = await asyncio.wait_for(asyncio.open_connection(proxy_host, proxy_port), timeout=timeout_sec)
+        # TCP keepalive on the hedger's OWN socket to the proxy (Ciel, 2026-09-05).
+        #
+        # forwarder._keepalive_opts() only reaches the socket httpx opens — and when
+        # more than one proxy is raced, that socket goes to 127.0.0.1:<hedger>, i.e.
+        # loopback, which never idles out. The leg that CAN be idle-dropped is this
+        # one, and it had no keepalive at all: while a model "thinks" for a minute
+        # before its first SSE byte, a residential/free proxy is free to drop a
+        # silent tunnel, and the resulting clean EOF is indistinguishable from the
+        # provider cutting the stream.
+        #
+        # Values come from the same dashboard settings as the direct path, so one
+        # place tunes both. Wrapped: TCP_KEEP* are Linux-specific and a proxy socket
+        # is not worth an exception.
+        try:
+            sock = writer.get_extra_info("socket")
+            if sock is not None:
+                idle = int(float(db.get_setting("keepalive_idle", "30") or 30))
+                intvl = int(float(db.get_setting("keepalive_intvl", "5") or 5))
+                cnt = int(float(db.get_setting("keepalive_cnt", "174") or 174))
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                for opt, val in ((getattr(socket, "TCP_KEEPIDLE", None), idle),
+                                 (getattr(socket, "TCP_KEEPINTVL", None), intvl),
+                                 (getattr(socket, "TCP_KEEPCNT", None), cnt)):
+                    if opt is not None:
+                        sock.setsockopt(socket.IPPROTO_TCP, opt, val)
+        except (OSError, TypeError, ValueError):
+            pass
 
         if "socks" in scheme:
             # Basic SOCKS5 handshake (no auth)

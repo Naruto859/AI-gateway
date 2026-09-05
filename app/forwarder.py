@@ -225,12 +225,61 @@ def _keepalive_opts():
         cnt = int(float(db.get_setting("keepalive_cnt", "174") or 174))
     except (TypeError, ValueError):
         idle, intvl, cnt = 30, 5, 174
+    # Linux rejects TCP_KEEPCNT above 127 with EINVAL, and setsockopt failing takes
+    # the WHOLE connection down (httpcore raises ConnectError: [Errno 22] Invalid
+    # argument), not just the option. The shipped default of 174 — and the 200 in
+    # every live DB — are both over that limit, so these options could only ever
+    # have worked by never being applied. Clamp instead of erroring: a caller asking
+    # for "probe basically forever" gets the longest the kernel allows.
+    # TCP_KEEPIDLE/INTVL are 1..32767 seconds.
+    idle = max(1, min(idle, 32767))
+    intvl = max(1, min(intvl, 32767))
+    cnt = max(1, min(cnt, 127))
     return [
         (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
         (socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, idle),
         (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, intvl),
         (socket.IPPROTO_TCP, socket.TCP_KEEPCNT, cnt),
     ]
+
+
+class _KeepaliveBackend:
+    """Applies socket options to proxied connections, which httpcore does not.
+
+    `httpx.AsyncHTTPTransport(socket_options=...)` looks like it covers every
+    connection, but httpcore's `AsyncHTTPProxy.create_connection()` builds
+    AsyncForwardHTTPConnection / AsyncTunnelHTTPConnection WITHOUT passing
+    `socket_options` down (verified in httpcore 1.0.9), even though both classes
+    accept it. Only the direct, proxy-less pool honours it.
+
+    Every upstream call in this gateway goes through a proxy, so in practice TCP
+    keepalive was configured and never actually applied: the sockets carried the
+    system default SO_KEEPALIVE=0 / idle 7200s. A silent tunnel could therefore be
+    dropped by any middlebox while a model was still thinking, and the resulting
+    clean EOF is indistinguishable from the provider truncating the stream.
+
+    This wrapper sits at the network-backend layer, below that branch, and fills in
+    the options when the caller passed none.
+    """
+
+    def __init__(self, inner, opts):
+        self._inner = inner
+        self._opts = opts
+
+    async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        return await self._inner.connect_tcp(
+            host, port, timeout=timeout, local_address=local_address,
+            socket_options=socket_options if socket_options else self._opts,
+        )
+
+    async def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        return await self._inner.connect_unix_socket(
+            path, timeout=timeout,
+            socket_options=socket_options if socket_options else self._opts,
+        )
+
+    async def sleep(self, seconds):
+        return await self._inner.sleep(seconds)
 
 
 def _build_client(candidates, timeout, hedge_id=None):
@@ -248,7 +297,15 @@ def _build_client(candidates, timeout, hedge_id=None):
         proxy = httpx.Proxy(f"http://127.0.0.1:{hedger.hedger_port()}", headers=hdrs)
     else:
         proxy = candidates[0]["url"]
-    transport = httpx.AsyncHTTPTransport(proxy=proxy, verify=False, socket_options=_keepalive_opts())
+    opts = _keepalive_opts()
+    transport = httpx.AsyncHTTPTransport(proxy=proxy, verify=False, socket_options=opts)
+    # httpcore drops socket_options on the proxied path (see _KeepaliveBackend), and
+    # every request here is proxied — so wrap the pool's network backend to apply
+    # them for real. Guarded by hasattr so a future httpcore that changes this
+    # internal name degrades to the old behaviour instead of crashing.
+    pool = getattr(transport, "_pool", None)
+    if pool is not None and hasattr(pool, "_network_backend"):
+        pool._network_backend = _KeepaliveBackend(pool._network_backend, opts)
     return httpx.AsyncClient(verify=False, transport=transport, timeout=timeout)
 
 
