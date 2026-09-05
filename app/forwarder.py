@@ -987,6 +987,49 @@ def _parse_block(block):
     return event, data
 
 
+# A JSON `null` payload is the one SSE frame no OpenAI-style client can survive.
+# The SDK does `json.loads(data)` and hands the result to its model constructor,
+# so `data: null` becomes a literal `None` in the chunk iterator — and the very
+# next line of every client is `chunk.choices[0].delta`, which raises
+#   AttributeError: 'NoneType' object has no attribute 'choices'
+# mid-conversation. Verified against this gateway with the real `openai` SDK:
+# 3 good chunks, 1 None, then that exact crash.
+#
+# It is not in the OpenAI SSE shape and carries no information, so dropping the
+# frame loses nothing. Toggle: fx_drop_null_frames (per-endpoint, default ON).
+def _is_null_frame(block: bytes) -> bool:
+    _ev, data = _parse_block(block)
+    return data is not None and data.strip() == "null"
+
+
+# The relay path reads arbitrary byte chunks (`aiter_raw`), so a frame can be
+# split across two reads and cannot be inspected without reassembly. This splits
+# on a frame boundary while RE-EMITTING the separator bytes it found, so a
+# filtered relay is byte-identical to the raw one apart from the frames
+# deliberately dropped. Both LF-LF and CRLF-CRLF are handled: splitting only on
+# b"\n\n" would never match a CRLF upstream (b"\r\n\r\n" contains no b"\n\n"),
+# and the buffer would then grow until end-of-stream — a hang, not a filter.
+def _sse_frames(buf: bytes):
+    """Yield (frame_body, separator) for every complete frame; return remainder.
+
+    Used as: ``for body, sep in ...`` via the wrapper below.
+    """
+    out = []
+    while True:
+        i_crlf = buf.find(b"\r\n\r\n")
+        i_lf = buf.find(b"\n\n")
+        if i_crlf < 0 and i_lf < 0:
+            break
+        if i_crlf >= 0 and (i_lf < 0 or i_crlf <= i_lf):
+            out.append((buf[:i_crlf], b"\r\n\r\n"))
+            buf = buf[i_crlf + 4:]
+        else:
+            out.append((buf[:i_lf], b"\n\n"))
+            buf = buf[i_lf + 2:]
+    return out, buf
+
+
+
 # ---------- assemblers: SSE stream -> single final object ----------
 class AnthropicAssembler:
     """Rebuild a /v1/messages Message object from its SSE event stream."""
@@ -1005,6 +1048,15 @@ class AnthropicAssembler:
         try:
             obj = json.loads(data)
         except Exception:
+            return
+        # `json.loads` succeeds on bare `null`, `[]`, `3`, `"x"` — all valid JSON,
+        # none of them an event object. Without this the next line raised
+        # AttributeError: 'NoneType' object has no attribute 'get' and killed the
+        # whole assembling task, which the caller reported as a transport fault
+        # ("<type> via <proxy>") and retried on another IP — a client-visible
+        # failure with a misattributed cause. Verified: feed("", "null") raised
+        # before this guard, returns quietly after.
+        if not isinstance(obj, dict):
             return
         t = obj.get("type")
         if t == "message_start":
@@ -1116,6 +1168,11 @@ class OpenAIAssembler:
         try:
             o = json.loads(data)
         except Exception:
+            return
+        # Same guard as AnthropicAssembler: `null` is valid JSON but not a chunk
+        # object, and `o.get(...)` on it raised AttributeError inside the
+        # assembling task.
+        if not isinstance(o, dict):
             return
         if self.obj is None:
             self.obj = {"id": o.get("id"), "object": "chat.completion",
@@ -2116,13 +2173,51 @@ async def forward(request, path):
                             detail = f"{tgt['name']} {r.status_code}"
                             break
                         _mark_used_good(candidates, used_url, int((time.time() - t0) * 1000))
-                        async for chunk in r.aiter_raw():
-                            forwarded = True
-                            yield chunk
+                        # RAW RELAY, MINUS THE FRAMES THAT CRASH CLIENTS (Ciel,
+                        # 2026-09-05). This path forwards upstream bytes verbatim, so
+                        # an upstream `data: null` frame reached the client untouched
+                        # and every OpenAI-style SDK died on it with
+                        #   AttributeError: 'NoneType' object has no attribute 'choices'
+                        # — mid-chat, after several good chunks, which is exactly what
+                        # made it look random. Measured on this gateway: one null
+                        # frame in a 10-frame stream from AgentRouter.
+                        #
+                        # Everything else stays byte-exact: the separator each frame
+                        # arrived with is re-emitted, and any trailing partial frame is
+                        # flushed at end-of-stream. When the toggle is off, the old
+                        # verbatim loop runs unchanged.
+                        if _fx("fx_drop_null_frames", tgt):
+                            _relay_buf = b""
+                            _dropped = 0
+                            async for chunk in r.aiter_raw():
+                                forwarded = True
+                                _relay_buf += chunk
+                                _frames, _relay_buf = _sse_frames(_relay_buf)
+                                _out = bytearray()
+                                for _body, _sep in _frames:
+                                    if _is_null_frame(_body):
+                                        _dropped += 1
+                                        continue
+                                    _out += _body + _sep
+                                if _out:
+                                    yield bytes(_out)
+                            if _relay_buf:
+                                # Tail with no terminating blank line. Pass it through
+                                # unless it is itself a null frame.
+                                if not _is_null_frame(_relay_buf):
+                                    yield _relay_buf
+                                else:
+                                    _dropped += 1
+                        else:
+                            _dropped = 0
+                            async for chunk in r.aiter_raw():
+                                forwarded = True
+                                yield chunk
                         await r.aclose(); await client.aclose()
                         _log(method=request.method, path=path, status=200, proxy=used_url,
                                    attempts=attempts, stream=1, redactions=redactions,
-                                   ms=int((time.time() - t0) * 1000), note="ok(relay)",
+                                   ms=int((time.time() - t0) * 1000),
+                                   note="ok(relay)" + (f" [{_dropped} null frame(s) dropped]" if _dropped else ""),
                                    ip=client_ip, model=current_model_log, endpoint=tgt["name"], final=True)
                         return
                     except Exception as e:

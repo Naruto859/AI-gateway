@@ -147,6 +147,15 @@ DEFAULT_SETTINGS = {
     # the LAST provider's 403. 0 = off (old behaviour, burn every proxy).
     "fx_stream_fault_is_endpoint": "1",
     "stream_fault_threshold": "2",
+    # Drop `data: null` SSE frames instead of relaying them. An upstream that emits
+    # one kills every OpenAI-style client mid-chat: the SDK json-decodes the frame
+    # into a literal None, and the client's next line — `chunk.choices[0].delta` —
+    # raises "AttributeError: 'NoneType' object has no attribute 'choices'".
+    # Measured on AgentRouter 2026-09-05: 1 null frame in a 10-frame stream, and the
+    # real `openai` SDK crashed on it after 3 good chunks. The frame is not part of
+    # the OpenAI SSE shape and carries no data, so nothing is lost. 0 = relay
+    # verbatim (old behaviour).
+    "fx_drop_null_frames": "1",
 }
 
 
