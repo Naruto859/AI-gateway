@@ -1935,10 +1935,17 @@ async def forward(request, path):
                         logged = True
                         yield _sse("error", err)
                         return
+                    # No target ever produced an upstream verdict — every one of them
+                    # ran out of exit IPs. Same reasoning as the `last_err` row above:
+                    # show the whole chain, not just whichever target happened to be
+                    # last, so "kaun kitna time kha gaya" is answerable from one row.
+                    _cd2 = json.dumps({"final": str(detail), "chain": _chain}, ensure_ascii=False)[:1500]
                     _log(method=request.method, path=path, status=503, proxy="", attempts=attempts,
                                stream=1, redactions=redactions, ms=int((time.time() - t0) * 1000),
-                               note=f"all targets failed: {detail}",
-                               ip=client_ip, model=current_model_log, endpoint="", detail=str(detail)[:1500], final=True)
+                               note=(f"all targets failed (no upstream answered) — chain: "
+                                     f"{_clip(' | '.join(_chain), 260)}" if _chain
+                                     else f"all targets failed: {detail}"),
+                               ip=client_ip, model=current_model_log, endpoint="", detail=_cd2, final=True)
                     logged = True
                     yield _sse("error", {"type": "error", "error": {"type": "api_error",
                               "message": f"All proxies failed. {detail}"}})
