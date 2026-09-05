@@ -156,6 +156,16 @@ DEFAULT_SETTINGS = {
     # the OpenAI SSE shape and carries no data, so nothing is lost. 0 = relay
     # verbatim (old behaviour).
     "fx_drop_null_frames": "1",
+    # Informational GET/HEAD routes (/v1/models and friends) take a direct,
+    # method-correct path to the FIRST enabled endpoint. If that provider does not
+    # serve the route at all (404/405/501) its rejection used to be handed straight
+    # back to the client, so a model picker went empty purely because of endpoint
+    # ORDER — measured 2026-09-05: AgentRouter at priority 0 answers GET /v1/models
+    # with 405 + an HTML page, while the next endpoint answers 200 with a real list.
+    # With this on, only route-level misses and transport errors advance to the next
+    # endpoint; every other status is that provider's real answer and is returned
+    # as-is. 0 = first endpoint only (old behaviour).
+    "fx_info_failover": "1",
 }
 
 

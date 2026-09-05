@@ -1521,32 +1521,58 @@ async def forward(request, path):
     if request.method in ("GET", "HEAD") and not body:
         tgts = _targets(s)
         if tgts and _fx("fx_method_passthrough", tgts[0]):
-            tgt = tgts[0]
-            url = f"{tgt['base'].rstrip('/')}/{path}"
-            hdrs = _target_headers(request, tgt, (tgt.get("keys") or [tgt.get("key", "")])[0])
-            t_info = time.time()
-            try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=conn_to, read=30.0,
-                                                                   write=30.0, pool=10.0),
-                                             follow_redirects=True) as c:
-                    r = await c.request(request.method, url, headers=hdrs)
-                raw = r.content
-                _log(method=request.method, path=path, status=r.status_code, proxy="direct",
-                     attempts=1, stream=0, redactions=0,
-                     ms=int((time.time() - t_info) * 1000),
-                     note=f"info passthrough ({request.method}) -> {tgt['name']}",
-                     ip=client_ip, model="", endpoint=tgt["name"],
-                     detail=raw[:1500].decode("utf-8", "replace"), final=True)
-                return Response(content=raw, status_code=r.status_code,
-                                media_type=r.headers.get("content-type", "application/json"))
-            except Exception as e:
-                _log(method=request.method, path=path, status=502, proxy="direct",
-                     attempts=1, stream=0, redactions=0,
-                     ms=int((time.time() - t_info) * 1000),
-                     note=f"info passthrough failed: {type(e).__name__}",
-                     ip=client_ip, model="", endpoint=tgt["name"],
-                     detail=str(e)[:1500], final=True)
-                return _err(f"Upstream unreachable for {request.method} {path}.", 502)
+            # ...but "first enabled endpoint" alone is not enough. Measured on the
+            # friend's gateway 2026-09-05: AgentRouter was dragged to priority 0 and
+            # it answers `GET /v1/models` with 405 + a Chinese HTML page (it only
+            # serves /v1/messages). That 405 was returned verbatim, so the client's
+            # model picker went empty again — "endpoint advertised no models" — even
+            # though the very next endpoint (justwoker) answers 200 with a real list.
+            # A provider that does not serve an informational route is exactly the
+            # case failover exists for. Only route-level rejections (404/405/501) and
+            # transport errors move on; every other verdict is still that provider's
+            # answer and is returned as-is, so this cannot become the 5-attempt walk
+            # that the POST-as-GET defect used to cause.
+            _info_failover = _fx("fx_info_failover", tgts[0])
+            _chain = []
+            for _i, tgt in enumerate(tgts):
+                _last = (_i == len(tgts) - 1) or not _info_failover
+                url = f"{tgt['base'].rstrip('/')}/{path}"
+                hdrs = _target_headers(request, tgt, (tgt.get("keys") or [tgt.get("key", "")])[0])
+                t_info = time.time()
+                try:
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=conn_to, read=30.0,
+                                                                      write=30.0, pool=10.0),
+                                                 follow_redirects=True) as c:
+                        r = await c.request(request.method, url, headers=hdrs)
+                    raw = r.content
+                    _route_miss = r.status_code in (404, 405, 501)
+                    _move_on = _route_miss and not _last
+                    _chain.append(f"{tgt['name']} {r.status_code}")
+                    _log(method=request.method, path=path, status=r.status_code, proxy="direct",
+                         attempts=_i + 1, stream=0, redactions=0,
+                         ms=int((time.time() - t_info) * 1000),
+                         note=(f"info passthrough ({request.method}) -> {tgt['name']}"
+                               + (f": route not served, trying {tgts[_i + 1]['name']}" if _move_on else "")),
+                         ip=client_ip, model="", endpoint=tgt["name"],
+                         detail=raw[:1500].decode("utf-8", "replace"), final=not _move_on)
+                    if _move_on:
+                        continue
+                    return Response(content=raw, status_code=r.status_code,
+                                    media_type=r.headers.get("content-type", "application/json"))
+                except Exception as e:
+                    _chain.append(f"{tgt['name']} {type(e).__name__}")
+                    _move_on = not _last
+                    _log(method=request.method, path=path, status=502, proxy="direct",
+                         attempts=_i + 1, stream=0, redactions=0,
+                         ms=int((time.time() - t_info) * 1000),
+                         note=(f"info passthrough failed: {type(e).__name__}"
+                               + (f", trying {tgts[_i + 1]['name']}" if _move_on else "")),
+                         ip=client_ip, model="", endpoint=tgt["name"],
+                         detail=str(e)[:1500], final=not _move_on)
+                    if _move_on:
+                        continue
+                    return _err(f"Upstream unreachable for {request.method} {path}. "
+                                f"Tried: {', '.join(_chain)}", 502)
 
     try:
         client_wants_stream = bool(json.loads(body).get("stream"))

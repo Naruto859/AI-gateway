@@ -1632,6 +1632,7 @@ function openEndpointSettings(e){
   <div class="field"><div class="meta"><div class="lbl">Preserve GET/HEAD method</div><div class="desc">Keeps model-list requests as GET instead of changing them to POST.</div></div><div class="ctrl"><div class="tg" id="esFxMethod"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Strict bot-block detection</div><div class="desc">Only a real challenge page counts as WAF; ordinary HTML errors do not.</div></div><div class="ctrl"><div class="tg" id="esFxWaf"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Drop <code>data: null</code> stream frames</div><div class="desc">Some providers emit a bare <code>null</code> inside an otherwise valid stream. Clients decode it into nothing and then crash mid-chat with <b>'NoneType' object has no attribute 'choices'</b>. The frame carries no data, so dropping it loses nothing. Off = relay it verbatim.</div></div><div class="ctrl"><div class="tg" id="esFxNullFrames"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Try the next endpoint for model lists</div><div class="desc">If this endpoint does not serve an informational route like <code>GET /v1/models</code> (404/405/501), ask the next endpoint instead of handing its rejection to the client — otherwise a model picker goes empty purely because of endpoint order. Other statuses are still returned as-is.</div></div><div class="ctrl"><div class="tg" id="esFxInfoFail"></div></div></div>
 </div>
 
 <div class="fsect">
@@ -1894,6 +1895,7 @@ function openEndpointSettings(e){
     ['esFxMethod','fx_method_passthrough'],
     ['esFxWaf','fx_strict_waf'],
     ['esFxNullFrames','fx_drop_null_frames'],
+    ['esFxInfoFail','fx_info_failover'],
   ];
   let _epFx={};
   try{ _epFx=e.fx_flags?JSON.parse(e.fx_flags):{}; }catch(_){ _epFx={}; }
