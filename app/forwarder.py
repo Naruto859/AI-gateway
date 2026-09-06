@@ -1638,6 +1638,66 @@ async def forward(request, path):
 
     kind = "openai" if "chat/completions" in path else "anthropic"
     targets = _order_targets(_targets(s))
+
+    # ---------- DIALECT ELIGIBILITY / FAIL FAST (Ciel, 2026-09-06) ----------
+    # Boss's rule, in his words: "अगर कोई भी OpenAI endpoint add नहीं है तो error
+    # फेंक देगा हमारा router, direct" — and with the translation toggle ON the
+    # router must instead "Anthropic endpoint से भी उठाके format translate करके"
+    # send it.
+    #
+    # An endpoint can serve THIS request when either
+    #   * it already speaks the client's dialect, or
+    #   * `fx_translate_format` is on for it, so its body can be translated.
+    # Anything else is a GUARANTEED upstream 400. Sending it anyway is what made
+    # a misconfiguration look like a routing fault: measured on phoenix before
+    # this gate, one OpenAI-shaped request against 9 anthropic-mode endpoints
+    # burned 13 attempts / 39.6s and reported the LAST provider's `401 Invalid
+    # token`, which names neither the real cause nor the fix.
+    #
+    # So: filter first, and if nothing is left, refuse immediately with a message
+    # that says exactly which knob is wrong. Nothing has been sent upstream yet
+    # and no 200 has been committed, so the client gets a clean, instant error in
+    # milliseconds instead of a timeout — for a stream request too, because this
+    # runs before the StreamingResponse is built.
+    #
+    # Ordering follows Boss's own description of the intent: "अगर OpenAI endpoint
+    # add है और Anthropic endpoint add है और … OpenAI format में [request आया] तो वो
+    # जो OpenAI endpoints है वहाँ से message जाएगा" — the endpoint that natively
+    # speaks the client's dialect goes FIRST, and translation is the fallback for
+    # when that dialect is missing ("Anthropic endpoint से भी उठाके format translate
+    # करके भेजेगा"). Relative order inside each group is untouched, so the priority
+    # column still decides among equals; the only promotion is native-over-translated,
+    # which is also the cheaper path (no body rewrite, byte-exact passthrough).
+    #
+    # Scoped to the two CHAT routes on purpose. Informational paths (v1/models,
+    # v1/props …) are identical in both dialects, so a dialect verdict about them
+    # would be meaningless — and refusing them here would break the model picker.
+    _p = (path or "").lower().rstrip("/")
+    if targets and (_p.endswith("chat/completions") or _p.endswith("messages")):
+        _native = [t for t in targets if _tgt_kind(t) == kind]
+        _xlated = [t for t in targets
+                   if _tgt_kind(t) != kind and _fx("fx_translate_format", t)]
+        _elig = _native + _xlated
+        if not _elig:
+            _other = "Anthropic /v1/messages" if kind == "openai" else "OpenAI /v1/chat/completions"
+            _want = "OpenAI /v1/chat/completions" if kind == "openai" else "Anthropic /v1/messages"
+            _msg = (
+                f"No endpoint can serve a {_want} request. "
+                f"{len(targets)} endpoint(s) are enabled and every one of them speaks "
+                f"{_other} with 'Translate request format' switched OFF. "
+                f"Fix: enable that toggle on an endpoint (Endpoint settings -> Failure "
+                f"diagnosis toggles), or add an endpoint whose API mode is {_want}."
+            )
+            _log(method=request.method, path=path, status=503, proxy="", attempts=0,
+                 stream=1 if client_wants_stream else 0, redactions=redactions, ms=0,
+                 note=f"no endpoint speaks {kind} (format translation off)",
+                 ip=client_ip, model=current_model_log, endpoint="",
+                 detail=_msg + " | endpoints: " + ", ".join(
+                     f"{t['name']}={_tgt_kind(t)}" for t in targets)[:900],
+                 final=True)
+            return _err(_msg, 503)
+        targets = _elig
+
     base_candidates = proxy_pool.ordered_for_request(max_retries)
     if not base_candidates:
         db.add_log(final=1, method=request.method, path=path, status=503, proxy="", attempts=0,
