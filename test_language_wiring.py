@@ -72,6 +72,48 @@ class PrepareRequestTests(unittest.TestCase):
             out, fmt, lang = asyncio.run(F._prepare_request(body, "anthropic", tgt))
         self.assertTrue(lang)
 
+    def test_endpoint_test_applies_language_toggle_before_http(self):
+        """Dashboard Test/Chat must exercise the same language flag as real routing."""
+        row = {"url": "https://agentrouter.org", "fx_flags":
+               '{"fx_translate_language":"1"}', "custom_proxies": "[]",
+               "proxy_priority": "[]", "proxy_fallback": 0}
+
+        class FakeCursor:
+            def execute(self, *args, **kwargs): return self
+            def fetchone(self): return row
+
+        class FakeResponse:
+            status_code = 200
+            text = '{"content":[{"type":"text","text":"ok"}]}'
+            headers = {"content-type": "application/json"}
+            content = text.encode()
+            def json(self): return json.loads(self.text)
+
+        captured = {}
+        class FakeClient:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+            async def post(self, url, headers=None, content=None):
+                captured["content"] = content
+                return FakeResponse()
+
+        async def fake_translate(body, kind):
+            data = json.loads(body)
+            data["messages"][0]["content"] = "translated English"
+            return json.dumps(data).encode(), True
+
+        with patch.object(F.db, "conn", return_value=FakeCursor()), \
+             patch.object(F, "_resolve_candidates", return_value=[]), \
+             patch.object(F.httpx, "AsyncClient", return_value=FakeClient()), \
+             patch.object(F.language_translate, "translate_request", side_effect=fake_translate), \
+             patch.object(F.db, "add_log"), \
+             patch.object(F.db, "get_setting", side_effect=lambda key, default="": default):
+            result = asyncio.run(F.test_endpoint(
+                "https://agentrouter.org", "anthropic", "key", "model", "नमस्ते"))
+        self.assertTrue(result["ok"])
+        sent = json.loads(captured["content"])
+        self.assertEqual(sent["messages"][0]["content"], "translated English")
+
     def test_language_then_format_translation_compose(self):
         tgt = {"mode": "openai", "fx_flags":
                '{"fx_translate_language":"1","fx_translate_format":"1"}'}

@@ -1449,7 +1449,13 @@ async def test_endpoint(url, api_mode, api_key, model, message, history=None, ma
             headers["anthropic-beta"] = "claude-code-20250219,fine-grained-tool-streaming-2025-05-14,prompt-caching-2025-07-21,context-1m-2025-08-07"
         else:
             headers["user-agent"] = "claude-cli/2.1.177 (external, cli)"
-    payload = json.dumps(body).encode()
+    payload = json.dumps(body, ensure_ascii=False).encode()
+    # Admin Test/Chat must exercise the endpoint's language policy too. Otherwise
+    # the panel can report AgentRouter broken for Hindi while real routed traffic
+    # would have translated it successfully.
+    client_kind = "openai" if openai else "anthropic"
+    if _fx("fx_translate_language", tgt, default="0"):
+        payload, _lang_xl = await language_translate.translate_request(payload, client_kind)
     t0 = time.time()
     detail = ""
     last_status = 0
