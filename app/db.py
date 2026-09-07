@@ -157,6 +157,12 @@ DEFAULT_SETTINGS = {
     # while its /v1/chat/completions is Cloudflare-blocked (403 direct, 0 of 3
     # free proxies, scrape.do ROTATION_FAILED). 0 = old verbatim behaviour.
     "fx_translate_format": "1",
+    # Translate Hindi/Devanagari and high-confidence Roman Hinglish natural-language
+    # fields to English before calling THIS endpoint. OFF globally by default: this
+    # exists for providers such as AgentRouter whose language gate rejects Hindi,
+    # and should be explicitly enabled only on the affected endpoint. Tool ids,
+    # arguments, URLs, code and JSON remain byte-exact.
+    "fx_translate_language": "0",
 }
 
 

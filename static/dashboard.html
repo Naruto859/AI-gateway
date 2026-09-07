@@ -739,6 +739,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints</h2>
 <p class="sub">Where the gateway forwards. Set one as primary; if it fails all retries the next is tried, then it loops back to primary.</p>
 <div class="field"><div class="meta"><div class="lbl">Claude Code Mimicry</div><div class="desc">A-to-Z exact mimicry (NodeJS + Claude-CLI). Overwrites client fingerprint headers. Keep ON if upstream strictly checks for real Claude Code.</div></div><div class="ctrl"><div class="tg" id="tgMimicry"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Format Translation</div><div class="desc">Let an endpoint serve a client that speaks the <b>other</b> dialect. Toggle ON = an OpenAI-shaped request is converted to Anthropic <code>/v1/messages</code> and back (and the reverse), including tool calls, tool results, images and streaming. Toggle OFF = reject instantly when no endpoint matches the client's dialect (the body is NOT translated). This is the fleet-wide default; per-endpoint overrides live in each endpoint's edit popup under "Translate request format".</div></div><div class="ctrl"><div class="tg" id="tgFmtXlate"></div></div></div>
 <div class="listbar">
   <span class="lbcount" id="epCount"></span>
   <button class="addbtn" id="openAddEp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add endpoint</button>
@@ -1150,6 +1151,7 @@ bindToggle('tgRotation','auto_rotation','Auto rotation',on=>{
   render();
 });
 bindToggle('tgMimicry','claude_mimicry','Mimicry');
+bindToggle('tgFmtXlate','fx_translate_format','Format Translation');
 bindToggle('tgHotPool','hot_pool_enabled','Hot Pool',on=>{
   if($('#hpSettingsWrap'))$('#hpSettingsWrap').style.display=on?'block':'none';
 });
@@ -1241,6 +1243,7 @@ function render(){
     $('#tgRotation').classList.toggle('on',s.auto_rotation==='1');
   if($('#rotSettingsWrap')) $('#rotSettingsWrap').style.display=s.auto_rotation==='1'?'none':'block';
     $('#tgMimicry').classList.toggle('on',s.claude_mimicry==='1');
+    $('#tgFmtXlate').classList.toggle('on',(s.fx_translate_format??'1')!=='0');
   $('#tgHotPool').classList.toggle('on',s.hot_pool_enabled==='1');
   if($('#hpSettingsWrap')) $('#hpSettingsWrap').style.display=s.hot_pool_enabled==='1'?'block':'none';
     $('#tgHotPoolApi').classList.toggle('on',s.hot_pool_api_test!=='0');
@@ -1632,6 +1635,7 @@ function openEndpointSettings(e){
   <div class="field"><div class="meta"><div class="lbl">Preserve GET/HEAD method</div><div class="desc">Keeps model-list requests as GET instead of changing them to POST.</div></div><div class="ctrl"><div class="tg" id="esFxMethod"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Strict bot-block detection</div><div class="desc">Only a real challenge page counts as WAF; ordinary HTML errors do not.</div></div><div class="ctrl"><div class="tg" id="esFxWaf"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Translate request format</div><div class="desc">Let this endpoint serve a client that speaks the <b>other</b> dialect: an OpenAI-shaped request is converted to Anthropic <code>/v1/messages</code> and back (and the reverse), including tool calls, tool results, images and streaming. Useful when only one of the two routes is reachable — measured 2026-09-05, <code>api.justwoker.icu</code> answers <code>/v1/messages</code> in 1.4s while its <code>/v1/chat/completions</code> is Cloudflare-blocked. Off = forward the body exactly as the client sent it (an endpoint that needs byte-identical bodies).</div></div><div class="ctrl"><div class="tg" id="esFxXlate"></div></div></div>
+  <div class="field"><div class="meta"><div class="lbl">Translate Hindi / Hinglish to English</div><div class="desc">Before calling <b>this endpoint only</b>, translate Hindi, Devanagari and high-confidence Roman Hinglish natural-language fields to English. System/user/assistant context and textual tool results are translated; tool IDs, tool arguments, JSON, URLs, model names and code stay exact. The model is instructed to answer in the user's original language. Keep OFF for endpoints that already accept Hindi.</div></div><div class="ctrl"><div class="tg" id="esFxLangXlate"></div></div></div>
 </div>
 
 <div class="fsect">
@@ -1894,6 +1898,7 @@ function openEndpointSettings(e){
     ['esFxMethod','fx_method_passthrough'],
     ['esFxWaf','fx_strict_waf'],
     ['esFxXlate','fx_translate_format'],
+    ['esFxLangXlate','fx_translate_language'],
   ];
   let _epFx={};
   try{ _epFx=e.fx_flags?JSON.parse(e.fx_flags):{}; }catch(_){ _epFx={}; }
@@ -1903,7 +1908,8 @@ function openEndpointSettings(e){
     if(!el)return;
     // Fall back to the global setting so the switch shows what is actually in
     // force for this endpoint, not a hardcoded ON.
-    const eff=(key in _epFx)?_epFx[key]:((ST.settings&&ST.settings[key])??'1');
+    const fallbackDefault=(key==='fx_translate_language')?'0':'1';
+    const eff=(key in _epFx)?_epFx[key]:((ST.settings&&ST.settings[key])??fallbackDefault);
     el.classList.toggle('on',String(eff)!=='0');
     el.onclick=()=>{
       const on=!el.classList.contains('on');

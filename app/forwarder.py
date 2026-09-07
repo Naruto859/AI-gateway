@@ -22,7 +22,7 @@ import socket
 import asyncio
 import httpx
 from starlette.responses import StreamingResponse, Response, JSONResponse
-from . import db, proxy_pool, filters, hedger, translate
+from . import db, proxy_pool, filters, hedger, translate, language_translate
 
 # ---------------------------------------------------------------------------
 # Dedicated-proxy cooldown.
@@ -991,6 +991,21 @@ def _xlate_request(body_bytes, client_kind, tgt):
     return json.dumps(out, ensure_ascii=False).encode("utf-8"), True
 
 
+async def _prepare_request(body_bytes, client_kind, tgt):
+    """Apply endpoint-specific language translation, then wire-format translation.
+
+    Ordering matters: language fields are translated while the request still has
+    the CLIENT's native shape; the existing wire translator can then map that
+    fully-English body to the endpoint dialect without touching protocol IDs.
+    """
+    lang_changed = False
+    if _fx("fx_translate_language", tgt, default="0"):
+        body_bytes, lang_changed = await language_translate.translate_request(
+            body_bytes, client_kind)
+    body_bytes, format_changed = _xlate_request(body_bytes, client_kind, tgt)
+    return body_bytes, format_changed, lang_changed
+
+
 def _xlate_object(obj, client_kind, tgt):
     """Translate an ASSEMBLED response object into the client's dialect."""
     if obj is None or not _xlate_on(client_kind, tgt):
@@ -1756,7 +1771,7 @@ async def forward(request, path):
                         # An OpenAI-mode endpoint gets an OpenAI-shaped body and its
                         # SSE is translated back to Anthropic before the client sees
                         # it, so `kind` stays the CLIENT's contract throughout.
-                        up_body, _xl = _xlate_request(up_body, "anthropic", tgt)
+                        up_body, _xl, _lang_xl = await _prepare_request(up_body, "anthropic", tgt)
                         _up_kind = _tgt_kind(tgt) if _xl else "anthropic"
                         url = _target_url(tgt["base"], path, tgt["mode"])
                         attempted_pids = set()
@@ -2256,7 +2271,7 @@ async def forward(request, path):
                 # /v1/chat/completions is Cloudflare-blocked (403 direct, 0/3 via free
                 # proxies), so an OpenAI-shaped client could not reach a provider that
                 # was perfectly healthy on its other route.
-                up_body, _xl = _xlate_request(up_body, "openai", tgt)
+                up_body, _xl, _lang_xl = await _prepare_request(up_body, "openai", tgt)
                 _up_kind = _tgt_kind(tgt) if _xl else "openai"
                 url = _target_url(tgt["base"], path, tgt["mode"])
                 attempted_pids = set()
@@ -2427,7 +2442,7 @@ async def forward(request, path):
         # below is what the UPSTREAM speaks, which is exactly what the assembler
         # and the completeness guard need; the answer is translated back to the
         # client's dialect at the return site.
-        up_body, _xl = _xlate_request(up_body, kind, tgt)
+        up_body, _xl, _lang_xl = await _prepare_request(up_body, kind, tgt)
         url = _target_url(tgt["base"], path, tgt["mode"])
         tgt_kind = "openai" if tgt["mode"] == "openai" else "anthropic"
         upstream_rejected = False
