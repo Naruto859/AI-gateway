@@ -1062,6 +1062,32 @@ def responses_request_to_oai(body: dict) -> dict:
             # invented into a message.
             continue
 
+        if itype == "additional_tools":
+            # Codex "code mode" delivers a tools bundle (typically a namespace
+            # container) as a developer input item. The bundle itself carries no
+            # conversational content; the tools it declares are flattened into
+            # the request's tool list by _flatten_responses_tools below.
+            continue
+
+        if itype in ("custom_tool_call", "custom_tool_call_output"):
+            # Freeform tool traffic behaves like function calls for our
+            # purposes; the arguments/input ride the same fields.
+            if itype == "custom_tool_call":
+                pending_calls.append({
+                    "id": it.get("call_id") or it.get("id") or _new_id("call"),
+                    "type": "function",
+                    "function": {"name": it.get("name") or "",
+                                 "arguments": _args_to_string(it.get("input"))},
+                })
+            else:
+                flush_calls()
+                msgs.append({
+                    "role": "tool",
+                    "tool_call_id": it.get("call_id") or "",
+                    "content": _resp_text_from_content(it.get("output")),
+                })
+            continue
+
         if itype and itype != "message":
             raise ValueError(f"unsupported Responses input item type: {itype}")
 
@@ -1115,24 +1141,47 @@ def responses_request_to_oai(body: dict) -> dict:
         if body.get(k) is not None:
             out[k] = body[k]
 
-    # Codex always ships built-in provider-executed tools (`web_search`, and a
-    # `namespace` container for multi-agent); an Anthropic-dialect upstream
-    # cannot execute those, and failing closed would kill every Codex request.
-    # Dropping them is safe: the model simply never sees those capabilities.
+    # Codex tool shapes and how they bridge to a function-only upstream
+    # (behavior matches LiteLLM's Responses bridge):
+    #   - `namespace` containers hold REAL function tools nested inside
+    #     (multi_agent_v1 -> spawn_agent/send_input/...). Dropping the whole
+    #     namespace silently removes those capabilities, so FLATTEN: emit each
+    #     nested function tool, discard the container itself.
+    #   - `custom` (freeform/grammar) tools become ordinary function tools —
+    #     the model sees the description; the grammar is not executable by a
+    #     non-OpenAI upstream anyway.
+    #   - provider-executed tools (web_search, image_generation, mcp, ...) have
+    #     no client-side meaning on an Anthropic-dialect upstream: DROP them.
     _DROPPABLE_RESPONSES_TOOL_TYPES = ("web_search", "web_search_request",
-                                       "namespace", "image_generation",
-                                       "code_interpreter", "mcp")
+                                       "image_generation", "code_interpreter", "mcp")
 
-    tools = body.get("tools")
-    if isinstance(tools, list) and tools:
+    def _flatten_responses_tools(entries, *, depth: int = 0):
         conv = []
-        for t in tools:
+        if not isinstance(entries, list):
+            return conv
+        if depth > 3:
+            raise ValueError("Responses tools nested deeper than 3 levels")
+        for t in entries:
             if not isinstance(t, dict):
                 raise ValueError("Responses tools must be objects")
-            if t.get("type") in _DROPPABLE_RESPONSES_TOOL_TYPES:
+            ttype = t.get("type")
+            if ttype == "namespace":
+                conv.extend(_flatten_responses_tools(t.get("tools") or [], depth=depth + 1))
                 continue
-            if t.get("type") not in (None, "function"):
-                raise ValueError("provider-executed Responses tools cannot be translated safely")
+            if ttype == "custom":
+                name = t.get("name") or ""
+                if not name:
+                    raise ValueError("Responses custom tool is missing a name")
+                conv.append({"type": "function", "function": {
+                    "name": name,
+                    "description": t.get("description") or "",
+                    "parameters": {"type": "object", "properties": {}},
+                }})
+                continue
+            if ttype in _DROPPABLE_RESPONSES_TOOL_TYPES:
+                continue
+            if ttype not in (None, "function"):
+                raise ValueError(f"provider-executed Responses tool type {ttype!r} cannot be translated safely")
             name = t.get("name") or ((t.get("function") or {}).get("name"))
             if not name:
                 raise ValueError("Responses function tool is missing a name")
@@ -1142,8 +1191,16 @@ def responses_request_to_oai(body: dict) -> dict:
                 "description": t.get("description") or src.get("description") or "",
                 "parameters": src.get("parameters") or {"type": "object", "properties": {}},
             }})
-        if conv:
-            out["tools"] = conv
+        return conv
+
+    tools = body.get("tools")
+    conv = _flatten_responses_tools(tools) if isinstance(tools, list) else []
+    # "additional_tools" input items declare more tools the same way.
+    for it in items if isinstance(raw_input, list) else []:
+        if isinstance(it, dict) and it.get("type") == "additional_tools" and isinstance(it.get("tools"), list):
+            conv.extend(_flatten_responses_tools(it["tools"]))
+    if conv:
+        out["tools"] = conv
 
     tc = body.get("tool_choice")
     if isinstance(tc, str) and tc in ("auto", "none", "required"):

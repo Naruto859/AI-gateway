@@ -174,7 +174,12 @@ def _get_dedicated_candidates(tgt, max_needed):
     except: proxy_priority = []
 
     for p_id in proxy_priority:
-        if p_id == "scrape.do" and scrape_token:
+        if p_id == "direct":
+            # Explicit no-proxy exit for endpoints that answer direct from this
+            # VPS (camel-hub does; some hosts CF-block it — those just don't
+            # list 'direct'). Tried in priority order like any dedicated proxy.
+            candidates.append({"id": "__direct__", "url": ""})
+        elif p_id == "scrape.do" and scrape_token:
             candidates.append({"id": "scrape", "url": f"http://{scrape_token}&customHeaders=true:@proxy.scrape.do:8080"})
         elif p_id.startswith("custom_"):
             idx = int(p_id.split('_')[1])
@@ -295,6 +300,12 @@ def _build_client(candidates, timeout, hedge_id=None):
         if hedge_id:
             hdrs["x-hedge-id"] = hedge_id
         proxy = httpx.Proxy(f"http://127.0.0.1:{hedger.hedger_port()}", headers=hdrs)
+    elif candidates[0].get("id") == "__direct__":
+        # Explicit no-proxy exit ("direct" in proxy_priority): an empty-string
+        # proxy URL would be handed to httpx and fail, so build a bare client.
+        opts = _keepalive_opts()
+        transport = httpx.AsyncHTTPTransport(verify=False, socket_options=opts)
+        return httpx.AsyncClient(verify=False, transport=transport, timeout=timeout)
     else:
         proxy = candidates[0]["url"]
     opts = _keepalive_opts()
