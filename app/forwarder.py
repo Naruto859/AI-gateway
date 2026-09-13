@@ -814,7 +814,7 @@ def _targets(s):
             "base": e["url"].rstrip("/"),
             "key": e.get("api_key") or s.get("gateway_key", ""),
             "keys": _endpoint_keys(e, s),
-            "mode": "openai" if e.get("api_mode") == "chat_completions" else "anthropic",
+            "mode": translate.dialect_of_mode(e.get("api_mode") or "anthropic_messages"),
             "agentrouter": False,
             "id": e.get("id"),
             "model_override": e.get("model_override") or s.get("global_model_override", ""),
@@ -892,20 +892,33 @@ def _target_url(base, path, mode):
     """
     base = base.rstrip("/")
     p = (path or "").strip("/")
-    if mode == "openai":
+    dialect = translate.dialect_of_mode(mode)
+    if dialect == "responses":
+        # Responses providers expose /v1/responses; a translated body must take
+        # that route or the provider answers about the wrong endpoint.
+        if base.endswith("/responses"):
+            return base
+        if base.endswith("/v1"):
+            return base + "/responses"
+        if p.endswith("chat/completions") or p.endswith("messages") or p.endswith("responses"):
+            return f"{base}/v1/responses"
+        return f"{base}/{path}"
+    if dialect == "openai":
         # OpenAI providers expose /chat/completions; map any messages path to it
         if base.endswith("/chat/completions"):
             return base
-        if "/v1" in base:
-            return base.rstrip("/") + "/chat/completions"
-        return base + "/v1/chat/completions"
+        if base.endswith("/v1"):
+            return base + "/chat/completions"
+        if p.endswith("chat/completions") or p.endswith("messages") or p.endswith("responses"):
+            return base + "/v1/chat/completions"
+        return f"{base}/{path}"
     # anthropic: agentrouter & compatibles expose /v1/messages
     if base.endswith("/v1/messages"):
         return base
-    if p.endswith("chat/completions"):
+    if p.endswith("chat/completions") or p.endswith("responses"):
         # An OpenAI-shaped client on an Anthropic endpoint: its body is translated,
         # so its ROUTE must be too.
-        return f"{base}/v1/messages"
+        return (base + "/messages") if base.endswith("/v1") else (base + "/v1/messages")
     return f"{base}/{path}"
 
 
@@ -915,7 +928,8 @@ def _target_headers(request, target, key=None):
     `key` overrides target["key"] so the retry loop can re-send the same request on the
     endpoint's next key without rebuilding the target.
     """
-    kind = "openai" if target["mode"] == "openai" else "anthropic"
+    # Responses is an OpenAI-family route: Bearer auth, same header shape.
+    kind = "anthropic" if translate.dialect_of_mode(target["mode"]) == "anthropic" else "openai"
     return _build_upstream_headers(request, key or target["key"], kind)
 
 
@@ -952,17 +966,28 @@ def _mutate_body(body_bytes, want_stream=None, model_override=None):
 #   * The CLIENT shape is decided by the inbound path (`kind`).
 #   * The ENDPOINT shape is `tgt["mode"]`.
 #   * Translation happens only when they differ, and only when the toggle is on.
-# Toggle: fx_translate_format (per-endpoint, defaults ON) — a premium endpoint
-# that must receive byte-exact bodies can opt out without touching the others.
+# Toggle: fx_translate_format (GLOBAL, defaults ON) — the fleet can carry all
+# three client wire formats (Anthropic Messages, OpenAI Chat, OpenAI Responses)
+# through whichever native endpoint is healthy. Boss explicitly removed the
+# duplicate per-endpoint switch on 2026-09-12: format is a router capability,
+# unlike endpoint-specific language policy.
 # ---------------------------------------------------------------------------
 
 def _tgt_kind(tgt):
-    return "openai" if (tgt or {}).get("mode") == "openai" else "anthropic"
+    """The dialect THIS endpoint speaks: anthropic | openai | responses."""
+    return translate.dialect_of_mode((tgt or {}).get("mode") or "")
 
 
 def _xlate_on(client_kind, tgt):
-    """Should this request be translated for THIS target?"""
-    return (_tgt_kind(tgt) != client_kind) and _fx("fx_translate_format", tgt)
+    """Should this request be translated for THIS target?
+
+    Format translation is a FLEET-WIDE switch (Boss, 2026-09-12): "vo poore
+    endpoints pe apply hona chahiye, isliye vo bahar mein rehna chahiye". A
+    client dialect is a property of the client, not of one provider, so a
+    per-endpoint override here only created two places to look when a Codex
+    request got rejected. Read from the global `settings` row only.
+    """
+    return (_tgt_kind(tgt) != client_kind) and db.get_setting("fx_translate_format", "1") != "0"
 
 
 def _xlate_request(body_bytes, client_kind, tgt):
@@ -975,34 +1000,93 @@ def _xlate_request(body_bytes, client_kind, tgt):
         return body_bytes, False
     try:
         d = json.loads(body_bytes)
-    except Exception:
-        return body_bytes, False
+    except Exception as exc:
+        raise ValueError(
+            f"{client_kind}->{_tgt_kind(tgt)} request translation received invalid JSON"
+        ) from exc
     if not isinstance(d, dict):
-        return body_bytes, False
+        raise ValueError(
+            f"{client_kind}->{_tgt_kind(tgt)} request translation requires a JSON object"
+        )
     try:
-        if client_kind == "anthropic":
-            out = translate.anthropic_request_to_oai(d)
-        else:
-            out = translate.oai_request_to_anthropic(d)
-    except Exception:
-        # A translation bug must not eat the request: fall back to verbatim and
-        # let the upstream's own verdict be logged, as before.
-        return body_bytes, False
+        out = translate.request_to(client_kind, _tgt_kind(tgt), d)
+    except Exception as exc:
+        # FAIL CLOSED.  A body in dialect A sent verbatim to dialect B is not a
+        # useful fallback: it can silently reinterpret tool/result ownership or
+        # produce a provider-specific 400 after wasting proxy retries.  The
+        # caller records this as a preprocessing failure and MUST NOT contact the
+        # upstream with the untranslated bytes.
+        raise ValueError(
+            f"{client_kind}->{_tgt_kind(tgt)} request translation failed: {exc}"
+        ) from exc
     return json.dumps(out, ensure_ascii=False).encode("utf-8"), True
 
 
-async def _prepare_request(body_bytes, client_kind, tgt):
-    """Apply endpoint-specific language translation, then wire-format translation.
+def _translation_error_response(exc):
+    """Return one explicit client-visible verdict; never leak source text upstream."""
+    return _err(
+        "Required language translation failed, so the original request was not "
+        f"forwarded upstream. {exc}",
+        503,
+    )
 
-    Ordering matters: language fields are translated while the request still has
-    the CLIENT's native shape; the existing wire translator can then map that
-    fully-English body to the endpoint dialect without touching protocol IDs.
+
+async def _prepare_request(body_bytes, client_kind, tgt, log=None):
+    """Apply wire-format translation, then endpoint-specific language translation.
+
+    Ordering matters: protocol shape is normalized to the endpoint's native
+    dialect first. Language translation then traverses that final wire shape,
+    so an OpenAI endpoint never receives an Anthropic-shaped body merely because
+    its language toggle is enabled.
     """
+    body_bytes, format_changed = _xlate_request(body_bytes, client_kind, tgt)
+    language_kind = _tgt_kind(tgt) if format_changed else client_kind
     lang_changed = False
     if _fx("fx_translate_language", tgt, default="0"):
-        body_bytes, lang_changed = await language_translate.translate_request(
-            body_bytes, client_kind)
-    body_bytes, format_changed = _xlate_request(body_bytes, client_kind, tgt)
+        translation_proxies = []
+        try:
+            custom = json.loads(tgt.get("custom_proxies") or "[]")
+            priority = json.loads(tgt.get("proxy_priority") or "[]")
+            if not isinstance(custom, list) or not isinstance(priority, list):
+                raise ValueError("proxy configuration must contain JSON arrays")
+            for proxy_id in priority:
+                if not str(proxy_id).startswith("custom_"):
+                    continue
+                try:
+                    proxy = custom[int(str(proxy_id).split("_", 1)[1])]
+                except (IndexError, TypeError, ValueError):
+                    continue
+                if proxy and proxy not in translation_proxies:
+                    translation_proxies.append(proxy)
+        except Exception as exc:
+            report = language_translate.TranslationReport(
+                body_bytes, False,
+                error=f"translator proxy configuration: {type(exc).__name__}: {exc}",
+            )
+        else:
+            try:
+                report = await language_translate.translate_request_report(
+                    body_bytes, language_kind,
+                    proxy_urls=translation_proxies or None,
+                )
+            except Exception as exc:
+                report = language_translate.TranslationReport(
+                    body_bytes, False,
+                    error=f"unexpected translator exception: {type(exc).__name__}: {exc}",
+                )
+        body_bytes, lang_changed = report.body, report.changed
+        if report.error:
+            if log:
+                log(status=0, proxy="", attempts=0, stream=0, redactions=0, ms=0,
+                    note="translator failed; request blocked; upstream_contacted=false",
+                    detail=report.error,
+                    endpoint=tgt.get("name") or tgt.get("base") or "")
+            raise language_translate.LanguageTranslationError(report.error)
+        elif log and report.changed:
+            log(status=200, proxy="", attempts=0, stream=0, redactions=0, ms=0,
+                note="translator translated request to English",
+                detail=f"source_language={report.detected_language or 'unknown'}",
+                endpoint=tgt.get("name") or tgt.get("base") or "")
     return body_bytes, format_changed, lang_changed
 
 
@@ -1011,11 +1095,15 @@ def _xlate_object(obj, client_kind, tgt):
     if obj is None or not _xlate_on(client_kind, tgt):
         return obj
     try:
-        if client_kind == "anthropic":
-            return translate.oai_response_to_anthropic(obj)
-        return translate.anthropic_response_to_oai(obj)
-    except Exception:
-        return obj
+        return translate.response_to(_tgt_kind(tgt), client_kind, obj)
+    except Exception as exc:
+        # Fail closed: returning the upstream dialect to a different client is
+        # malformed, and returning a failed Responses object unchanged can look
+        # like a successful empty completion.  Let the request path classify and
+        # log the preprocessing failure explicitly.
+        raise ValueError(
+            f"{_tgt_kind(tgt)}->{client_kind} response translation failed: {exc}"
+        ) from exc
 
 
 def _stream_ended(up_kind, ev, data):
@@ -1027,9 +1115,7 @@ def _stream_ended(up_kind, ev, data):
     name — so a perfectly complete answer would be scored "truncated", the proxy
     blamed, and the whole provider retried. Recognise both terminators.
     """
-    if up_kind == "openai":
-        return bool(data) and data.strip() == "[DONE]"
-    return ev == "message_stop"
+    return translate.stream_terminated(up_kind, ev, data)
 
 
 
@@ -1170,7 +1256,8 @@ class AnthropicAssembler:
 
 
 def _sse(event, data):
-    return (f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n").encode("utf-8")
+    prefix = f"event: {event}\n" if event else ""
+    return (f"{prefix}data: {json.dumps(data, ensure_ascii=False)}\n\n").encode("utf-8")
 
 
 # a keepalive ping frame (the Anthropic SDK explicitly ignores `ping` events)
@@ -1223,17 +1310,66 @@ def _message_to_sse(msg):
     return frames
 
 
+class ResponsesAssembler:
+    """Rebuild a Responses response object from a Responses SSE stream."""
+    def __init__(self):
+        self.response = None
+        self.items = {}
+        self.text = {}
+        self.args = {}
+
+    def feed(self, event, data):
+        if not data or data == "[DONE]":
+            return
+        try:
+            obj = json.loads(data)
+        except Exception:
+            return
+        if not isinstance(obj, dict):
+            return
+        typ = obj.get("type") or event or ""
+        if typ == "response.created":
+            self.response = dict(obj.get("response") or {})
+        elif typ == "response.output_item.added":
+            index = obj.get("output_index", len(self.items))
+            self.items[index] = dict(obj.get("item") or {})
+        elif typ == "response.output_text.delta":
+            index = obj.get("output_index", 0)
+            self.text[index] = self.text.get(index, "") + str(obj.get("delta") or "")
+        elif typ == "response.function_call_arguments.delta":
+            index = obj.get("output_index", 0)
+            self.args[index] = self.args.get(index, "") + str(obj.get("delta") or "")
+        elif typ in ("response.completed", "response.incomplete", "response.failed"):
+            self.response = dict(obj.get("response") or self.response or {})
+            if typ == "response.failed":
+                self.response.setdefault("status", "failed")
+                self.response["error"] = self.response.get("error") or obj.get("error")
+
+    def result(self):
+        if self.response is None:
+            return None
+        response = dict(self.response)
+        output = []
+        for index in sorted(set(self.items) | set(self.text) | set(self.args)):
+            item = dict(self.items.get(index) or {})
+            if item.get("type") == "message" and index in self.text:
+                item["content"] = [{"type": "output_text", "text": self.text[index]}]
+            if item.get("type") == "function_call" and index in self.args:
+                item["arguments"] = self.args[index]
+            if item:
+                output.append(item)
+        if output:
+            response["output"] = output
+        return response
+
+
 class OpenAIAssembler:
+    """Rebuild a /v1/chat/completions object from its SSE stream."""
+
     """Rebuild a /v1/chat/completions object from its SSE stream.
 
-    TOOL CALLS (Ciel, 2026-09-06): this used to accumulate `content` only, so an
-    upstream that answered with tool calls assembled to an EMPTY message. That was
-    harmless while the assembler only ever served openai-client→openai-endpoint
-    traffic (the raw relay handled streams), but format translation now routes
-    Anthropic clients through here — and an agentic client whose tool call
-    silently vanished would hang. OpenAI streams tool calls as sparse deltas: the
-    first carries index+id+name, later ones append `arguments` fragments, so they
-    must be merged per index rather than replaced.
+    Tool calls are accumulated from sparse deltas: the first carries index, id,
+    and name; later frames append argument fragments.
     """
     def __init__(self):
         self.obj = None
@@ -1345,7 +1481,9 @@ async def _consume_assemble(candidates, url, headers, body, timeout, kind,
                         return ("retry", f"non-json 2xx via {used}: {_peek!r}", used)
                     out_ct = "application/json" if raw[:1] in (b"{", b"[") else (ct or "application/json")
                     return ("respond", r.status_code, out_ct, raw, used)
-                asm = OpenAIAssembler() if kind == "openai" else AnthropicAssembler()
+                asm = (OpenAIAssembler() if kind == "openai"
+                       else (ResponsesAssembler() if kind == "responses"
+                             else AnthropicAssembler()))
                 buf = b""
                 async for chunk in r.aiter_bytes():
                     buf += chunk
@@ -1424,13 +1562,22 @@ async def test_endpoint(url, api_mode, api_key, model, message, history=None, ma
     # "ConnectError" for endpoints that were actually healthy, which is exactly the
     # wrong diagnosis. Routed traffic never does this; it keeps using proxies only.
     candidates.append({"id": "__direct__", "url": ""})
-    openai = (api_mode == "chat_completions")
+    ep_kind = translate.dialect_of_mode(api_mode)
+    openai = (ep_kind == "openai")
+    responses = (ep_kind == "responses")
     # A one-shot Test sends just `message`; the dashboard Chat passes the running
     # `history` so the model can actually hold a conversation instead of answering
     # every turn cold.
     msgs = list(history) if history else [{"role": "user", "content": message}]
     mt = int(max_tokens or 20)
-    if openai:
+    if responses:
+        full = url.rstrip("/") + ("/responses" if not url.rstrip("/").endswith("/responses") else "")
+        body = {"model": model, "max_output_tokens": mt,
+                "input": [{"role": m.get("role", "user"),
+                           "content": [{"type": "input_text", "text": (m.get("content") if isinstance(m.get("content"), str) else json.dumps(m.get("content"), ensure_ascii=False))}]}
+                          for m in msgs if isinstance(m, dict)]}
+        headers = {"authorization": f"Bearer {api_key}", "content-type": "application/json"}
+    elif openai:
         full = url.rstrip("/") + ("/chat/completions" if not url.rstrip("/").endswith("chat/completions") else "")
         body = {"model": model, "max_tokens": mt, "messages": msgs}
         headers = {"authorization": f"Bearer {api_key}", "content-type": "application/json"}
@@ -1453,9 +1600,27 @@ async def test_endpoint(url, api_mode, api_key, model, message, history=None, ma
     # Admin Test/Chat must exercise the endpoint's language policy too. Otherwise
     # the panel can report AgentRouter broken for Hindi while real routed traffic
     # would have translated it successfully.
-    client_kind = "openai" if openai else "anthropic"
+    client_kind = ep_kind
     if _fx("fx_translate_language", tgt, default="0"):
-        payload, _lang_xl = await language_translate.translate_request(payload, client_kind)
+        try:
+            report = await language_translate.translate_request_report(payload, client_kind)
+        except Exception as exc:
+            report = language_translate.TranslationReport(
+                payload, False,
+                error=f"unexpected translator exception: {type(exc).__name__}: {exc}",
+            )
+        if report.error:
+            detail = f"translator failed; upstream_contacted=false; cause={report.error}"
+            db.add_log(
+                final=1, method="POST", path="endpoint/test", status=503,
+                proxy="", attempts=0, stream=0, redactions=0, ms=0,
+                note="translator failed; request blocked; upstream_contacted=false", model=model,
+                endpoint=url.replace("https://", "").replace("http://", ""),
+                source="test", detail=detail[:1500],
+            )
+            return {"ok": False, "status": 503, "ms": 0, "reply": "",
+                    "detail": detail, "attempts": 0}
+        payload = report.body
     t0 = time.time()
     detail = ""
     last_status = 0
@@ -1483,7 +1648,12 @@ async def test_endpoint(url, api_mode, api_key, model, message, history=None, ma
                     reply = ""
                     try:
                         d = r.json()
-                        if openai:
+                        if responses:
+                            reply = "".join(
+                                b.get("text", "") for item in d.get("output", [])
+                                if isinstance(item, dict) and item.get("type") == "message"
+                                for b in item.get("content", []) if isinstance(b, dict))
+                        elif openai:
                             reply = d["choices"][0]["message"]["content"]
                         else:
                             reply = "".join(b.get("text", "") for b in d.get("content", []))
@@ -1561,6 +1731,20 @@ async def forward(request, path):
             _logged_final["done"] = True
             kw["final"] = 1
         db.add_log(**kw)
+
+    def _translator_log(**kw):
+        """Language-translator outcome row: never final, never a client verdict.
+
+        Before this, a translator failure (e.g. Google 429 on the VPS exit IP)
+        was swallowed and the ORIGINAL Hindi body went upstream; the log then
+        showed only the upstream's content-blocked, hiding the real first cause.
+        """
+        kw.setdefault("method", request.method)
+        kw.setdefault("path", path)
+        kw.setdefault("ip", client_ip)
+        kw.setdefault("model", current_model_log)
+        kw["final"] = False
+        _log(**kw)
 
     # Claude CLI issues an unauthenticated handshake/info call to v1/props on
     # startup (no key header). Exempt such no-key info paths so they don't spam
@@ -1657,7 +1841,14 @@ async def forward(request, path):
     except Exception:
         client_wants_stream = "text/event-stream" in request.headers.get("accept", "")
 
-    kind = "openai" if "chat/completions" in path else "anthropic"
+    # Client dialect: three are in the wild now (Boss, 2026-09-12) — Codex
+    # speaks ONLY /v1/responses, so a two-way guess sent its body to the wrong
+    # route and every upstream answered "not implemented".
+    try:
+        _pb = json.loads(body)
+    except Exception:
+        _pb = None
+    kind = translate.detect_client_shape(path, _pb if isinstance(_pb, dict) else None)
     targets = _order_targets(_targets(s))
 
     # ---------- DIALECT ELIGIBILITY / FAIL FAST (Ciel, 2026-09-06) ----------
@@ -1668,7 +1859,7 @@ async def forward(request, path):
     #
     # An endpoint can serve THIS request when either
     #   * it already speaks the client's dialect, or
-    #   * `fx_translate_format` is on for it, so its body can be translated.
+    #   * the global `fx_translate_format` switch is on, so its body can be translated.
     # Anything else is a GUARANTEED upstream 400. Sending it anyway is what made
     # a misconfiguration look like a routing fault: measured on phoenix before
     # this gate, one OpenAI-shaped request against 9 anthropic-mode endpoints
@@ -1694,20 +1885,25 @@ async def forward(request, path):
     # v1/props …) are identical in both dialects, so a dialect verdict about them
     # would be meaningless — and refusing them here would break the model picker.
     _p = (path or "").lower().rstrip("/")
-    if targets and (_p.endswith("chat/completions") or _p.endswith("messages")):
+    if targets and (_p.endswith("chat/completions") or _p.endswith("messages")
+                    or _p.endswith("responses")):
         _native = [t for t in targets if _tgt_kind(t) == kind]
-        _xlated = [t for t in targets
-                   if _tgt_kind(t) != kind and _fx("fx_translate_format", t)]
+        _fmt_on = db.get_setting("fx_translate_format", "1") != "0"
+        _xlated = [t for t in targets if _tgt_kind(t) != kind] if _fmt_on else []
         _elig = _native + _xlated
         if not _elig:
-            _other = "Anthropic /v1/messages" if kind == "openai" else "OpenAI /v1/chat/completions"
-            _want = "OpenAI /v1/chat/completions" if kind == "openai" else "Anthropic /v1/messages"
+            _route = {"openai": "OpenAI /v1/chat/completions",
+                      "anthropic": "Anthropic /v1/messages",
+                      "responses": "OpenAI /v1/responses"}
+            _want = _route.get(kind, kind)
+            _other = ", ".join(sorted({_route.get(_tgt_kind(t), _tgt_kind(t))
+                                       for t in targets}))
             _msg = (
                 f"No endpoint can serve a {_want} request. "
                 f"{len(targets)} endpoint(s) are enabled and every one of them speaks "
-                f"{_other} with 'Translate request format' switched OFF. "
-                f"Fix: enable that toggle on an endpoint (Endpoint settings -> Failure "
-                f"diagnosis toggles), or add an endpoint whose API mode is {_want}."
+                f"{_other} with 'Format Translation' switched OFF. "
+                f"Fix: switch Format Translation ON (Endpoints page — it applies to the "
+                f"whole fleet), or add an endpoint whose API mode is {_want}."
             )
             _log(method=request.method, path=path, status=503, proxy="", attempts=0,
                  stream=1 if client_wants_stream else 0, redactions=redactions, ms=0,
@@ -1777,7 +1973,21 @@ async def forward(request, path):
                         # An OpenAI-mode endpoint gets an OpenAI-shaped body and its
                         # SSE is translated back to Anthropic before the client sees
                         # it, so `kind` stays the CLIENT's contract throughout.
-                        up_body, _xl, _lang_xl = await _prepare_request(up_body, "anthropic", tgt)
+                        try:
+                            up_body, _xl, _lang_xl = await _prepare_request(
+                                up_body, "anthropic", tgt, log=_translator_log)
+                        except (language_translate.LanguageTranslationError, ValueError) as exc:
+                            _log(method=request.method, path=path, status=503, proxy="",
+                                 attempts=attempts, stream=1, redactions=redactions,
+                                 ms=int((time.time() - t0) * 1000),
+                                 note="required preprocessing translation failed; original request blocked; upstream_contacted=false",
+                                 ip=client_ip, model=current_model_log,
+                                 endpoint=tgt["name"], detail=str(exc), final=True)
+                            # Translation is endpoint-specific: skip this endpoint and
+                            # let the next eligible target try the original request.
+                            _chain.append(f"{tgt['name']}: translator failed")
+                            detail = str(exc)
+                            continue
                         _up_kind = _tgt_kind(tgt) if _xl else "anthropic"
                         url = _target_url(tgt["base"], path, tgt["mode"])
                         attempted_pids = set()
@@ -1900,7 +2110,8 @@ async def forward(request, path):
                                                         except: err = {"type": "error", "error": {"message": err_str}}
                                                         return ("error", r.status_code, err, used)
                                             asm = (OpenAIAssembler() if _up_kind == "openai"
-                                                   else AnthropicAssembler())
+                                                   else (ResponsesAssembler() if _up_kind == "responses"
+                                                         else AnthropicAssembler()))
                                             saw_stop = False
                                             buf = b""
                                             seen = b""   # first bytes, for diagnosing a non-SSE body
@@ -1941,7 +2152,13 @@ async def forward(request, path):
                                             # (stop_reason / content blocks), so judging a
                                             # raw OpenAI object with them would call every
                                             # good answer "incomplete".
-                                            obj = _xlate_object(obj, "anthropic", tgt)
+                                            try:
+                                                obj = _xlate_object(obj, "anthropic", tgt)
+                                            except Exception as exc:
+                                                _ev_box.update({"translation_error": str(exc)[:400]})
+                                                return ("error", 502, {"type":"error", "error":{
+                                                    "type":"api_error",
+                                                    "message":"Upstream response could not be translated safely."}}, used)
                                             # A REFUSAL IS A COMPLETE ANSWER (Ciel,
                                             # 2026-09-02). The test below used to require
                                             # `obj.get("content")` to be non-empty, but a
@@ -2240,7 +2457,9 @@ async def forward(request, path):
                                ip=client_ip, model=current_model_log, endpoint="", detail=_cd2, final=True)
                     logged = True
                     yield _sse("error", {"type": "error", "error": {"type": "api_error",
-                              "message": f"All proxies failed. {detail}"}})
+                              "message": ("Required language translation failed; original request was not forwarded upstream. "
+                                         f"{detail}" if "translator" in detail.lower()
+                                         else f"All proxies failed. {detail}")}})
                 finally:
                     # Always log, even if client disconnected mid-retry
                     if not logged:
@@ -2265,6 +2484,7 @@ async def forward(request, path):
             # an `event: ping` they might not expect.
             if client_wants_stream and _fx("fx_early_ping", targets[0] if targets else None):
                 yield b": keepalive\n\n"
+            _client_kind = kind  # OpenAI Chat or OpenAI Responses
             for tgt in targets:
                 current_model_log = tgt.get("model_override") or req_model
                 if client_wants_stream:
@@ -2277,8 +2497,31 @@ async def forward(request, path):
                 # /v1/chat/completions is Cloudflare-blocked (403 direct, 0/3 via free
                 # proxies), so an OpenAI-shaped client could not reach a provider that
                 # was perfectly healthy on its other route.
-                up_body, _xl, _lang_xl = await _prepare_request(up_body, "openai", tgt)
-                _up_kind = _tgt_kind(tgt) if _xl else "openai"
+                try:
+                    up_body, _xl, _lang_xl = await _prepare_request(
+                        up_body, _client_kind, tgt, log=_translator_log)
+                except (language_translate.LanguageTranslationError, ValueError) as exc:
+                    _log(method=request.method, path=path, status=503, proxy="",
+                         attempts=attempts, stream=1, redactions=redactions,
+                         ms=int((time.time() - t0) * 1000),
+                         note="required preprocessing translation failed; original request blocked; upstream_contacted=false",
+                         ip=client_ip, model=current_model_log,
+                         endpoint=tgt["name"], detail=str(exc), final=True)
+                    if _client_kind == "responses":
+                        yield ("event: response.failed\ndata: " + json.dumps({
+                            "type": "response.failed",
+                            "response": {"id": "resp_error", "object": "response",
+                                         "status": "failed", "error": {
+                                             "code": "translation_failed",
+                                             "message": "Required language translation failed; original request was not forwarded upstream.",
+                                         }},
+                        }, ensure_ascii=False) + "\n\n").encode()
+                    else:
+                        yield ("data: " + json.dumps({"error": {
+                            "message": "Required language translation failed; original request was not forwarded upstream.",
+                            "type": "api_error"}}) + "\n\n").encode()
+                    return
+                _up_kind = _tgt_kind(tgt) if _xl else _client_kind
                 url = _target_url(tgt["base"], path, tgt["mode"])
                 attempted_pids = set()
                 consecutive_5xx = 0
@@ -2359,17 +2602,19 @@ async def forward(request, path):
                             detail = f"{tgt['name']} {r.status_code}"
                             break
                         _mark_used_good(candidates, used_url, int((time.time() - t0) * 1000))
-                        if _up_kind == "openai":
+                        if _up_kind == kind:
                             # Same dialect: relay the bytes verbatim, as before.
                             async for chunk in r.aiter_raw():
                                 forwarded = True
                                 yield chunk
                         else:
-                            # TRANSLATED STREAM (Anthropic upstream -> OpenAI client).
-                            # Translate frame by frame so the client still streams —
-                            # buffering the whole answer here would undo the entire
-                            # point of a streaming route.
-                            _tr = translate.AnthropicToOaiStream(model=current_model_log)
+                            # TRANSLATED STREAM: any of the three wire dialects
+                            # -> the client's dialect (including Codex Responses).
+                            # Translate frame by frame; never buffer a whole answer.
+                            _tr = translate.stream_translator(
+                                _up_kind, kind, model=current_model_log)
+                            if _tr is None:  # impossible here: dialects differ
+                                raise RuntimeError(f"missing stream translator {_up_kind}->{kind}")
                             _buf = b""
                             async for chunk in r.aiter_bytes():
                                 _buf += chunk
@@ -2393,8 +2638,8 @@ async def forward(request, path):
                         _log(method=request.method, path=path, status=200, proxy=used_url,
                                    attempts=attempts, stream=1, redactions=redactions,
                                    ms=int((time.time() - t0) * 1000),
-                                   note=("ok(relay)" if _up_kind == "openai"
-                                         else f"ok(translated {_up_kind}->openai)"),
+                                   note=("ok(relay)" if _up_kind == kind
+                                         else f"ok(translated {_up_kind}->{kind})"),
                                    ip=client_ip, model=current_model_log, endpoint=tgt["name"], final=True)
                         return
                     except Exception as e:
@@ -2448,9 +2693,27 @@ async def forward(request, path):
         # below is what the UPSTREAM speaks, which is exactly what the assembler
         # and the completeness guard need; the answer is translated back to the
         # client's dialect at the return site.
-        up_body, _xl, _lang_xl = await _prepare_request(up_body, kind, tgt)
-        url = _target_url(tgt["base"], path, tgt["mode"])
-        tgt_kind = "openai" if tgt["mode"] == "openai" else "anthropic"
+        try:
+            up_body, _xl, _lang_xl = await _prepare_request(
+                up_body, kind, tgt, log=_translator_log)
+        except (language_translate.LanguageTranslationError, ValueError) as exc:
+            _log(method=request.method, path=path, status=503, proxy="",
+                 attempts=attempts, stream=0, redactions=redactions,
+                 ms=int((time.time() - t0) * 1000),
+                 note="required preprocessing translation failed; original request blocked; upstream_contacted=false",
+                 ip=client_ip, model=current_model_log,
+                 endpoint=tgt["name"], detail=str(exc), final=True)
+            return _translation_error_response(exc)
+        tgt_kind = _tgt_kind(tgt)
+        # Once the body is in the endpoint's dialect, route it to that
+        # dialect's endpoint as well. Passing the original client path here was
+        # the old Responses failure: translated chat body still POSTed to
+        # /v1/responses (or vice versa).
+        _dialect_path = {"anthropic": "v1/messages",
+                         "openai": "v1/chat/completions",
+                         "responses": "v1/responses"}[tgt_kind]
+        url = _target_url(tgt["base"], _dialect_path,
+                          translate.mode_of_dialect(tgt_kind))
         upstream_rejected = False
         attempted_pids = set()
         consecutive_5xx = 0
@@ -2487,8 +2750,14 @@ async def forward(request, path):
                             _obj = _xlate_object(_obj, kind, tgt)
                             payload = json.dumps(_obj, ensure_ascii=False).encode("utf-8")
                             _note = f"ok(assembled, translated {tgt_kind}->{kind})"
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            _log(method=request.method, path=path, status=502, proxy=used_url,
+                                 attempts=attempts, stream=0, redactions=redactions,
+                                 ms=int((time.time() - t0) * 1000),
+                                 note="response format translation failed; malformed success blocked",
+                                 ip=client_ip, model=current_model_log, endpoint=tgt["name"],
+                                 detail=str(exc)[:1500], final=True)
+                            return _err("Upstream response could not be translated safely.", 502)
                     _log(method=request.method, path=path, status=status, proxy=used_url,
                                attempts=attempts, stream=0, redactions=redactions,
                                ms=int((time.time() - t0) * 1000), note=_note,
