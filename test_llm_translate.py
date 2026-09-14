@@ -33,6 +33,7 @@ class Responder:
 
     async def __call__(self, client, url, headers, payload, timeout):
         self.calls.append({"url": url, "headers": dict(headers), "payload": payload})
+        self._last_timeout = timeout
         i = min(len(self.calls) - 1, len(self.replies) - 1)
         status = self.statuses[min(len(self.calls) - 1, len(self.statuses) - 1)]
         return status, self._wrap(self.replies[i])
@@ -157,6 +158,29 @@ class LLMTranslatorTests(unittest.TestCase):
         self.assertEqual(len(r.calls), 1)
         sent = r.calls[0]["payload"]["messages"][1]["content"]
         self.assertEqual(sent, text)
+
+    # -- configurable timeout (Boss 2026-09-14: "hardcoded mat rakho") ----------
+    def test_timeout_from_row_overrides_default(self):
+        from app import llm_translate
+        r = Responder(replies=["ok"])
+        tr = self._tr(backend_row(timeout_seconds=12), r)
+        asyncio.run(tr("नमस्ते"))
+        # the http layer must have RECEIVED the row's timeout, not the module default
+        self.assertEqual(r._last_timeout, 12)
+
+    def test_timeout_zero_means_default(self):
+        from app import llm_translate
+        r = Responder(replies=["ok"])
+        tr = self._tr(backend_row(timeout_seconds=0), r)
+        asyncio.run(tr("नमस्ते"))
+        self.assertEqual(r._last_timeout, llm_translate.DEFAULT_TIMEOUT_SECONDS)
+
+    def test_responder_records_timeout(self):
+        from app import llm_translate
+        r = Responder(replies=["ok"])
+        tr = self._tr(backend_row(), r)
+        asyncio.run(tr("नमस्ते"))
+        self.assertEqual(r._last_timeout, llm_translate.DEFAULT_TIMEOUT_SECONDS)
 
     def test_failure_raises_after_all_proxies(self):
         from app import llm_translate

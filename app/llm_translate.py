@@ -36,7 +36,9 @@ _CHARS_PER_TOKEN = 2.8
 _AUTO_MULTIPLIER = 1.5
 _AUTO_BUFFER_TOKENS = 256
 
-_TIMEOUT_SECONDS = 120.0
+# Per-backend request timeout is CONFIGURABLE (Boss 2026-09-14: "hardcoded mat
+# rakho") — stored per backend row in `timeout_seconds`, 0/absent = this default.
+DEFAULT_TIMEOUT_SECONDS = 120.0
 
 
 def auto_max_tokens(input_chars: int) -> int:
@@ -119,6 +121,8 @@ class LLMTranslator:
         self.system_prompt = self.row.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
         self.chunk_chars = max(256, int(self.row.get("chunk_chars") or 4000))
         self.max_output_tokens = max(0, int(self.row.get("max_output_tokens") or 0))
+        # Per-backend request timeout (Boss 2026-09-14: customizable, 0 = default)
+        self.timeout_seconds = float(self.row.get("timeout_seconds") or 0) or DEFAULT_TIMEOUT_SECONDS
         self._bucket = _RPMBucket(self.row.get("rpm") or 0)
         self._http_call = http_call
         self._proxy_urls = _proxies_from_row(self.row)
@@ -191,16 +195,16 @@ class LLMTranslator:
                     transport = httpx.AsyncHTTPTransport(proxy=proxy_url)
                     async with httpx.AsyncClient(
                             verify=False, transport=transport,
-                            timeout=_TIMEOUT_SECONDS) as client:
+                            timeout=self.timeout_seconds) as client:
                         status, body = await self._http_call(
                             client, url, headers, self._payload(text),
-                            _TIMEOUT_SECONDS)
+                            self.timeout_seconds)
                 else:
                     async with httpx.AsyncClient(
-                            verify=False, timeout=_TIMEOUT_SECONDS) as client:
+                            verify=False, timeout=self.timeout_seconds) as client:
                         status, body = await self._http_call(
                             client, url, headers, self._payload(text),
-                            _TIMEOUT_SECONDS)
+                            self.timeout_seconds)
                 return self._extract(status, body)
             except Exception as exc:  # proxy/transport failure -> next exit
                 last_err = exc

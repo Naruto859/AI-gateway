@@ -322,6 +322,7 @@ async def translation_add(payload: dict, x_admin_token: str = Header(default="")
         rpm=int(payload.get("rpm") or 0),
         chunk_chars=int(payload.get("chunk_chars") or 4000),
         max_output_tokens=int(payload.get("max_output_tokens") or 0),
+        timeout_seconds=float(payload.get("timeout_seconds") or 120),
         custom_proxies=payload.get("custom_proxies") or "[]",
         proxy_priority=payload.get("proxy_priority") or "[]",
         proxy_fallback=int(payload.get("proxy_fallback") if payload.get("proxy_fallback") is not None else 1),

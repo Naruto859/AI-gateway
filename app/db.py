@@ -329,6 +329,7 @@ def _init(c):
             rpm               INTEGER DEFAULT 0,          -- 0 = unlimited
             chunk_chars       INTEGER DEFAULT 4000,
             max_output_tokens INTEGER DEFAULT 0,          -- 0 = auto (input*1.5 + 256)
+            timeout_seconds   REAL DEFAULT 120,            -- 0/NULL uses translator default
             custom_proxies    TEXT DEFAULT '[]',
             proxy_priority    TEXT DEFAULT '[]',
             proxy_fallback    INTEGER DEFAULT 1,
@@ -443,6 +444,11 @@ def _init(c):
         c.execute("ALTER TABLE logs ADD COLUMN source TEXT DEFAULT ''")
     if "req_body" not in lcols:
         c.execute("ALTER TABLE logs ADD COLUMN req_body TEXT DEFAULT ''")
+
+    # translation_endpoints: add timeout_seconds migration for existing tables
+    tcols = [r[1] for r in c.execute("PRAGMA table_info(translation_endpoints)").fetchall()]
+    if "timeout_seconds" not in tcols:
+        c.execute("ALTER TABLE translation_endpoints ADD COLUMN timeout_seconds REAL DEFAULT 120")
     c.commit()
 
 
@@ -857,15 +863,16 @@ def delete_endpoint(eid):
 # --- translation backends (custom LLM translators, 2026-09-14) ---
 _TRANSLATION_ENDPOINT_COLS = {
     "name", "kind", "url", "api_key", "model", "api_mode", "system_prompt",
-    "rpm", "chunk_chars", "max_output_tokens", "custom_proxies",
-    "proxy_priority", "proxy_fallback", "priority", "enabled",
+    "rpm", "chunk_chars", "max_output_tokens", "timeout_seconds",
+    "custom_proxies", "proxy_priority", "proxy_fallback", "priority",
+    "enabled",
 }
 
 
 def add_translation_endpoint(name, kind="llm", url="", api_key="", model="",
                              api_mode="chat_completions", system_prompt="",
                              rpm=0, chunk_chars=4000, max_output_tokens=0,
-                             custom_proxies="[]", proxy_priority="[]",
+                             timeout_seconds=120, custom_proxies="[]", proxy_priority="[]",
                              proxy_fallback=1):
     """Insert a custom LLM translation backend. Returns (added, id)."""
     with _lock:
@@ -875,12 +882,12 @@ def add_translation_endpoint(name, kind="llm", url="", api_key="", model="",
         cur = c.execute(
             "INSERT INTO translation_endpoints"
             "(name, kind, url, api_key, model, api_mode, system_prompt,"
-            " rpm, chunk_chars, max_output_tokens, custom_proxies,"
+            " rpm, chunk_chars, max_output_tokens, timeout_seconds, custom_proxies,"
             " proxy_priority, proxy_fallback, priority, enabled)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,? ,1)",
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,? ,1)",
             (name, kind, url, api_key, model, api_mode, system_prompt,
              int(rpm or 0), int(chunk_chars or 4000), int(max_output_tokens or 0),
-             custom_proxies or "[]", proxy_priority or "[]",
+             float(timeout_seconds or 120), custom_proxies or "[]", proxy_priority or "[]",
              int(proxy_fallback if proxy_fallback is not None else 1), nxt))
         c.commit()
         return (1 if cur.rowcount else 0), cur.lastrowid

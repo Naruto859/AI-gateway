@@ -39,7 +39,7 @@ class TranslationEndpointsDBTests(unittest.TestCase):
         cols = {r[1] for r in self.db.conn().execute("PRAGMA table_info(translation_endpoints)")}
         for c in ("id", "name", "kind", "url", "api_key", "model", "api_mode",
                   "system_prompt", "rpm", "chunk_chars", "max_output_tokens",
-                  "custom_proxies", "proxy_priority", "proxy_fallback",
+                  "timeout_seconds", "custom_proxies", "proxy_priority", "proxy_fallback",
                   "priority", "enabled"):
             self.assertIn(c, cols, f"missing column {c}")
 
@@ -63,6 +63,9 @@ class TranslationEndpointsDBTests(unittest.TestCase):
         row = [r for r in self.db.list_translation_endpoints() if r["id"] == tid][0]
         self.assertEqual(row["model"], "glm-5.3")
         self.assertEqual(row["rpm"], 30)
+        self.db.update_translation_endpoint(tid, timeout_seconds=45.5)
+        row = [r for r in self.db.list_translation_endpoints() if r["id"] == tid][0]
+        self.assertEqual(row["timeout_seconds"], 45.5)
         # delete
         self.db.delete_translation_endpoint(tid)
         self.assertEqual(self.db.list_translation_endpoints(), [])

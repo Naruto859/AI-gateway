@@ -872,10 +872,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 
   <label class="fl" style="margin-top:12px">Request format</label>
   <div class="fhint" style="margin:0 2px 4px">How this provider speaks. OpenAI-style uses /chat/completions with Bearer auth; Anthropic-style uses /v1/messages with x-api-key.</div>
-  <select id="txbMode" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card,#fff);font-size:13px">
-    <option value="chat_completions">OpenAI Chat Completions</option>
-    <option value="anthropic_messages">Anthropic Messages</option>
-  </select>
+  <div class="csel wide" id="txbMode" data-val="chat_completions"><button class="csel-btn">OpenAI Chat Completions</button><div class="csel-pop"><div class="csel-opt sel" data-v="chat_completions">OpenAI Chat Completions</div><div class="csel-opt" data-v="anthropic_messages">Anthropic Messages</div></div></div>
 
   <label class="fl" style="margin-top:12px">System prompt</label>
   <div class="fhint" style="margin:0 2px 4px">Sent with every chunk. Leave empty to use the built-in exact-translation prompt. Edit only if you know what you're doing.</div>
@@ -897,10 +894,16 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
       <div class="fhint" style="margin:0 2px 4px">0 = AUTO (input size × 1.5 + buffer). A fixed lower value can cut long translations — keep 0 unless the provider requires a cap.</div>
       <input id="txbMaxTok" type="number" min="0" value="0" style="width:100%">
     </div>
+    <div style="flex:1">
+      <label class="fl" style="margin-top:0">Timeout (sec)</label>
+      <div class="fhint" style="margin:0 2px 4px">Max seconds to wait for model response. 0 = use translator default (120s).</div>
+      <input id="txbTimeout" type="number" min="0" value="120" style="width:100%">
+    </div>
   </div>
 
   <div style="display:flex;gap:8px;margin-top:16px">
     <button class="btn" id="txbSave" style="flex:1">Save backend</button>
+    <button class="btn ghost" id="txbReset" style="flex:1">Reset to defaults</button>
     <button class="btn ghost" id="txbTest" style="flex:1">Test translation</button>
   </div>
   <div id="txbTestOut" style="display:none;margin-top:10px;padding:10px;border-radius:8px;border:1px solid var(--line);font-size:12px;white-space:pre-wrap"></div>
@@ -1711,6 +1714,7 @@ function openEndpointSettings(e){
   <div id="txBackendList" style="display:flex;flex-direction:column;gap:6px;margin-top:10px"></div>
 
   <div style="display:flex;gap:8px;margin-top:10px">
+    <button class="btn ghost" id="btnRestoreGoogle" style="padding:5px 10px;font-size:11px;border-radius:6px;min-height:unset;min-width:unset">↺ Restore Google Translate</button>
     <button class="btn ghost" id="btnAddTxBackend" style="padding:5px 10px;font-size:11px;border-radius:6px;min-height:unset;min-width:unset">+ Add LLM backend</button>
   </div>
 </div>
@@ -2080,12 +2084,20 @@ function openEndpointSettings(e){
     $('#txbKey').value = '';   // never prefill real keys; blank = unchanged
     $('#txbKey').placeholder = row.api_key ? '•••• saved (blank = keep)' : 'sk-…';
     $('#txbModel').value = row.model || '';
-    $('#txbMode').value = row.api_mode || 'chat_completions';
+    const mm = $('#txbMode');
+    mm.dataset.val = row.api_mode || 'chat_completions';
     $('#txbPrompt').value = row.system_prompt || '';
     $('#txbRpm').value = row.rpm || 0;
     $('#txbChunk').value = row.chunk_chars || 4000;
     $('#txbMaxTok').value = row.max_output_tokens || 0;
+    $('#txbTimeout').value = row.timeout_seconds || 120;
     $('#txbTestOut').style.display = 'none';
+    // custom dropdown reads from dataset.val, not .value
+    const mm = $('#txbMode');
+    mm.dataset.val = row.api_mode || 'chat_completions';
+    const mb = mm.querySelector('.csel-btn');
+    if (mb) mb.textContent = (row.api_mode === 'anthropic_messages' ? 'Anthropic Messages' : 'OpenAI Chat Completions');
+    mm.querySelectorAll('.csel-opt').forEach(o => o.classList.toggle('sel', o.dataset.v === (row.api_mode || 'chat_completions')));
     openModal('txbModal');
   }
 
@@ -2095,15 +2107,25 @@ function openEndpointSettings(e){
       url: $('#txbUrl').value.trim(),
       api_key: $('#txbKey').value.trim(),
       model: $('#txbModel').value.trim(),
-      api_mode: $('#txbMode').value,
+      api_mode: $('#txbMode').dataset.val || 'chat_completions',
       system_prompt: $('#txbPrompt').value.trim(),
       rpm: +($('#txbRpm').value || 0),
       chunk_chars: +($('#txbChunk').value || 4000),
       max_output_tokens: +($('#txbMaxTok').value || 0),
+      timeout_seconds: +($('#txbTimeout').value || 120)
     };
   }
 
   $('#btnAddTxBackend').onclick = () => _txOpenBackendModal(null);
+  $('#btnRestoreGoogle').onclick = () => {
+    if (!_txBackends.some(b => b.id === 'google')) {
+      _txBackends.push({id: 'google'});
+      _txRender();
+      toast('Google Translate restored — save endpoint to apply', 'ok');
+    } else {
+      toast('Google Translate is already in the chain', 'ok');
+    }
+  };
   $('#txbModalX').onclick = () => closeModal('txbModal');
 
   $('#txbSave').onclick = async () => {
@@ -2171,6 +2193,24 @@ function openEndpointSettings(e){
     } finally {
       btn.disabled = false; btn.textContent = 'Test translation';
     }
+  };
+
+  // Reset to built-in defaults (Boss requested reset option)
+  $('#txbReset').onclick = () => {
+    $('#txbName').value = '';
+    $('#txbUrl').value = 'https://gen.pollinations.ai/v1';
+    $('#txbKey').value = '';
+    $('#txbModel').value = '';
+    const rm = $('#txbMode');
+    rm.dataset.val = 'chat_completions';
+    rm.querySelector('.csel-btn').textContent = 'OpenAI Chat Completions';
+    rm.querySelectorAll('.csel-opt').forEach(o => o.classList.toggle('sel', o.dataset.v === 'chat_completions'));
+    $('#txbPrompt').value = '';
+    $('#txbRpm').value = '0';
+    $('#txbChunk').value = '4000';
+    $('#txbMaxTok').value = '0';
+    $('#txbTimeout').value = '120';
+    $('#txbTestOut').style.display = 'none';
   };
 
   function _txChainValue() {
