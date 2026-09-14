@@ -609,7 +609,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/></svg></span>Timeouts</h2>
 <p class="sub">How long the gateway waits before giving up on the upstream.</p>
-<div class="field"><div class="meta"><div class="lbl">Read timeout</div><div class="desc">Max seconds to wait for model response. Long generations need this large.</div></div><div class="ctrl"><input type="number" data-set="read_timeout"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Read timeout</div><div class="desc">Max seconds to wait for model response. Long generations need this large.</div></div><div class="ctrl"><input type="number" data-set="read_timeout"><span class="unit">sec</span> <button type="button" class="chipbtn" data-reset="read_timeout" data-default="1200">Reset</button></div></div>
 </div>
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>TCP keepalive</h2>
@@ -677,7 +677,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <p class="sub">Global proxy testing and connection tuning.</p>
 <div class="field"><div class="meta"><div class="lbl">API testing</div><div class="desc">ON = deep test proxy using API endpoint. OFF = basic TCP ping (very fast).</div></div><div class="ctrl"><div class="tg" id="tgHotPoolApi"></div></div></div>
 <div class="field"><div class="meta"><div class="lbl">Hedging Concurrency</div><div class="desc">Number of proxies to race in parallel for ZERO latency. (Higher = faster, but uses more proxy bandwidth).</div></div><div class="ctrl"><input type="number" data-set="hedging_concurrency" min="1" max="50" style="width:70px"></div></div>
-<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Set under <b>Timers → Advanced Timings</b>. Lower = a dead proxy fails faster and the next one is tried sooner.</div></div><div class="ctrl"><span class="unit" id="ctMirror">—</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Max seconds to establish the proxy tunnel. Lower = a dead proxy fails faster and the next one is tried sooner. 0 = gateway default (8s).</div></div><div class="ctrl"><input type="number" step="0.5" data-set="connect_timeout" style="width:80px"><span class="unit">sec</span> <button type="button" class="chipbtn" data-reset="connect_timeout" data-default="8" style="margin-left:6px">Reset</button></div></div>
 <div class="field"><div class="meta"><div class="lbl">Max retries</div><div class="desc">Attempts per request before giving up.</div></div><div class="ctrl"><input type="number" data-set="max_retries" style="width:70px"></div></div>
 <div class="field"><div class="meta"><div class="lbl">Endpoint failover threshold</div><div class="desc">Consecutive 500+ errors required on different proxies to switch to the next endpoint target.</div></div><div class="ctrl"><input type="number" data-set="failover_5xx_threshold" min="1" max="10" style="width:70px"></div></div>
 <div class="field"><div class="meta"><div class="lbl">Retry initial delay</div><div class="desc">Wait before 1st retry. Doubles each time.</div></div><div class="ctrl"><input type="number" step="0.5" data-set="retry_initial_delay" style="width:70px"><span class="unit">sec</span></div></div>
@@ -1228,8 +1228,14 @@ bindToggle('tgScanner','proxy_scanner_enabled','Scanner',on=>{
   if($('#scanSettingsWrap'))$('#scanSettingsWrap').style.display=on?'block':'none';
 });
 $('#saveScannerBtn').onclick=()=>saveSettings(['proxy_scanner_interval','proxy_scanner_batch'],'Scanner settings');
+// Reset buttons next to tunable number fields: restore the gateway default into the
+// input (still needs Save — same rule as every other field on this panel).
+$$('[data-reset]').forEach(btn=>btn.onclick=()=>{
+  const inp=$('[data-set="'+btn.dataset.reset+'"]');
+  if(inp){inp.value=btn.dataset.default||'';toast('Reset to '+btn.dataset.default+' — Save to apply','ok');}
+});
 $('#saveHotPool').onclick=()=>saveSettings(['hot_pool_size','hot_pool_refresh','hot_pool_test_timeout','hot_pool_concurrency'],'Hot pool settings');
-$('#saveProxyEngine').onclick=()=>saveSettings(['hedging_concurrency','max_retries','failover_5xx_threshold','retry_initial_delay','retry_max_delay'],'Proxy Engine');
+$('#saveProxyEngine').onclick=()=>saveSettings(['hedging_concurrency','connect_timeout','max_retries','failover_5xx_threshold','retry_initial_delay','retry_max_delay'],'Proxy Engine');
 
 // Hot Pool Live View
 let _hpInterval=null;
@@ -1317,7 +1323,7 @@ function render(){
   const scanOn=(s.proxy_scanner_enabled??'1')!=='0';
   $('#tgScanner').classList.toggle('on',scanOn);
   if($('#scanSettingsWrap')) $('#scanSettingsWrap').style.display=scanOn?'block':'none';
-  const ctm=$('#ctMirror');if(ctm)ctm.textContent=(s.connect_timeout||'—')+' sec';
+  const cti=$('[data-set="connect_timeout"]');if(cti&&cti.value==='')cti.value=s.connect_timeout||8;
   // These three were rendered empty / hard-coded, so the cards advertised state
   // that never appeared.
   const ri=$('#rotInfo');
@@ -1715,6 +1721,7 @@ function openEndpointSettings(e){
 
   <div style="display:flex;gap:8px;margin-top:10px">
     <button class="btn ghost" id="btnRestoreGoogle" style="padding:5px 10px;font-size:11px;border-radius:6px;min-height:unset;min-width:unset">↺ Restore Google Translate</button>
+    <button class="btn ghost" id="btnAddExistingTx" style="padding:5px 10px;font-size:11px;border-radius:6px;min-height:unset;min-width:unset">+ Add saved backend</button>
     <button class="btn ghost" id="btnAddTxBackend" style="padding:5px 10px;font-size:11px;border-radius:6px;min-height:unset;min-width:unset">+ Add LLM backend</button>
   </div>
 </div>
@@ -2123,6 +2130,31 @@ function openEndpointSettings(e){
     } else {
       toast('Google Translate is already in the chain', 'ok');
     }
+  };
+  // Add an ALREADY-SAVED backend by name — creating a whole new backend each time
+  // (the only option before) is what left the operator thinking names were missing.
+  $('#btnAddExistingTx').onclick = async () => {
+    await _txLoadBackends();
+    const unused = _txCustom.filter(r => !_txBackends.some(b => String(b.id) === String(r.id)));
+    if (!unused.length) { toast('No other saved backends — use "+ Add LLM backend"', 'ok'); return; }
+    const sel = document.createElement('div');
+    sel.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-top:8px';
+    sel.id = 'txPickList';
+    unused.forEach(r => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn ghost';
+      b.style.cssText = 'justify-content:flex-start;font-size:12px';
+      b.textContent = `${r.name || 'backend'}${r.model ? ' · ' + r.model : ''}`;
+      b.onclick = () => {
+        _txBackends.push({id: r.id, row: r});
+        sel.remove();
+        _txRender();
+        toast('Added — save endpoint to apply', 'ok');
+      };
+      sel.appendChild(b);
+    });
+    const host = $('#txBackendList').parentNode;
+    host.appendChild(sel);
   };
   $('#txbModalX').onclick = () => closeModal('txbModal');
 
