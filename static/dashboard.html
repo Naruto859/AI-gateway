@@ -2084,8 +2084,6 @@ function openEndpointSettings(e){
     $('#txbKey').value = '';   // never prefill real keys; blank = unchanged
     $('#txbKey').placeholder = row.api_key ? '•••• saved (blank = keep)' : 'sk-…';
     $('#txbModel').value = row.model || '';
-    const mm = $('#txbMode');
-    mm.dataset.val = row.api_mode || 'chat_completions';
     $('#txbPrompt').value = row.system_prompt || '';
     $('#txbRpm').value = row.rpm || 0;
     $('#txbChunk').value = row.chunk_chars || 4000;
