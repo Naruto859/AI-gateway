@@ -62,7 +62,7 @@ class PrepareRequestTests(unittest.TestCase):
         self.assertTrue(lang)
         self.assertFalse(fmt)
         self.assertEqual(json.loads(out)["_language_translated"], "anthropic")
-        tr.assert_called_once_with(body, "anthropic", proxy_urls=None)
+        tr.assert_called_once_with(body, "anthropic", proxy_urls=None, backends=None)
 
     def test_toggle_on_passes_endpoint_proxy_priority_to_translator(self):
         tgt = {
@@ -78,6 +78,7 @@ class PrepareRequestTests(unittest.TestCase):
         tr.assert_called_once_with(
             body, "anthropic",
             proxy_urls=["http://preferred", "http://first"],
+            backends=None,
         )
 
     def test_global_off_endpoint_absent_does_not_translate(self):

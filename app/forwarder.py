@@ -22,7 +22,7 @@ import socket
 import asyncio
 import httpx
 from starlette.responses import StreamingResponse, Response, JSONResponse
-from . import db, proxy_pool, filters, hedger, translate, language_translate
+from . import db, proxy_pool, filters, hedger, translate, language_translate, llm_translate
 
 # ---------------------------------------------------------------------------
 # Dedicated-proxy cooldown.
@@ -840,6 +840,9 @@ def _targets(s):
             # actually changed are stored; anything absent falls back to the
             # global setting. See _fx().
             "fx_flags": e.get("fx_flags", ""),
+            # Ordered translation backend chain (2026-09-14): JSON list of
+            # "google" / translation_endpoints ids. Absent = legacy Google.
+            "translation_config": e.get("translation_config", ""),
         }
 
     primary_custom = next((e for e in customs if e.get("is_primary")), None)
@@ -1042,6 +1045,39 @@ def _translation_error_response(exc):
     )
 
 
+def _translation_backends(tgt) -> list | None:
+    """Resolve the endpoint's ORDERED translation backend chain (2026-09-14).
+
+    ``endpoints.translation_config`` holds a JSON list the user dragged into
+    order: "google" = the built-in Google backend; a numeric id selects a
+    ``translation_endpoints`` row which becomes an LLMTranslator. Missing or
+    disabled rows are SKIPPED (the remaining chain still runs); an absent or
+    empty config returns None so the call is byte-for-byte the legacy Google
+    path — existing deployments change behaviour only when configured.
+    """
+    raw = (tgt or {}).get("translation_config") or ""
+    try:
+        entries = json.loads(raw) if raw else []
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(entries, list) or not entries:
+        return None
+    chain: list = []
+    for entry in entries:
+        if entry == "google":
+            chain.append("google")
+            continue
+        try:
+            eid = int(entry)
+        except (TypeError, ValueError):
+            continue
+        row = db.get_translation_endpoint(eid)
+        if not row or not row.get("enabled"):
+            continue
+        chain.append(llm_translate.LLMTranslator(row))
+    return chain or None
+
+
 async def _prepare_request(body_bytes, client_kind, tgt, log=None):
     """Apply wire-format translation, then endpoint-specific language translation.
 
@@ -1079,6 +1115,7 @@ async def _prepare_request(body_bytes, client_kind, tgt, log=None):
                 report = await language_translate.translate_request_report(
                     body_bytes, language_kind,
                     proxy_urls=translation_proxies or None,
+                    backends=_translation_backends(tgt),
                 )
             except Exception as exc:
                 report = language_translate.TranslationReport(

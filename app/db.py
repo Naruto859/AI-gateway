@@ -157,11 +157,10 @@ DEFAULT_SETTINGS = {
     # while its /v1/chat/completions is Cloudflare-blocked (403 direct, 0 of 3
     # free proxies, scrape.do ROTATION_FAILED). 0 = old verbatim behaviour.
     "fx_translate_format": "1",
-    # Translate Hindi/Devanagari and high-confidence Roman Hinglish natural-language
-    # fields to English before calling THIS endpoint. OFF globally by default: this
-    # exists for providers such as AgentRouter whose language gate rejects Hindi,
-    # and should be explicitly enabled only on the affected endpoint. Tool ids,
-    # arguments, URLs, code and JSON remain byte-exact.
+    # Translate non-English natural-language fields to English before calling THIS
+    # endpoint. OFF globally by default: explicitly enable it only for providers
+    # whose language gate rejects non-English input. Tool ids, arguments, URLs,
+    # code and JSON remain byte-exact.
     "fx_translate_language": "0",
 }
 
@@ -185,9 +184,10 @@ CREATE TABLE endpoints_new (
     custom_proxies            TEXT    DEFAULT '[]',
     proxy_priority            TEXT    DEFAULT '[]',
     proxy_fallback            INTEGER DEFAULT 1,
-    key_failover_keywords     TEXT    DEFAULT '',
-    extra_keys                TEXT    DEFAULT '[]',
-    fx_flags                  TEXT    DEFAULT ''
+    key_failover_keywords TEXT DEFAULT '',
+    extra_keys TEXT DEFAULT '[]',
+    fx_flags TEXT DEFAULT '',
+    translation_config TEXT DEFAULT ''
 )
 """
 
@@ -297,7 +297,7 @@ def _init(c):
             -- NOT unique: providers hand out several keys per account, each with its
             -- own quota, so the same base URL legitimately appears more than once.
             url       TEXT NOT NULL,
-            api_mode  TEXT    DEFAULT 'anthropic_messages',  -- anthropic_messages|chat_completions
+            api_mode  TEXT    DEFAULT 'anthropic_messages',  -- anthropic_messages|chat_completions|openai_responses
             api_key   TEXT    DEFAULT '',                    -- '' = use global upstream_key
             enabled   INTEGER DEFAULT 1,
             priority  INTEGER DEFAULT 0,                     -- lower = tried first
@@ -316,6 +316,24 @@ def _init(c):
             last_used  REAL    DEFAULT 0,
             hit_count  INTEGER DEFAULT 0,
             enabled    INTEGER DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS translation_endpoints (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            name              TEXT NOT NULL,
+            kind              TEXT DEFAULT 'llm',         -- llm (google is builtin, not a row)
+            url               TEXT DEFAULT '',
+            api_key           TEXT DEFAULT '',
+            model             TEXT DEFAULT '',
+            api_mode          TEXT DEFAULT 'chat_completions', -- anthropic_messages|chat_completions
+            system_prompt     TEXT DEFAULT '',
+            rpm               INTEGER DEFAULT 0,          -- 0 = unlimited
+            chunk_chars       INTEGER DEFAULT 4000,
+            max_output_tokens INTEGER DEFAULT 0,          -- 0 = auto (input*1.5 + 256)
+            custom_proxies    TEXT DEFAULT '[]',
+            proxy_priority    TEXT DEFAULT '[]',
+            proxy_fallback    INTEGER DEFAULT 1,
+            priority          INTEGER DEFAULT 0,          -- display order among custom rows
+            enabled           INTEGER DEFAULT 1
         );
         """
     )
@@ -366,6 +384,11 @@ def _init(c):
         c.execute("ALTER TABLE endpoints ADD COLUMN failover_trigger_keywords TEXT DEFAULT '500,501,502,503,504,524,401,403,unauthorized'")
     if "endpoint_failover_keywords" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN endpoint_failover_keywords TEXT DEFAULT 'Thinking,model_not_found,invalid_api_key,content-blocked,content_filter'")
+    # 2026-09-14: per-endpoint ORDERED translation backend chain.
+    # JSON list of backend ids: "google" (builtin) and/or translation_endpoints ids.
+    # NULL/'' = legacy behaviour (Google only) — never auto-migrate existing rows.
+    if "translation_config" not in ecols:
+        c.execute("ALTER TABLE endpoints ADD COLUMN translation_config TEXT DEFAULT ''")
     if "scrape_do_token" not in ecols:
         c.execute("ALTER TABLE endpoints ADD COLUMN scrape_do_token TEXT DEFAULT ''")
     if "custom_proxies" not in ecols:
@@ -813,7 +836,7 @@ def add_endpoint(url, api_mode="anthropic_messages", api_key="", model_override=
 
 
 def update_endpoint(eid, **fields):
-    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords", "endpoint_failover_keywords", "scrape_do_token", "custom_proxies", "proxy_priority", "proxy_fallback", "extra_keys", "key_failover_keywords", "fx_flags"}
+    allowed_ENDPOINT_COLS = {"url", "api_mode", "api_key", "enabled", "priority", "status", "note", "is_primary", "name", "model_override", "failover_trigger_keywords", "endpoint_failover_keywords", "scrape_do_token", "custom_proxies", "proxy_priority", "proxy_fallback", "extra_keys", "key_failover_keywords", "fx_flags", "translation_config"}
     fields = {k: v for k, v in fields.items() if k in allowed_ENDPOINT_COLS}
     if not fields:
         return
@@ -828,6 +851,72 @@ def delete_endpoint(eid):
     with _lock:
         c = conn()
         c.execute("DELETE FROM endpoints WHERE id=?", (eid,))
+        c.commit()
+
+
+# --- translation backends (custom LLM translators, 2026-09-14) ---
+_TRANSLATION_ENDPOINT_COLS = {
+    "name", "kind", "url", "api_key", "model", "api_mode", "system_prompt",
+    "rpm", "chunk_chars", "max_output_tokens", "custom_proxies",
+    "proxy_priority", "proxy_fallback", "priority", "enabled",
+}
+
+
+def add_translation_endpoint(name, kind="llm", url="", api_key="", model="",
+                             api_mode="chat_completions", system_prompt="",
+                             rpm=0, chunk_chars=4000, max_output_tokens=0,
+                             custom_proxies="[]", proxy_priority="[]",
+                             proxy_fallback=1):
+    """Insert a custom LLM translation backend. Returns (added, id)."""
+    with _lock:
+        c = conn()
+        nxt = c.execute(
+            "SELECT COALESCE(MAX(priority),-1)+1 FROM translation_endpoints").fetchone()[0]
+        cur = c.execute(
+            "INSERT INTO translation_endpoints"
+            "(name, kind, url, api_key, model, api_mode, system_prompt,"
+            " rpm, chunk_chars, max_output_tokens, custom_proxies,"
+            " proxy_priority, proxy_fallback, priority, enabled)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,? ,1)",
+            (name, kind, url, api_key, model, api_mode, system_prompt,
+             int(rpm or 0), int(chunk_chars or 4000), int(max_output_tokens or 0),
+             custom_proxies or "[]", proxy_priority or "[]",
+             int(proxy_fallback if proxy_fallback is not None else 1), nxt))
+        c.commit()
+        return (1 if cur.rowcount else 0), cur.lastrowid
+
+
+def list_translation_endpoints():
+    c = conn()
+    rows = c.execute(
+        "SELECT * FROM translation_endpoints ORDER BY priority, id").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_translation_endpoint(eid):
+    c = conn()
+    r = c.execute(
+        "SELECT * FROM translation_endpoints WHERE id=?", (eid,)).fetchone()
+    return dict(r) if r else None
+
+
+def update_translation_endpoint(eid, **fields):
+    fields = {k: v for k, v in fields.items()
+              if k in _TRANSLATION_ENDPOINT_COLS}
+    if not fields:
+        return
+    cols = ", ".join(f"{k}=?" for k in fields)
+    with _lock:
+        c = conn()
+        c.execute(f"UPDATE translation_endpoints SET {cols} WHERE id=?",
+                  list(fields.values()) + [eid])
+        c.commit()
+
+
+def delete_translation_endpoint(eid):
+    with _lock:
+        c = conn()
+        c.execute("DELETE FROM translation_endpoints WHERE id=?", (eid,))
         c.commit()
 
 

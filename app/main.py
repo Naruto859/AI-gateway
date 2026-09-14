@@ -297,6 +297,71 @@ async def endpoint_delete(payload: dict, x_admin_token: str = Header(default="")
     return {"ok": True}
 
 
+# --- translation backends (2026-09-14): custom LLM translators ---
+@app.get("/admin/translation/list")
+async def translation_list(x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    rows = db.list_translation_endpoints()
+    # never hand keys to the dashboard list view
+    for r in rows:
+        r["api_key"] = "••••" + (r.get("api_key") or "")[-4:] if r.get("api_key") else ""
+    return {"ok": True, "backends": rows}
+
+
+@app.post("/admin/translation/add")
+async def translation_add(payload: dict, x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    added, tid = db.add_translation_endpoint(
+        name=(payload.get("name") or "backend").strip(),
+        kind="llm",
+        url=(payload.get("url") or "").strip(),
+        api_key=(payload.get("api_key") or "").strip(),
+        model=(payload.get("model") or "").strip(),
+        api_mode=payload.get("api_mode") or "chat_completions",
+        system_prompt=(payload.get("system_prompt") or "").strip(),
+        rpm=int(payload.get("rpm") or 0),
+        chunk_chars=int(payload.get("chunk_chars") or 4000),
+        max_output_tokens=int(payload.get("max_output_tokens") or 0),
+        custom_proxies=payload.get("custom_proxies") or "[]",
+        proxy_priority=payload.get("proxy_priority") or "[]",
+        proxy_fallback=int(payload.get("proxy_fallback") if payload.get("proxy_fallback") is not None else 1),
+    )
+    return {"ok": bool(added), "id": tid}
+
+
+@app.post("/admin/translation/update")
+async def translation_update(payload: dict, x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    tid = payload.pop("id")
+    db.update_translation_endpoint(tid, **payload)
+    return {"ok": True}
+
+
+@app.post("/admin/translation/delete")
+async def translation_delete(payload: dict, x_admin_token: str = Header(default="")):
+    _require_admin(x_admin_token)
+    db.delete_translation_endpoint(payload["id"])
+    return {"ok": True}
+
+
+@app.post("/admin/translation/test")
+async def translation_test(payload: dict, x_admin_token: str = Header(default="")):
+    """One REAL tiny translation through the backend — a green light here means
+    the URL+key+model+format combo genuinely translates, not merely answers."""
+    _require_admin(x_admin_token)
+    from app import llm_translate
+    row = db.get_translation_endpoint(int(payload["id"]))
+    if not row:
+        return JSONResponse({"ok": False, "error": "backend not found"}, 404)
+    tr = llm_translate.LLMTranslator(row)
+    sample = payload.get("text") or "नमस्ते दुनिया, यह अनुवाद परीक्षण है"
+    try:
+        out = await tr(sample)
+        return {"ok": True, "input": sample, "output": out}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
 
 
 @app.post("/admin/endpoint/primary")

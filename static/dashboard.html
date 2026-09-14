@@ -739,7 +739,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.6 10.6l6.8-3.2M8.6 13.4l6.8 3.2"/></svg></span>Upstream endpoints</h2>
 <p class="sub">Where the gateway forwards. Set one as primary; if it fails all retries the next is tried, then it loops back to primary.</p>
 <div class="field"><div class="meta"><div class="lbl">Claude Code Mimicry</div><div class="desc">A-to-Z exact mimicry (NodeJS + Claude-CLI). Overwrites client fingerprint headers. Keep ON if upstream strictly checks for real Claude Code.</div></div><div class="ctrl"><div class="tg" id="tgMimicry"></div></div></div>
-<div class="field"><div class="meta"><div class="lbl">Format Translation</div><div class="desc">Let an endpoint serve a client that speaks the <b>other</b> dialect. Toggle ON = an OpenAI-shaped request is converted to Anthropic <code>/v1/messages</code> and back (and the reverse), including tool calls, tool results, images and streaming. Toggle OFF = reject instantly when no endpoint matches the client's dialect (the body is NOT translated). This is the fleet-wide default; per-endpoint overrides live in each endpoint's edit popup under "Translate request format".</div></div><div class="ctrl"><div class="tg" id="tgFmtXlate"></div></div></div>
+<div class="field"><div class="meta"><div class="lbl">Format Translation</div><div class="desc">One fleet-wide switch for all endpoints. ON = translate request, response, tools, images and streaming among all three wire formats: Anthropic <code>/v1/messages</code>, OpenAI Chat <code>/v1/chat/completions</code>, and OpenAI Responses <code>/v1/responses</code> (Codex). Native-format endpoints stay first; translation is fallback. OFF = reject instantly when no endpoint natively matches. This is protocol translation only — not English/Hindi translation.</div></div><div class="ctrl"><div class="tg" id="tgFmtXlate"></div></div></div>
 <div class="listbar">
   <span class="lbcount" id="epCount"></span>
   <button class="addbtn" id="openAddEp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add endpoint</button>
@@ -769,7 +769,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="fhint">The same provider may be added more than once — one entry per API key, each with its own quota.</div>
 
 <label class="fl" style="margin-top:11px">API mode</label>
-<div class="csel wide" id="epMode" data-val="anthropic_messages"><button class="csel-btn" type="button">Anthropic Messages</button><div class="csel-pop"><div class="csel-opt sel" data-v="anthropic_messages">Anthropic Messages</div><div class="csel-opt" data-v="chat_completions">OpenAI Chat</div></div></div>
+<div class="csel wide" id="epMode" data-val="anthropic_messages"><button class="csel-btn" type="button">Anthropic Messages</button><div class="csel-pop"><div class="csel-opt sel" data-v="anthropic_messages">Anthropic Messages</div><div class="csel-opt" data-v="chat_completions">OpenAI Chat</div><div class="csel-opt" data-v="openai_responses">OpenAI Responses (Codex)</div></div></div>
 
 <label class="fl" style="margin-top:11px">Display name <span class="opt">optional</span></label>
 <input class="wide" id="epName" type="text" placeholder="e.g. AgentRouter · key 2">
@@ -844,6 +844,67 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div id="hpProxies"></div>
 <div class="hp-section-title">📋 Activity Log</div>
 <div class="hp-log" id="hpLog"></div>
+</div>
+</div>
+</div>
+
+<!-- TRANSLATION BACKEND MODAL (2026-09-14) -->
+<div class="modal" id="txbModal">
+<div class="modalbox" style="max-width:560px">
+<div class="modalhd"><h3 id="txbTitle">LLM Translation Backend</h3><button class="x" id="txbModalX">×</button></div>
+<div class="modalbody" id="txbBody" style="padding:14px 16px;max-height:70vh;overflow-y:auto">
+
+  <label class="fl">Name</label>
+  <div class="fhint" style="margin:0 2px 4px">Shown in the engine list. e.g. "DeepSeek"</div>
+  <input id="txbName" type="text" placeholder="DeepSeek">
+
+  <label class="fl" style="margin-top:12px">Base URL</label>
+  <div class="fhint" style="margin:0 2px 4px">Provider base URL without /v1/messages or /chat suffix. e.g. https://gen.pollinations.ai/v1 or https://api.example.com/v1</div>
+  <input id="txbUrl" type="text" placeholder="https://gen.pollinations.ai/v1">
+
+  <label class="fl" style="margin-top:12px">API Key</label>
+  <div class="fhint" style="margin:0 2px 4px">Bearer token for OpenAI-style, x-api-key for Anthropic-style.</div>
+  <input id="txbKey" type="text" placeholder="sk-…">
+
+  <label class="fl" style="margin-top:12px">Model ID</label>
+  <div class="fhint" style="margin:0 2px 4px">The model that translates. Flash-tier is ideal (fast, cheap, strong at translation). e.g. deepseek-v4.1-flash</div>
+  <input id="txbModel" type="text" placeholder="deepseek-v4.1-flash">
+
+  <label class="fl" style="margin-top:12px">Request format</label>
+  <div class="fhint" style="margin:0 2px 4px">How this provider speaks. OpenAI-style uses /chat/completions with Bearer auth; Anthropic-style uses /v1/messages with x-api-key.</div>
+  <select id="txbMode" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card,#fff);font-size:13px">
+    <option value="chat_completions">OpenAI Chat Completions</option>
+    <option value="anthropic_messages">Anthropic Messages</option>
+  </select>
+
+  <label class="fl" style="margin-top:12px">System prompt</label>
+  <div class="fhint" style="margin:0 2px 4px">Sent with every chunk. Leave empty to use the built-in exact-translation prompt. Edit only if you know what you're doing.</div>
+  <textarea id="txbPrompt" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px;resize:vertical" placeholder="(built-in exact-translation prompt)"></textarea>
+
+  <div style="display:flex;gap:10px;margin-top:12px">
+    <div style="flex:1">
+      <label class="fl" style="margin-top:0">RPM limit</label>
+      <div class="fhint" style="margin:0 2px 4px">Requests per minute this provider allows. 0 = unlimited. Extra chunks automatically wait for the next minute — nothing is dropped.</div>
+      <input id="txbRpm" type="number" min="0" value="0" style="width:100%">
+    </div>
+    <div style="flex:1">
+      <label class="fl" style="margin-top:0">Chunk size (chars)</label>
+      <div class="fhint" style="margin:0 2px 4px">Characters per request. Big-context models (1M) can take 8000+ — fewer requests, faster translation.</div>
+      <input id="txbChunk" type="number" min="256" value="4000" style="width:100%">
+    </div>
+    <div style="flex:1">
+      <label class="fl" style="margin-top:0">Max output tokens</label>
+      <div class="fhint" style="margin:0 2px 4px">0 = AUTO (input size × 1.5 + buffer). A fixed lower value can cut long translations — keep 0 unless the provider requires a cap.</div>
+      <input id="txbMaxTok" type="number" min="0" value="0" style="width:100%">
+    </div>
+  </div>
+
+  <div style="display:flex;gap:8px;margin-top:16px">
+    <button class="btn" id="txbSave" style="flex:1">Save backend</button>
+    <button class="btn ghost" id="txbTest" style="flex:1">Test translation</button>
+  </div>
+  <div id="txbTestOut" style="display:none;margin-top:10px;padding:10px;border-radius:8px;border:1px solid var(--line);font-size:12px;white-space:pre-wrap"></div>
+
 </div>
 </div>
 </div>
@@ -1021,6 +1082,8 @@ const ICO={
 };
 
 const GRIP_SVG='<svg class="gicon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M2.5 5h11M2.5 8h11M2.5 11h11"/></svg>';
+const GEAR_SVG='<svg class="nicon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4"/></svg>';
+const LANG_SVG='<svg class="nicon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h7M6 3.5c0 3-1.8 5.2-4 6.5M4 5.5c.4 2.3 2 4 4.2 4.5"/><path d="M8.5 13.5l2.8-7 2.7 7M9.8 11h3"/></svg>';
 const CHEV_UP='<svg class="nicon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4-4 4 4"/></svg>';
 const CHEV_DN='<svg class="nicon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>';
 const CK_SVG='<svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11"/></svg>';
@@ -1368,7 +1431,7 @@ function renderEndpoints(){
     // the right of "Anthropic · fallback". They used to trail the three action
     // buttons and wrapped onto a line of their own, which wasted a whole row.
     return`<div class="ep"><span class="eprank">${prim?ICO.star:(e.priority||'·')}</span>
-<div class="pi"><div class="ip" style="font-family:inherit" title="${esc(e.url)}">${esc(epName(e))}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI':'Anthropic'} · ${prim?'primary':'fallback'}${epKeyCount(e)>1?' · '+epKeyCount(e)+' keys':''}${e.status&&e.status!=='unknown'?' · '+esc(e.status):''}</div></div>
+<div class="pi"><div class="ip" style="font-family:inherit" title="${esc(e.url)}">${esc(epName(e))}</div><div class="tag">${e.api_mode==='chat_completions'?'OpenAI Chat':e.api_mode==='openai_responses'?'OpenAI Responses':'Anthropic'} · ${prim?'primary':'fallback'}${epKeyCount(e)>1?' · '+epKeyCount(e)+' keys':''}${e.status&&e.status!=='unknown'?' · '+esc(e.status):''}</div></div>
 <div class="epstate">
 <div class="tg ${e.enabled?'on':''}" data-eptg="${e.id}" title="${e.enabled?'Disable':'Enable'} this endpoint"></div>
 <button class="xbtn" data-epdel="${e.id}" title="Remove endpoint" aria-label="Remove endpoint">×</button>
@@ -1634,8 +1697,22 @@ function openEndpointSettings(e){
   <div class="field"><div class="meta"><div class="lbl">Treat refusal as a complete answer</div><div class="desc">Do not resend a valid model refusal 9 times through every provider.</div></div><div class="ctrl"><div class="tg" id="esFxRefusal"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Preserve GET/HEAD method</div><div class="desc">Keeps model-list requests as GET instead of changing them to POST.</div></div><div class="ctrl"><div class="tg" id="esFxMethod"></div></div></div>
   <div class="field"><div class="meta"><div class="lbl">Strict bot-block detection</div><div class="desc">Only a real challenge page counts as WAF; ordinary HTML errors do not.</div></div><div class="ctrl"><div class="tg" id="esFxWaf"></div></div></div>
-  <div class="field"><div class="meta"><div class="lbl">Translate request format</div><div class="desc">Let this endpoint serve a client that speaks the <b>other</b> dialect: an OpenAI-shaped request is converted to Anthropic <code>/v1/messages</code> and back (and the reverse), including tool calls, tool results, images and streaming. Useful when only one of the two routes is reachable — measured 2026-09-05, <code>api.justwoker.icu</code> answers <code>/v1/messages</code> in 1.4s while its <code>/v1/chat/completions</code> is Cloudflare-blocked. Off = forward the body exactly as the client sent it (an endpoint that needs byte-identical bodies).</div></div><div class="ctrl"><div class="tg" id="esFxXlate"></div></div></div>
-  <div class="field"><div class="meta"><div class="lbl">Translate Hindi / Hinglish to English</div><div class="desc">Before calling <b>this endpoint only</b>, translate Hindi, Devanagari and high-confidence Roman Hinglish natural-language fields to English. System/user/assistant context and textual tool results are translated; tool IDs, tool arguments, JSON, URLs, model names and code stay exact. The model is instructed to answer in the user's original language. Keep OFF for endpoints that already accept Hindi.</div></div><div class="ctrl"><div class="tg" id="esFxLangXlate"></div></div></div>
+
+  <div class="field"><div class="meta"><div class="lbl">Translate any language to English</div><div class="desc">Before calling <b>this endpoint only</b>, send non-English natural-language prose to your <b>translation engine</b> and translate it to English. Supports Hindi/Hinglish and other languages; English passes unchanged. System/user/assistant context, textual tool results and schema descriptions may be sent; tool IDs, tool arguments, JSON, URLs, model names and code stay exact. The model is instructed to answer in the latest user's language. Keep OFF for endpoints that already accept all languages or for private content that must not leave the gateway.</div></div><div class="ctrl"><div class="tg" id="esFxLangXlate"></div></div></div>
+</div>
+
+<div class="fsect" id="txEngineSect" style="display:none">
+  <div class="fsect-hd">Translation Engine</div>
+  <div class="fsect-sub">Choose <b>which engine translates</b> for this endpoint and in what order.
+    Drag the rows (or use ▲▼) — the first engine is used first; if it fails, the next one takes over.
+    <b>Google Translate</b> is the free built-in. Custom LLM backends give meaning-aware translation.
+    If every engine fails, the request is blocked (never sent untranslated).</div>
+
+  <div id="txBackendList" style="display:flex;flex-direction:column;gap:6px;margin-top:10px"></div>
+
+  <div style="display:flex;gap:8px;margin-top:10px">
+    <button class="btn ghost" id="btnAddTxBackend" style="padding:5px 10px;font-size:11px;border-radius:6px;min-height:unset;min-width:unset">+ Add LLM backend</button>
+  </div>
 </div>
 
 <div class="fsect">
@@ -1897,7 +1974,7 @@ function openEndpointSettings(e){
     ['esFxRefusal','fx_refusal_is_answer'],
     ['esFxMethod','fx_method_passthrough'],
     ['esFxWaf','fx_strict_waf'],
-    ['esFxXlate','fx_translate_format'],
+
     ['esFxLangXlate','fx_translate_language'],
   ];
   let _epFx={};
@@ -1915,8 +1992,203 @@ function openEndpointSettings(e){
       const on=!el.classList.contains('on');
       el.classList.toggle('on',on);
       _epFx[key]=on?'1':'0';   // written on Save, with the rest of the form
+      if (key === 'fx_translate_language') _txToggleChanged();
     };
   });
+
+  // --- Translation Engine chain (2026-09-14) ---------------------------------
+  // Orderable backends below the language toggle: "google" is built-in;
+  // numeric ids are translation_endpoints rows. The chain persists on
+  // endpoints.translation_config when the endpoint form is saved.
+  let _txBackends = [];        // [{id:'google'} | {id:7, row:{…}}]
+  let _txCustom = [];          // all translation_endpoints rows (cache)
+  let _txSortable = null;
+  let _txEditingId = null;     // row id being edited in the backend modal
+
+  async function _txLoadBackends() {
+    try {
+      const r = await api('/admin/translation/list');
+      _txCustom = (r && r.backends) || [];
+    } catch (err) { _txCustom = []; }
+  }
+
+  function _txToggleChanged() {
+    const on = $('#esFxLangXlate').classList.contains('on');
+    $('#txEngineSect').style.display = on ? 'block' : 'none';
+  }
+
+  function _txLabel(entry) {
+    if (entry.id === 'google') return 'Google Translate (built-in)';
+    const row = entry.row || {};
+    const m = row.model ? ` · ${row.model}` : '';
+    return `${row.name || 'LLM backend'}${m}`;
+  }
+
+  function _txRender() {
+    const host = $('#txBackendList');
+    if (_txSortable) { try { _txSortable.destroy(); } catch (err) {} _txSortable = null; }
+    if (!_txBackends.length) {
+      // Legacy endpoints start with the built-in engine, matching old behaviour.
+      _txBackends = [{id: 'google'}];
+    }
+    host.innerHTML = _txBackends.map((b, i) => `
+      <div class="pprow" data-txid="${esc(String(b.id))}">
+        <div class="pgrip">${GRIP_SVG}</div>
+        <span class="ppos">${i + 1}</span>
+        <div class="plabel">${b.id === 'google' ? LANG_SVG : ''} ${esc(_txLabel(b))}</div>
+        <div class="ro-nudge">
+          ${b.id !== 'google' ? `<button type="button" class="txGear" data-txedit="${esc(String(b.id))}" title="Backend settings">${GEAR_SVG}</button>` : ''}
+          <button type="button" data-txup="${esc(String(b.id))}" ${i === 0 ? 'disabled' : ''} title="Move up">${CHEV_UP}</button>
+          <button type="button" data-txdn="${esc(String(b.id))}" ${i === _txBackends.length - 1 ? 'disabled' : ''} title="Move down">${CHEV_DN}</button>
+          <button type="button" class="txDel" data-txdel="${esc(String(b.id))}" title="Remove from chain">×</button>
+        </div>
+      </div>`).join('');
+
+    const nudge = (id, dir) => {
+      const i = _txBackends.findIndex(b => String(b.id) === String(id));
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= _txBackends.length) return;
+      [_txBackends[i], _txBackends[j]] = [_txBackends[j], _txBackends[i]];
+      _txRender();
+    };
+    $$('#txBackendList [data-txup]').forEach(b => b.onclick = () => nudge(b.dataset.txup, -1));
+    $$('#txBackendList [data-txdn]').forEach(b => b.onclick = () => nudge(b.dataset.txdn, 1));
+    $$('#txBackendList [data-txdel]').forEach(b => b.onclick = () => {
+      if (_txBackends.length <= 1) { toast('Chain needs at least one engine', 'bad'); return; }
+      _txBackends = _txBackends.filter(x => String(x.id) !== String(b.dataset.txdel));
+      _txRender();
+    });
+    $$('#txBackendList .txGear').forEach(b => b.onclick = () => _txOpenBackendModal(+b.dataset.txedit));
+    if (window.Sortable) {
+      _txSortable = Sortable.create(host, {
+        animation: 150, handle: '.pgrip',
+        onEnd: () => {
+          const order = [...host.children].map(el => el.dataset.txid);
+          _txBackends.sort((a, b) =>
+            order.indexOf(String(a.id)) - order.indexOf(String(b.id)));
+        },
+      });
+    }
+  }
+
+  function _txOpenBackendModal(editId) {
+    _txEditingId = editId || null;
+    const row = editId ? (_txCustom.find(r => r.id === editId) || {}) : {};
+    $('#txbTitle').textContent = editId ? 'Edit LLM backend' : 'Add LLM translation backend';
+    $('#txbName').value = row.name || '';
+    $('#txbUrl').value = row.url || '';
+    $('#txbKey').value = '';   // never prefill real keys; blank = unchanged
+    $('#txbKey').placeholder = row.api_key ? '•••• saved (blank = keep)' : 'sk-…';
+    $('#txbModel').value = row.model || '';
+    $('#txbMode').value = row.api_mode || 'chat_completions';
+    $('#txbPrompt').value = row.system_prompt || '';
+    $('#txbRpm').value = row.rpm || 0;
+    $('#txbChunk').value = row.chunk_chars || 4000;
+    $('#txbMaxTok').value = row.max_output_tokens || 0;
+    $('#txbTestOut').style.display = 'none';
+    openModal('txbModal');
+  }
+
+  function _txBackendPayload() {
+    return {
+      name: $('#txbName').value.trim() || 'backend',
+      url: $('#txbUrl').value.trim(),
+      api_key: $('#txbKey').value.trim(),
+      model: $('#txbModel').value.trim(),
+      api_mode: $('#txbMode').value,
+      system_prompt: $('#txbPrompt').value.trim(),
+      rpm: +($('#txbRpm').value || 0),
+      chunk_chars: +($('#txbChunk').value || 4000),
+      max_output_tokens: +($('#txbMaxTok').value || 0),
+    };
+  }
+
+  $('#btnAddTxBackend').onclick = () => _txOpenBackendModal(null);
+  $('#txbModalX').onclick = () => closeModal('txbModal');
+
+  $('#txbSave').onclick = async () => {
+    const btn = $('#txbSave');
+    const payload = _txBackendPayload();
+    if (!payload.url) { toast('Base URL is required', 'bad'); return; }
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      let bid;
+      if (_txEditingId) {
+        if (payload.api_key) {
+          await api('/admin/translation/update', {id: _txEditingId, ...payload});
+        } else {
+          const {api_key, ...rest} = payload;  // blank key = keep saved one
+          await api('/admin/translation/update', {id: _txEditingId, ...rest});
+        }
+        bid = _txEditingId;
+      } else {
+        const r = await api('/admin/translation/add', payload);
+        bid = r.id;
+      }
+      await _txLoadBackends();
+      const row = _txCustom.find(r => r.id === bid) || {};
+      const existing = _txBackends.find(b => String(b.id) === String(bid));
+      if (!existing) _txBackends.push({id: bid, row});
+      else existing.row = row;
+      _txRender();
+      closeModal('txbModal');
+      toast('Translation backend saved', 'ok');
+    } catch (err) {
+      toast('Save failed: ' + (err.message || err), 'bad');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Save backend';
+    }
+  };
+
+  $('#txbTest').onclick = async () => {
+    const btn = $('#txbTest');
+    const out = $('#txbTestOut');
+    btn.disabled = true; btn.textContent = 'Testing…';
+    out.style.display = 'block';
+    out.textContent = 'Running one real Hindi→English translation…';
+    try {
+      const payload = _txBackendPayload();
+      // Test the DRAFT as typed — not the saved row — so the button reflects
+      // exactly what Save would store.
+      let id = _txEditingId;
+      if (!id) {
+        const r = await api('/admin/translation/add', payload);
+        id = r.id;
+        await _txLoadBackends();
+        const row = _txCustom.find(x => x.id === id) || {};
+        _txBackends.push({id, row});
+        _txRender();
+        toast('Backend saved (auto-saved to run the test)', 'ok');
+      } else {
+        await api('/admin/translation/update', {id, ...payload});
+      }
+      const r = await api('/admin/translation/test', {id});
+      out.textContent = r.ok
+        ? `✓ Works.\n\nInput:  ${r.input}\nOutput: ${r.output}`
+        : `✗ Failed: ${r.error || 'unknown error'}`;
+    } catch (err) {
+      out.textContent = `✗ ${err.message || err}`;
+    } finally {
+      btn.disabled = false; btn.textContent = 'Test translation';
+    }
+  };
+
+  function _txChainValue() {
+    return JSON.stringify(_txBackends.map(b => b.id));
+  }
+
+  // boot the section from the endpoint's saved chain (legacy = google only)
+  (async () => {
+    await _txLoadBackends();
+    let saved = [];
+    try { saved = JSON.parse(e.translation_config || '["google"]'); } catch (err) { saved = ['google']; }
+    if (!Array.isArray(saved) || !saved.length) saved = ['google'];
+    _txBackends = saved.map(id => id === 'google'
+      ? {id: 'google'}
+      : {id, row: _txCustom.find(r => r.id === id) || {}});
+    _txRender();
+    _txToggleChanged();
+  })();
 
   openModal('epSetModal');
   $('#esSave').onclick=async()=>{
@@ -1955,7 +2227,8 @@ function openEndpointSettings(e){
       proxy_fallback: finalFallback,
       extra_keys: JSON.stringify(finalExtraKeys),
       key_failover_keywords: ($('#esKeyKw') ? $('#esKeyKw').value.trim() : ''),
-      fx_flags: JSON.stringify(_epFx)
+      fx_flags: JSON.stringify(_epFx),
+      translation_config: _txChainValue()
     });
     // The dialog deliberately stays open. This is a settings surface — the operator is
     // often adjusting several fields, and closing it the moment one save lands both hides
@@ -2293,7 +2566,7 @@ function openEndpointChat(cfg){
   // it sat pressed against the input with no breathing room (and scrolled away anyway).
   $('#chatLog').innerHTML='<div class="chatempty">Send a message to test this endpoint end to end — its own key, its own proxy chain.</div>';
   const meta=$('#chatMeta');
-  if(meta)meta.textContent=(cfg.model||'model')+' · '+(cfg.api_mode==='chat_completions'?'OpenAI':'Anthropic');
+  if(meta)meta.textContent=(cfg.model||'model')+' · '+(cfg.api_mode==='chat_completions'?'OpenAI Chat':cfg.api_mode==='openai_responses'?'OpenAI Responses':'Anthropic');
   $('#chatInput').value='';autoGrow($('#chatInput'));syncChatSend();
   openModal('chatModal');
   setTimeout(()=>$('#chatInput').focus(),100);
