@@ -46,7 +46,7 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}},
     {"name": "list_proxies", "description": "List proxies with id, host, status, success count.",
      "parameters": {"type": "object", "properties": {}}},
-    {"name": "add_endpoint", "description": "Add an upstream endpoint. api_mode is 'anthropic_messages' or 'chat_completions'.",
+    {"name": "add_endpoint", "description": "Add an upstream endpoint. api_mode is 'anthropic_messages', 'chat_completions', or 'openai_responses'.",
      "parameters": {"type": "object", "properties": {"url": {"type": "string"}, "api_mode": {"type": "string"}, "api_key": {"type": "string"}}, "required": ["url"]}},
     {"name": "add_filter", "description": "Add a content filter keyword. mode is 'redact' or 'block'.",
      "parameters": {"type": "object", "properties": {"value": {"type": "string"}, "mode": {"type": "string"}}, "required": ["value"]}},

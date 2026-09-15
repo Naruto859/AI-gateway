@@ -247,7 +247,34 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .ro-keys{font-weight:700;color:var(--g-700)}
 .ro-off-note{font-size:10px;color:var(--ink-faint);text-align:center;padding:7px 4px 2px;font-weight:600}
 .ro-off-note b{color:var(--ink-soft)}
-/* endpoint-settings modal: custom proxy rows + priority rows */
+/* Translation backend editor: compact, balanced controls on desktop and phones. */
+#txbBody{font-size:12px;line-height:1.45}
+#txbBody .fl{font-size:12px;margin-top:9px!important;margin-bottom:3px;display:block}
+#txbBody .fhint{font-size:9.5px;line-height:1.35}
+#txbBody input,#txbBody textarea,#txbBody select,#txbBody .csel-btn{font-size:12px;padding:7px 9px;border-radius:8px}
+#txbBody>div[style*="display:flex"]{gap:7px!important}
+#txbBody .btn{font-size:11px;padding:7px 9px;min-height:32px;line-height:1.2}
+#txbBody .csel-pop{font-size:12px}
+/* Tuning row: 4 columns on desktop (each input full width of its cell),
+   2 columns on phones — the 4-across wrap made every description a tall
+   one-word-per-line column (Boss screenshot 2026-09-14). */
+#txbTuningRow{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
+@media(max-width:600px){
+  #txbTuningRow{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+/* Action row: 3 equal compact buttons that never wrap their labels into
+   two-line stacks ("Save / backend", "Reset / to / defaults"). */
+#txbBtnRow{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+#txbBtnRow .btn{width:100%;min-width:0;white-space:nowrap;padding:8px 4px;font-size:11px}
+@media(max-width:600px){
+  #txbModal .modalbox{max-width:calc(100vw - 18px);border-radius:15px}
+  #txbModal .modalhd{padding:11px 13px}
+  #txbModal .modalbody{padding:10px 12px;max-height:76vh}
+  #txbBody>div[style*="display:flex"]{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px!important}
+  #txbBody>div[style*="display:flex"]>div{min-width:0}
+  #txbBody>div[style*="display:flex"]:last-of-type{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))}
+  #txbBody>div[style*="display:flex"]:last-of-type .btn{width:100%;min-width:0}
+}
 .pxrow{display:flex;gap:8px;margin-bottom:8px;align-items:center}
 .pxrow .pxInput{flex:1 1 auto;min-width:0;height:36px}
 .pxrow .pxDel{flex:0 0 30px;width:30px;height:30px;background:#fee2e2;color:#dc2626;border:none;border-radius:7px;font-size:15px;cursor:pointer;display:grid;place-items:center;padding:0;line-height:1}
@@ -257,6 +284,9 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .pgrip:active{cursor:grabbing}
 .ppos{width:20px;height:20px;border-radius:6px;background:var(--g-100);color:var(--g-700);font-size:10.5px;font-weight:740;display:grid;place-items:center;flex:none}
 .plabel{flex:1;font-size:12px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Engine-list icon inline with its label — unsized inside .plabel it expanded
+   to the row's full height and ate the row (Boss screenshot 2026-09-14). */
+.plabel .nicon{width:13px;height:13px;display:inline-block;vertical-align:-2px;flex:none}
 @media(max-width:600px){.ro-stat{min-width:76px}.robar .btn{flex:1 1 100%;min-width:0}.robar .csel{margin-left:0;width:100%}}
 .eprank{width:24px;height:24px;border-radius:7px;background:linear-gradient(145deg,var(--g-400),var(--g-600));color:#fff;font-size:12px;font-weight:740;display:grid;place-items:center;flex:none}
 /* Two-row card: [rank | name+meta | switch & delete] then [action buttons].
@@ -609,7 +639,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/></svg></span>Timeouts</h2>
 <p class="sub">How long the gateway waits before giving up on the upstream.</p>
-<div class="field"><div class="meta"><div class="lbl">Read timeout</div><div class="desc">Max seconds to wait for model response. Long generations need this large.</div></div><div class="ctrl"><input type="number" data-set="read_timeout"><span class="unit">sec</span> <button type="button" class="chipbtn" data-reset="read_timeout" data-default="1200">Reset</button></div></div>
+<div class="field"><div class="meta"><div class="lbl">Read timeout</div><div class="desc">Max seconds to wait for model response. Long generations need this large. Default 1200.</div></div><div class="ctrl"><input type="number" data-set="read_timeout"><span class="unit">sec</span></div></div>
 </div>
 <div class="card">
 <h2><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>TCP keepalive</h2>
@@ -677,7 +707,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <p class="sub">Global proxy testing and connection tuning.</p>
 <div class="field"><div class="meta"><div class="lbl">API testing</div><div class="desc">ON = deep test proxy using API endpoint. OFF = basic TCP ping (very fast).</div></div><div class="ctrl"><div class="tg" id="tgHotPoolApi"></div></div></div>
 <div class="field"><div class="meta"><div class="lbl">Hedging Concurrency</div><div class="desc">Number of proxies to race in parallel for ZERO latency. (Higher = faster, but uses more proxy bandwidth).</div></div><div class="ctrl"><input type="number" data-set="hedging_concurrency" min="1" max="50" style="width:70px"></div></div>
-<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Max seconds to establish the proxy tunnel. Lower = a dead proxy fails faster and the next one is tried sooner. 0 = gateway default (8s).</div></div><div class="ctrl"><input type="number" step="0.5" data-set="connect_timeout" style="width:80px"><span class="unit">sec</span> <button type="button" class="chipbtn" data-reset="connect_timeout" data-default="8" style="margin-left:6px">Reset</button></div></div>
+<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Max seconds to establish the proxy tunnel. Lower = a dead proxy fails faster and the next one is tried sooner. 0 = gateway default (8s).</div></div><div class="ctrl"><input type="number" step="0.5" data-set="connect_timeout" style="width:80px"><span class="unit">sec</span></div></div>
 <div class="field"><div class="meta"><div class="lbl">Max retries</div><div class="desc">Attempts per request before giving up.</div></div><div class="ctrl"><input type="number" data-set="max_retries" style="width:70px"></div></div>
 <div class="field"><div class="meta"><div class="lbl">Endpoint failover threshold</div><div class="desc">Consecutive 500+ errors required on different proxies to switch to the next endpoint target.</div></div><div class="ctrl"><input type="number" data-set="failover_5xx_threshold" min="1" max="10" style="width:70px"></div></div>
 <div class="field"><div class="meta"><div class="lbl">Retry initial delay</div><div class="desc">Wait before 1st retry. Doubles each time.</div></div><div class="ctrl"><input type="number" step="0.5" data-set="retry_initial_delay" style="width:70px"><span class="unit">sec</span></div></div>
@@ -859,8 +889,8 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
   <input id="txbName" type="text" placeholder="DeepSeek">
 
   <label class="fl" style="margin-top:12px">Base URL</label>
-  <div class="fhint" style="margin:0 2px 4px">Provider base URL without /v1/messages or /chat suffix. e.g. https://gen.pollinations.ai/v1 or https://api.example.com/v1</div>
-  <input id="txbUrl" type="text" placeholder="https://gen.pollinations.ai/v1">
+  <div class="fhint" style="margin:0 2px 4px">Provider base URL without /v1/messages or /chat suffix. e.g. https://api.openai.com/v1 or https://api.example.com/v1</div>
+  <input id="txbUrl" type="text" placeholder="https://api.example.com/v1">
 
   <label class="fl" style="margin-top:12px">API Key</label>
   <div class="fhint" style="margin:0 2px 4px">Bearer token for OpenAI-style, x-api-key for Anthropic-style.</div>
@@ -878,33 +908,33 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
   <div class="fhint" style="margin:0 2px 4px">Sent with every chunk. Leave empty to use the built-in exact-translation prompt. Edit only if you know what you're doing.</div>
   <textarea id="txbPrompt" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px;resize:vertical" placeholder="(built-in exact-translation prompt)"></textarea>
 
-  <div style="display:flex;gap:10px;margin-top:12px">
-    <div style="flex:1">
+  <div id="txbTuningRow" style="margin-top:12px">
+    <div>
       <label class="fl" style="margin-top:0">RPM limit</label>
       <div class="fhint" style="margin:0 2px 4px">Requests per minute this provider allows. 0 = unlimited. Extra chunks automatically wait for the next minute — nothing is dropped.</div>
       <input id="txbRpm" type="number" min="0" value="0" style="width:100%">
     </div>
-    <div style="flex:1">
+    <div>
       <label class="fl" style="margin-top:0">Chunk size (chars)</label>
       <div class="fhint" style="margin:0 2px 4px">Characters per request. Big-context models (1M) can take 8000+ — fewer requests, faster translation.</div>
       <input id="txbChunk" type="number" min="256" value="4000" style="width:100%">
     </div>
-    <div style="flex:1">
+    <div>
       <label class="fl" style="margin-top:0">Max output tokens</label>
       <div class="fhint" style="margin:0 2px 4px">0 = AUTO (input size × 1.5 + buffer). A fixed lower value can cut long translations — keep 0 unless the provider requires a cap.</div>
       <input id="txbMaxTok" type="number" min="0" value="0" style="width:100%">
     </div>
-    <div style="flex:1">
+    <div>
       <label class="fl" style="margin-top:0">Timeout (sec)</label>
       <div class="fhint" style="margin:0 2px 4px">Max seconds to wait for model response. 0 = use translator default (120s).</div>
       <input id="txbTimeout" type="number" min="0" value="120" style="width:100%">
     </div>
   </div>
 
-  <div style="display:flex;gap:8px;margin-top:16px">
-    <button class="btn" id="txbSave" style="flex:1">Save backend</button>
-    <button class="btn ghost" id="txbReset" style="flex:1">Reset to defaults</button>
-    <button class="btn ghost" id="txbTest" style="flex:1">Test translation</button>
+  <div id="txbBtnRow" style="margin-top:16px">
+    <button class="btn" id="txbSave">Save backend</button>
+    <button class="btn ghost" id="txbReset">Reset to defaults</button>
+    <button class="btn ghost" id="txbTest">Test translation</button>
   </div>
   <div id="txbTestOut" style="display:none;margin-top:10px;padding:10px;border-radius:8px;border:1px solid var(--line);font-size:12px;white-space:pre-wrap"></div>
 
@@ -1302,7 +1332,10 @@ function render(){
   renderStats();
   const enp=ST.counts ? ST.counts.enabled : ST.proxies.filter(p=>p.enabled).length;
   const tot=ST.counts ? ST.counts.total : ST.proxies.length;
-  $('#s_px').innerHTML=enp+'<small>/ '+tot+'</small>';
+  // Proxy counter on ONE line — "13890/ 13890" wrapping across two lines on
+  // phones read as a broken number (Boss, screenshot 2026-09-14). Keep the
+  // value and the total joined at the whitespace that never breaks.
+  $('#s_px').innerHTML='<span style="white-space:nowrap">'+enp+'<small>/ '+tot+'</small></span>';
   // setting inputs — skip "dirty" (user-modified but unsaved) fields
   $$('[data-set]').forEach(el=>{
     if(s[el.dataset.set]===undefined)return;
@@ -2228,7 +2261,7 @@ function openEndpointSettings(e){
   // Reset to built-in defaults (Boss requested reset option)
   $('#txbReset').onclick = () => {
     $('#txbName').value = '';
-    $('#txbUrl').value = 'https://gen.pollinations.ai/v1';
+    $('#txbUrl').value = '';
     $('#txbKey').value = '';
     $('#txbModel').value = '';
     const rm = $('#txbMode');

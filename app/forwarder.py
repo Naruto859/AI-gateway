@@ -993,18 +993,44 @@ def _tgt_kind(tgt):
 
 
 def _dialect_eligible_targets(targets, client_kind, format_translation_on=True):
-    """Order targets for a client dialect without letting ``is_primary`` win.
+    """Order targets for a client dialect with PRIMARY ALWAYS FIRST (Boss, 2026-09-15).
 
-    The first target must speak the request's native wire dialect.  A global
-    primary endpoint is only a priority within that dialect; an Anthropic
-    request must not be sent to an OpenAI primary merely because it is marked
-    primary.  Different-dialect targets remain a fallback only when format
-    translation is enabled.
+    Boss's rule, in his words: "jo primary set hai wo primary rehna chahiye —
+    wo open hai ya nahi usse fark nahi padta... native nahi jayega, hamesha jo
+    primary hai wo primary hai". And for the fallthrough: "primary agar fail ho
+    jaye to wo pehle anthropic wale ko try karega... lekin agar saara OpenAI
+    fail ho gaya" (then the other dialects).
+
+    Hierarchy, in order:
+      1. the operator's PRIMARY endpoint — first regardless of its dialect
+         (format translation carries a cross-dialect primary);
+      2. the remaining NATIVE-dialect endpoints, in priority order;
+      3. the translated endpoints, in priority order, only when format
+         translation is enabled.
+
+    ``targets`` arrives from ``_targets()`` in priority order with the primary
+    first, so the primary is simply frozen at position 0 and the REST is
+    grouped native-before-translated. A primary anywhere else in the list
+    (stale flag, manual priority edits) is still promoted to the front.
+    With format translation OFF, translated endpoints are dropped EXCEPT the
+    primary itself: a cross-dialect primary can only be served through
+    translation, so keeping it would forward an untranslatable body. It is
+    therefore excluded in that case — the operator's "always primary" wish
+    cannot override the global toggle, and the 503 fail-fast message explains
+    exactly that.
     """
-    native = [t for t in targets if _tgt_kind(t) == client_kind]
-    translated = ([t for t in targets if _tgt_kind(t) != client_kind]
+    primary = next((t for t in targets if t.get("is_primary")), None)
+    rest = [t for t in targets if t is not primary]
+    if primary is not None and not format_translation_on \
+            and _tgt_kind(primary) != client_kind:
+        # Cross-dialect primary cannot be served with translation OFF.
+        primary = None
+        rest = [t for t in targets if t.get("is_primary")] + \
+               [t for t in targets if not t.get("is_primary")]
+    native = [t for t in rest if _tgt_kind(t) == client_kind]
+    translated = ([t for t in rest if _tgt_kind(t) != client_kind]
                   if format_translation_on else [])
-    return native + translated
+    return ([primary] if primary is not None else []) + native + translated
 
 
 def _xlate_on(client_kind, tgt):
@@ -1935,14 +1961,14 @@ async def forward(request, path):
     # milliseconds instead of a timeout — for a stream request too, because this
     # runs before the StreamingResponse is built.
     #
-    # Ordering follows Boss's own description of the intent: "अगर OpenAI endpoint
-    # add है और Anthropic endpoint add है और … OpenAI format में [request आया] तो वो
-    # जो OpenAI endpoints है वहाँ से message जाएगा" — the endpoint that natively
-    # speaks the client's dialect goes FIRST, and translation is the fallback for
-    # when that dialect is missing ("Anthropic endpoint से भी उठाके format translate
-    # करके भेजेगा"). Relative order inside each group is untouched, so the priority
-    # column still decides among equals; the only promotion is native-over-translated,
-    # which is also the cheaper path (no body rewrite, byte-exact passthrough).
+    # Ordering (Boss, 2026-09-15) — PRIMARY ALWAYS FIRST: "jo primary set hai
+    # wo primary rehna chahiye — wo open hai ya nahi usse fark nahi padta…
+    # native nahi jayega, hamesha jo primary hai wo primary hai". After the
+    # primary, the remaining NATIVE-dialect endpoints are tried (his words:
+    # "primary agar fail ho jaye to wo pehle anthropic wale ko try karega"),
+    # and only when that whole dialect is exhausted do the translated
+    # endpoints serve ("lekin agar saara OpenAI fail ho gaya" → then the rest).
+    # See _dialect_eligible_targets for the full hierarchy.
     #
     # Scoped to the two CHAT routes on purpose. Informational paths (v1/models,
     # v1/props …) are identical in both dialects, so a dialect verdict about them

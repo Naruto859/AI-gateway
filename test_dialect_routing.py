@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Regression tests for request-dialect-aware endpoint selection."""
+"""Regression tests for request-dialect-aware endpoint selection.
+
+Updated 2026-09-15 for the PRIMARY-FIRST hierarchy (Boss): the primary
+endpoint is always tried first regardless of dialect; only among the
+REMAINING endpoints does native-dialect come before translated. When no
+primary is flagged, the old native-first behaviour applies.
+"""
 import sys
 import unittest
 
@@ -9,6 +15,7 @@ from app import forwarder as F
 
 class DialectRoutingTests(unittest.TestCase):
     def setUp(self):
+        # No is_primary flags here: plain priority order 1,2,3,4.
         self.targets = [
             {"id": 1, "name": "primary-openai", "mode": "openai"},
             {"id": 2, "name": "anthropic-first", "mode": "anthropic"},
@@ -16,11 +23,11 @@ class DialectRoutingTests(unittest.TestCase):
             {"id": 4, "name": "responses", "mode": "responses"},
         ]
 
-    def test_anthropic_request_skips_openai_primary(self):
+    def test_anthropic_request_orders_native_before_translated(self):
         selected = F._dialect_eligible_targets(self.targets, "anthropic", True)
         self.assertEqual([t["id"] for t in selected], [2, 3, 1, 4])
 
-    def test_openai_request_skips_anthropic_primary_and_prefers_native(self):
+    def test_openai_request_native_first(self):
         selected = F._dialect_eligible_targets(self.targets, "openai", True)
         self.assertEqual([t["id"] for t in selected], [1, 2, 3, 4])
 
