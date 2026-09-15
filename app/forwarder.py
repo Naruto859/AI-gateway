@@ -992,6 +992,21 @@ def _tgt_kind(tgt):
     return translate.dialect_of_mode((tgt or {}).get("mode") or "")
 
 
+def _dialect_eligible_targets(targets, client_kind, format_translation_on=True):
+    """Order targets for a client dialect without letting ``is_primary`` win.
+
+    The first target must speak the request's native wire dialect.  A global
+    primary endpoint is only a priority within that dialect; an Anthropic
+    request must not be sent to an OpenAI primary merely because it is marked
+    primary.  Different-dialect targets remain a fallback only when format
+    translation is enabled.
+    """
+    native = [t for t in targets if _tgt_kind(t) == client_kind]
+    translated = ([t for t in targets if _tgt_kind(t) != client_kind]
+                  if format_translation_on else [])
+    return native + translated
+
+
 def _xlate_on(client_kind, tgt):
     """Should this request be translated for THIS target?
 
@@ -1935,8 +1950,9 @@ async def forward(request, path):
     _p = (path or "").lower().rstrip("/")
     if targets and (_p.endswith("chat/completions") or _p.endswith("messages")
                     or _p.endswith("responses")):
-        _native = [t for t in targets if _tgt_kind(t) == kind]
         _fmt_on = db.get_setting("fx_translate_format", "1") != "0"
+        targets = _dialect_eligible_targets(targets, kind, _fmt_on)
+        _native = [t for t in targets if _tgt_kind(t) == kind]
         _xlated = [t for t in targets if _tgt_kind(t) != kind] if _fmt_on else []
         _elig = _native + _xlated
         if not _elig:
