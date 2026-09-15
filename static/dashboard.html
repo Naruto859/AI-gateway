@@ -29,7 +29,7 @@ header{display:flex;align-items:center;gap:13px;margin:4px 4px 22px;animation:ri
 .pill{margin-left:auto;display:flex;align-items:center;gap:7px;background:var(--g-100);color:var(--g-700);padding:7px 13px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid var(--line)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--g-500);animation:pulse 2s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(47,165,106,.5)}70%{box-shadow:0 0 0 7px rgba(47,165,106,0)}100%{box-shadow:0 0 0 0 rgba(47,165,106,0)}}
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-bottom:20px}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin-bottom:20px}
 .stat{border:1px solid var(--line);border-radius:var(--r);padding:14px 15px;box-shadow:var(--shadow);animation:rise .6s ease both;transform:translateZ(0)}
 .stat:nth-child(1){background:linear-gradient(135deg,rgba(167,224,196,.45),var(--card))}
 .stat:nth-child(2){background:linear-gradient(135deg,rgba(186,208,245,.45),var(--card));animation-delay:.05s}
@@ -1332,10 +1332,10 @@ function render(){
   renderStats();
   const enp=ST.counts ? ST.counts.enabled : ST.proxies.filter(p=>p.enabled).length;
   const tot=ST.counts ? ST.counts.total : ST.proxies.length;
-  // Proxy counter on ONE line — "13890/ 13890" wrapping across two lines on
-  // phones read as a broken number (Boss, screenshot 2026-09-14). Keep the
-  // value and the total joined at the whitespace that never breaks.
-  $('#s_px').innerHTML='<span style="white-space:nowrap">'+enp+'<small>/ '+tot+'</small></span>';
+  // Proxy counter on stat card: restored to natural wrapping ("13890 / 13890")
+  // so the grid column width remains equal across all three cards.
+  // Boss (2026-09-15): "proxi ka box khinch ja raha hai right side mein, pehle jaisa fix kar do".
+  $('#s_px').innerHTML=enp+'<small>/ '+tot+'</small>';
   // setting inputs — skip "dirty" (user-modified but unsaved) fields
   $$('[data-set]').forEach(el=>{
     if(s[el.dataset.set]===undefined)return;
