@@ -204,6 +204,9 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .upbox:hover,.upbox.drag{border-color:var(--g-500);background:var(--g-50)}
 .log .lt{color:var(--ink-faint);font-family:ui-monospace,monospace;font-size:11.5px;flex:none}
 .ep{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;background:#fff;overflow:hidden;max-width:100%}
+/* Brief green flash on a freshly added endpoint so the user sees the save landed. */
+.ep.justadded{animation:epFlash 2.2s ease-out}
+@keyframes epFlash{0%{background:var(--g-100);border-color:var(--g-400)}100%{background:#fff;border-color:var(--line)}}
 /* ---- Routing Order panel ---- */
 .rolist{display:flex;flex-direction:column;gap:6px;margin-top:4px}
 /* One row = one line. No wrapping: the stat block and nudge buttons are fixed-width
@@ -707,7 +710,7 @@ footer{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:24px
 <p class="sub">Global proxy testing and connection tuning.</p>
 <div class="field"><div class="meta"><div class="lbl">API testing</div><div class="desc">ON = deep test proxy using API endpoint. OFF = basic TCP ping (very fast).</div></div><div class="ctrl"><div class="tg" id="tgHotPoolApi"></div></div></div>
 <div class="field"><div class="meta"><div class="lbl">Hedging Concurrency</div><div class="desc">Number of proxies to race in parallel for ZERO latency. (Higher = faster, but uses more proxy bandwidth).</div></div><div class="ctrl"><input type="number" data-set="hedging_concurrency" min="1" max="50" style="width:70px"></div></div>
-<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Max seconds to establish the proxy tunnel. Lower = a dead proxy fails faster and the next one is tried sooner. 0 = gateway default (8s).</div></div><div class="ctrl"><input type="number" step="0.5" data-set="connect_timeout" style="width:80px"><span class="unit">sec</span></div></div>
+<div class="field"><div class="meta"><div class="lbl">Connect timeout</div><div class="desc">Max seconds to establish the proxy tunnel. Lower = a dead proxy fails faster and the next one is tried sooner. Blank/0 = fall back to the Advanced Timings connect timeout.</div></div><div class="ctrl"><input type="number" step="0.5" data-set="proxy_connect_timeout" style="width:80px"><span class="unit">sec</span></div></div>
 <div class="field"><div class="meta"><div class="lbl">Max retries</div><div class="desc">Attempts per request before giving up.</div></div><div class="ctrl"><input type="number" data-set="max_retries" style="width:70px"></div></div>
 <div class="field"><div class="meta"><div class="lbl">Endpoint failover threshold</div><div class="desc">Consecutive 500+ errors required on different proxies to switch to the next endpoint target.</div></div><div class="ctrl"><input type="number" data-set="failover_5xx_threshold" min="1" max="10" style="width:70px"></div></div>
 <div class="field"><div class="meta"><div class="lbl">Retry initial delay</div><div class="desc">Wait before 1st retry. Doubles each time.</div></div><div class="ctrl"><input type="number" step="0.5" data-set="retry_initial_delay" style="width:70px"><span class="unit">sec</span></div></div>
@@ -1077,6 +1080,9 @@ async function loadState(){
   }
   try{render();}
   catch(e){console.error('render failed',e);toast('Loaded with a display glitch','bad');}
+  // Hydrate the embedded-agent brain from the server-persisted (masked) config, so a
+  // fresh browser still uses the operator's saved brain. Never bounces the UI on failure.
+  try{await hydrateAgentBrain();}catch(e){console.error('brain hydrate failed',e);}
 }
 
 // auto-resume: if we already have a saved token, show the dashboard and load.
@@ -1265,7 +1271,7 @@ $$('[data-reset]').forEach(btn=>btn.onclick=()=>{
   if(inp){inp.value=btn.dataset.default||'';toast('Reset to '+btn.dataset.default+' — Save to apply','ok');}
 });
 $('#saveHotPool').onclick=()=>saveSettings(['hot_pool_size','hot_pool_refresh','hot_pool_test_timeout','hot_pool_concurrency'],'Hot pool settings');
-$('#saveProxyEngine').onclick=()=>saveSettings(['hedging_concurrency','connect_timeout','max_retries','failover_5xx_threshold','retry_initial_delay','retry_max_delay'],'Proxy Engine');
+$('#saveProxyEngine').onclick=()=>saveSettings(['hedging_concurrency','proxy_connect_timeout','max_retries','failover_5xx_threshold','retry_initial_delay','retry_max_delay'],'Proxy Engine');
 
 // Hot Pool Live View
 let _hpInterval=null;
@@ -1853,8 +1859,19 @@ function openEndpointSettings(e){
       el.onchange = () => { keyRows[+el.dataset.idx].val = el.value.trim(); };
     });
     $$('#extraKeyList .kyEye').forEach(b => {
-      b.onclick = () => {
+      b.onclick = async () => {
         const inp = b.parentNode.querySelector('.kyInput');
+        // Reveal the real spare key on demand (state ships it masked). Fetch once.
+        if(inp.type === 'password' && _is_masked_val(inp.value)){
+          try{
+            const s = await _ensureRealSecrets();
+            const idx = +b.dataset.idx;
+            if(s && Array.isArray(s.extra_keys) && typeof s.extra_keys[idx] === 'string'){
+              inp.value = s.extra_keys[idx];
+              keyRows[idx].val = s.extra_keys[idx];
+            }
+          }catch(err){ toast('Could not reveal key: '+(err.message||'error'),'bad'); return; }
+        }
         const show = inp.type === 'password';
         inp.type = show ? 'text' : 'password';
         b.classList.toggle('on', show);
@@ -1961,7 +1978,30 @@ function openEndpointSettings(e){
     }
   }
 
-  $('#esKeyEye') && ($('#esKeyEye').onclick = () => toggleReveal('esKey', 'esKeyEye'));
+  // The API-key field is loaded with the MASKED value from /admin/state (••••last4);
+  // the real key never rides in the bulk state blob. On first reveal, fetch the real
+  // secrets for THIS one endpoint from the admin-gated /admin/endpoint/key route and
+  // swap them into the fields, so click-to-show shows the genuine key. Cached so a
+  // hide/show toggle doesn't refetch. A masked-echo save is still dropped server-side.
+  let _revealedSecrets = null;
+  async function _ensureRealSecrets(){
+    if(_revealedSecrets) return _revealedSecrets;
+    _revealedSecrets = await api('/admin/endpoint/key', {id: e.id});
+    return _revealedSecrets;
+  }
+  async function revealEndpointKey(){
+    const inp = $('#esKey'), btn = $('#esKeyEye');
+    if(!inp || !btn) return;
+    // Going from hidden -> shown: make sure the real key is in the field first.
+    if(inp.type === 'password'){
+      try{
+        const s = await _ensureRealSecrets();
+        if(_is_masked_val(inp.value) && s && typeof s.api_key === 'string') inp.value = s.api_key;
+      }catch(err){ toast('Could not reveal key: '+(err.message||'error'),'bad'); return; }
+    }
+    toggleReveal('esKey','esKeyEye');
+  }
+  $('#esKeyEye') && ($('#esKeyEye').onclick = revealEndpointKey);
 
   $('#tgScrape').onclick = () => {
     $('#tgScrape').classList.toggle('on');
@@ -2512,6 +2552,7 @@ function _flashSaved(btn, label){
 }
 
 // One reveal-toggle implementation for every password field.
+function _is_masked_val(v){ return typeof v==='string' && v.indexOf('••••')===0; }
 function toggleReveal(inputId,btnId){
   const el=$('#'+inputId),b=$('#'+btnId);
   if(!el||!b)return;
@@ -2540,12 +2581,27 @@ $('#addEndpoint').onclick=async()=>{
   if(!/^https?:\/\//i.test(u)){toast('Base URL must start with http:// or https://','bad');return;}
   const btn=$('#addEndpoint');btn.disabled=true;btn.textContent='Adding…';
   try{
-    await api('/admin/endpoint/add',{url:u,api_mode:$('#epMode').dataset.val,
+    const res=await api('/admin/endpoint/add',{url:u,api_mode:$('#epMode').dataset.val,
       api_key:$('#epKey').value.trim(),model_override:$('#epModel').value.trim(),
       name:$('#epName').value.trim()});
     toast('Endpoint added','ok');
     closeModal('epAddModal');
+    // A new endpoint gets priority MAX+1, so it lands at the BOTTOM of the list.
+    // renderEndpoints() folds everything past the 4th row, so on any gateway with
+    // 4+ endpoints the row that was just created is hidden below "Show N more" —
+    // the save succeeded but the user never sees it and reports "it didn't save".
+    // Expand the list and scroll the new row into view so the save is visible.
+    EPX.collapsed=false;
     await refresh();await loadRouting();
+    const nid=res&&res.id;
+    if(nid){
+      const row=$(`#epList [data-epset="${nid}"]`)?.closest('.ep');
+      if(row){
+        row.scrollIntoView({behavior:'smooth',block:'center'});
+        row.classList.add('justadded');
+        setTimeout(()=>row.classList.remove('justadded'),2200);
+      }
+    }
   }catch(e){toast('Could not add endpoint: '+(e.message||'error'),'bad');}
   finally{btn.disabled=false;btn.textContent='Add endpoint';}
 };
@@ -2767,8 +2823,44 @@ $('#chatInput').addEventListener('input',e=>{autoGrow(e.target);syncChatSend();}
 $('#chatInput').addEventListener('scroll',e=>autoGrow(e.target));
 
 // ============ EMBEDDED AGENT ============
-let AG={cfg:JSON.parse(localStorage.getItem('mr_agent')||'{}'),msgs:[],att:[],welcomed:false,busy:false};
+// The brain config is persisted SERVER-SIDE (settings table) so it survives across
+// browsers/devices. localStorage is only a legacy fallback / one-time migration source.
+// AG.cfg holds the non-secret shape for the UI label; the api_key never lives here in
+// cleartext — the server keeps it and only ever hands back a masked last-4.
+let AG={cfg:JSON.parse(localStorage.getItem('mr_agent')||'{}'),msgs:[],att:[],welcomed:false,busy:false,keySet:false,keyLast4:''};
+delete AG.cfg.api_key;  // never keep a raw key in the browser going forward
 function agentBrainLabel(){return AG.cfg.mode==='custom'?('Custom · '+(AG.cfg.model||'?')):'Default brain';}
+
+// Pull the server-persisted brain (masked) out of /admin/state and drive the UI from it.
+// Runs on every state load so a fresh browser with empty localStorage still shows — and
+// uses — the operator's saved brain. Falls back to a one-time migration of a legacy
+// localStorage custom brain (with its cleartext key) up to the server, then forgets it.
+async function hydrateAgentBrain(){
+  const b=(ST&&ST.agent_brain)||{};
+  if(b.mode==='custom'&&b.endpoint){
+    AG.cfg={mode:'custom',sdk:b.sdk||'openai',endpoint:b.endpoint,model:b.model||''};
+    AG.keySet=!!b.api_key_set;AG.keyLast4=b.api_key_last4||'';
+    localStorage.setItem('mr_agent',JSON.stringify(AG.cfg));
+  }else{
+    // No server brain. Migrate a legacy localStorage custom brain once, then adopt default.
+    let legacy={};try{legacy=JSON.parse(localStorage.getItem('mr_agent')||'{}');}catch(e){}
+    if(legacy.mode==='custom'&&legacy.endpoint&&legacy.api_key&&!AG._migrated){
+      AG._migrated=true;
+      try{
+        await api('/admin/agent/brain',{mode:'custom',sdk:legacy.sdk||'openai',
+          endpoint:legacy.endpoint,model:legacy.model||'',api_key:legacy.api_key});
+        // strip the cleartext key from localStorage now that the server owns it
+        AG.cfg={mode:'custom',sdk:legacy.sdk||'openai',endpoint:legacy.endpoint,model:legacy.model||''};
+        localStorage.setItem('mr_agent',JSON.stringify(AG.cfg));
+        AG.keySet=true;AG.keyLast4=String(legacy.api_key).slice(-4);
+      }catch(e){/* migration best-effort; leave legacy in place */}
+    }else{
+      AG.cfg={mode:'default'};AG.keySet=false;AG.keyLast4='';
+    }
+  }
+  const badge=$('#agentBrain');if(badge)badge.textContent=agentBrainLabel();
+  if(typeof syncAgentCfgUI==='function')syncAgentCfgUI();
+}
 function openAgent(){
   $('#agentPanel').classList.add('show');$('#agentFab').style.display='none';
   $('#agentBrain').textContent=agentBrainLabel();
@@ -2818,13 +2910,22 @@ function syncAgentCfgUI(){
   $('#agentCustom').hidden=!custom;
   if(AG.cfg.endpoint)$('#agentEp').value=AG.cfg.endpoint;
   if(AG.cfg.model)$('#agentModel').value=AG.cfg.model;
-  if(AG.cfg.api_key)$('#agentKey').value=AG.cfg.api_key;
+  // The raw key never comes back from the server — only a masked last-4. Show it as a
+  // placeholder so the operator knows a key is stored; an empty field on save means
+  // "keep the existing key", a typed value replaces it.
+  const keyEl=$('#agentKey');
+  if(keyEl){
+    keyEl.value='';
+    keyEl.placeholder=AG.keySet?('•••• '+(AG.keyLast4||'')+'  (stored — leave blank to keep)'):'API key';
+  }
   if(AG.cfg.sdk){const c=$('#agentSdk');c.dataset.val=AG.cfg.sdk;const b=c.querySelector('.csel-btn');if(b)b.textContent=AG.cfg.sdk==='anthropic'?'Anthropic':'OpenAI';}
 }
 $('#brainDefault').onclick=()=>{AG._pick='default';syncAgentCfgUI();};
 $('#brainCustom').onclick=()=>{AG._pick='custom';syncAgentCfgUI();setTimeout(()=>$('#agentEp').focus(),60);};
-$('#agentSaveCfg').onclick=()=>{
+$('#agentSaveCfg').onclick=async()=>{
   const custom=(AG._pick||AG.cfg.mode)==='custom';
+  const btn=$('#agentSaveCfg');
+  let body;
   if(custom){
     const ep=$('#agentEp').value.trim();
     // Saving a half-filled custom brain would silently leave the assistant unusable,
@@ -2833,15 +2934,36 @@ $('#agentSaveCfg').onclick=()=>{
     if(!/^https?:\/\//i.test(ep)){toast('Endpoint must start with http:// or https://','bad');$('#agentEp').focus();return;}
     const model=$('#agentModel').value.trim();
     if(!model){toast('Model name is required','bad');$('#agentModel').focus();return;}
-    AG.cfg={mode:'custom',sdk:$('#agentSdk').dataset.val,endpoint:ep,model,api_key:$('#agentKey').value.trim()};
-  }else AG.cfg={mode:'default'};
+    const typedKey=$('#agentKey').value.trim();
+    // A key must exist: either a stored one we keep, or a freshly typed one.
+    if(!typedKey&&!AG.keySet){toast('API key is required','bad');$('#agentKey').focus();return;}
+    body={mode:'custom',sdk:$('#agentSdk').dataset.val,endpoint:ep,model};
+    // Blank key on an existing custom brain means "keep the stored key" — don't send it.
+    if(typedKey)body.api_key=typedKey;
+  }else body={mode:'default'};
+  btn.disabled=true;
+  try{
+    // Persist SERVER-SIDE. The masked brain comes back so the UI can show last-4.
+    const r=await api('/admin/agent/brain',body);
+    const b=(r&&r.brain)||{};
+    if(b.mode==='custom'&&b.endpoint){
+      AG.cfg={mode:'custom',sdk:b.sdk||'openai',endpoint:b.endpoint,model:b.model||''};
+      AG.keySet=!!b.api_key_set;AG.keyLast4=b.api_key_last4||'';
+    }else{AG.cfg={mode:'default'};AG.keySet=false;AG.keyLast4='';}
+    // Keep only the non-secret shape in localStorage as a cache; never the key.
+    localStorage.setItem('mr_agent',JSON.stringify(AG.cfg));
+  }catch(e){
+    toast('Could not save the brain: '+(e.message||'error'),'bad');
+    btn.disabled=false;return;
+  }
+  btn.disabled=false;
   AG._pick=null;
-  localStorage.setItem('mr_agent',JSON.stringify(AG.cfg));
   $('#agentBrain').textContent=agentBrainLabel();
+  syncAgentCfgUI();
   $('#agentPanel').classList.remove('cfg');
   $('#agentCfgBtn').classList.remove('on');
   $('#agentCfgBtn').setAttribute('aria-expanded','false');
-  toast(custom?'Assistant will use your provider':'Assistant will use this gateway','ok');
+  toast(custom?'Assistant will use your provider (saved)':'Assistant will use this gateway','ok');
 };
 function agentBubble(role,text){const d=document.createElement('div');d.className='msg '+role;d.textContent=text;d.style.maxWidth='85%';d.style.wordBreak='break-word';$('#agentLog').appendChild(d);$('#agentLog').scrollTop=$('#agentLog').scrollHeight;return d;}
 
@@ -2904,7 +3026,10 @@ async function agentSend(){
   const wait=agentBubble('a','');
   wait.innerHTML='<span class="dots"><i></i><i></i><i></i></span>';
   try{
-    const r=await api('/admin/agent/chat',{messages:AG.msgs,config:AG.cfg});
+    // Send an empty config: the brain now lives server-side (settings table), and the
+    // browser no longer holds the api_key. The server resolves the persisted brain (or
+    // the default gateway brain when none is saved).
+    const r=await api('/admin/agent/chat',{messages:AG.msgs,config:{}});
     wait.textContent=r.reply||'(no reply)';
     AG.msgs.push({role:'assistant',content:r.reply||''});
     // Name what actually ran, and flag anything that errored — a bare list of tool

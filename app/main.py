@@ -469,6 +469,38 @@ async def endpoint_update(payload: dict, x_admin_token: str = Header(default="")
     return {"ok": True}
 
 
+@app.post("/admin/endpoint/key")
+async def endpoint_reveal_key(payload: dict, x_admin_token: str = Header(default="")):
+    """On-demand reveal of ONE endpoint's real secrets, behind the admin gate.
+
+    /admin/state masks every api_key to ``••••last4`` so the bulk dashboard load
+    never carries secret material. The edit-dialog eye button ("click-to-show")
+    therefore cannot read the real key from that blob — it calls THIS route, which
+    returns the full key for the single endpoint the operator opened, and nothing
+    else (never admin_password / gateway_key / agent_brain, never the whole set).
+
+    Requires a valid admin token like every other /admin route; an unauthenticated
+    call raises 401 and leaks nothing.
+    """
+    _require_admin(x_admin_token)
+    eid = _need_int(payload, "id")
+    row = db.get_endpoint(eid)
+    if not row:
+        raise HTTPException(404, "no such endpoint")
+    try:
+        extra = json.loads(row.get("extra_keys") or "[]")
+        if not isinstance(extra, list):
+            extra = []
+    except (ValueError, TypeError):
+        extra = []
+    return {
+        "id": eid,
+        "api_key": row.get("api_key") or "",
+        "scrape_do_token": row.get("scrape_do_token") or "",
+        "extra_keys": [str(k) for k in extra],
+    }
+
+
 @app.post("/admin/endpoint/delete")
 async def endpoint_delete(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
