@@ -120,6 +120,10 @@ class LLMTranslator:
         self.model = self.row.get("model") or ""
         self.system_prompt = self.row.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
         self.chunk_chars = max(256, int(self.row.get("chunk_chars") or 4000))
+        # LLM backends translate the WHOLE message (protected spans masked as
+        # placeholders) in one call so sentence grammar survives; only the
+        # built-in Google collector uses the per-fragment path.
+        self.whole_text_masking = True
         self.max_output_tokens = max(0, int(self.row.get("max_output_tokens") or 0))
         # Per-backend request timeout (Boss 2026-09-14: customizable, 0 = default)
         self.timeout_seconds = float(self.row.get("timeout_seconds") or 0) or DEFAULT_TIMEOUT_SECONDS

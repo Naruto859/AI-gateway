@@ -29,6 +29,9 @@ DEFAULT_SETTINGS = {
     "require_client_key": "1",                    # 1 = clients must send the gateway_key
     "admin_password": "12345678",                 # dashboard password (CHANGE THIS)
     "model_note": "claude-opus-4-8",              # informational
+    "agent_brain_json": "",                       # embedded-agent brain config (JSON). Persisted
+                                                  # server-side so it survives across browsers/devices.
+                                                  # api_key lives here; /admin/state only reads it back masked.
     # --- latency-tuned defaults -------------------------------------------------
     # Measured over 24h of live traffic: 1-attempt requests averaged 33s while
     # 4-6 attempt requests averaged 247-471s. Almost all latency is burned in
@@ -42,6 +45,8 @@ DEFAULT_SETTINGS = {
     "connect_timeout": "8",                       # seconds to establish the proxy tunnel; a live proxy
                                                   # answers in 1-3s, so a longer wait only pays for
                                                   # dead ones (45 dead-proxy hits in the sample day)
+    "proxy_connect_timeout": "",                  # Proxy Engine card override for the live-request connect
+                                                  # timeout. Blank/0 = fall back to connect_timeout above.
     "read_timeout": "1200",                       # seconds to wait for upstream bytes (long generations)
     "write_timeout": "120",                       # seconds to wait for downstream data upload (e.g., large POST payloads)
     "pool_timeout": "20",                         # seconds to wait for an available connection from the internal pool
@@ -816,6 +821,15 @@ def list_endpoints():
     with _lock:
         return [dict(r) for r in conn().execute(
             "SELECT * FROM endpoints ORDER BY priority, id").fetchall()]
+
+
+def get_endpoint(eid):
+    """One endpoint row as a dict, or None. Used to read stored secrets before an
+    update so a masked-value echo from the dashboard doesn't overwrite them."""
+    with _lock:
+        row = conn().execute(
+            "SELECT * FROM endpoints WHERE id=?", (eid,)).fetchone()
+        return dict(row) if row else None
 
 
 def add_endpoint(url, api_mode="anthropic_messages", api_key="", model_override="", name=""):

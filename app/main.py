@@ -6,8 +6,9 @@ import json
 import urllib.parse
 import asyncio
 import logging
+import hmac
 from fastapi import FastAPI, Request, Header, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from . import db, proxy_pool, forwarder, agent, github_fetcher, hedger
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,8 +66,162 @@ _SCHEME = {"http": "http", "https": "https", "socks5": "socks5", "socks4": "sock
 
 def _require_admin(token):
     pw = db.get_setting("admin_password", "")
-    if not pw or token != pw:
+    if not pw or not hmac.compare_digest(str(token or ""), str(pw)):
         raise HTTPException(status_code=401, detail="bad admin token")
+
+
+def _mask_secret(val):
+    """Redact a secret to '••••'+last4 so the dashboard can still identify it
+    without ever receiving the full value. Empty stays empty."""
+    val = "" if val is None else str(val)
+    if not val:
+        return ""
+    return "••••" + val[-4:]
+
+
+# Settings keys that hold raw secrets and must never leave the process.
+_SECRET_SETTING_KEYS = {"gateway_key", "upstream_key", "admin_password",
+                        # holds the embedded-agent custom-brain api_key in cleartext;
+                        # a masked view is shipped separately under `agent_brain`.
+                        "agent_brain_json"}
+
+
+def _sanitize_state_settings(s):
+    """Copy of the settings dict with every secret stripped/redacted."""
+    return {k: v for k, v in s.items() if k not in _SECRET_SETTING_KEYS}
+
+
+def _sanitize_endpoint(ep):
+    """Redact per-endpoint secrets (api_key, scrape_do_token, extra_keys list)."""
+    ep = dict(ep)
+    if "api_key" in ep:
+        ep["api_key"] = _mask_secret(ep.get("api_key"))
+    if "scrape_do_token" in ep:
+        ep["scrape_do_token"] = _mask_secret(ep.get("scrape_do_token"))
+    if "extra_keys" in ep:
+        raw = ep.get("extra_keys") or "[]"
+        try:
+            keys = json.loads(raw)
+            if isinstance(keys, list):
+                ep["extra_keys"] = json.dumps(
+                    [_mask_secret(k) for k in keys])
+        except (ValueError, TypeError):
+            ep["extra_keys"] = "[]"
+    return ep
+
+
+def _sanitize_api_key(k):
+    """Client api_keys: both `key` and `name` carry the full secret here."""
+    k = dict(k)
+    if k.get("key"):
+        k["key"] = _mask_secret(k.get("key"))
+    if k.get("name"):
+        k["name"] = _mask_secret(k.get("name"))
+    return k
+
+
+# Prefix that _mask_secret() puts in front of a redacted value. A real secret
+# can never start with four U+2022 bullets, so a submitted value beginning with
+# this is the UI echoing the masked view back — it must NOT overwrite the stored
+# secret. (The dashboard loads ``••••last4`` into the key field and posts it back
+# unchanged on save; without this guard an unrelated edit destroys the API key.)
+_MASK_PREFIX = "••••"
+
+
+def _is_masked(val) -> bool:
+    return isinstance(val, str) and val.startswith(_MASK_PREFIX)
+
+
+def _keep_secret_if_masked(payload: dict, stored: str, field: str = "api_key") -> None:
+    """Drop ``field`` from ``payload`` when it is the mask echo (preserve stored).
+
+    A genuinely new key or an explicit clear ("") is passed through untouched.
+    """
+    if field in payload and _is_masked(payload.get(field)):
+        payload.pop(field, None)
+
+
+def _unmask_extra_keys(payload: dict, stored_extra: str) -> None:
+    """Restore masked entries in an ``extra_keys`` JSON list to their stored value.
+
+    The dashboard renders each spare key as ``••••last4``. On save, masked
+    entries are matched back to the stored key by their last-4 and substituted;
+    genuinely new (unmasked) entries are kept as typed. Unmatchable masked
+    entries are dropped rather than persisted as a useless mask.
+    """
+    if "extra_keys" not in payload:
+        return
+    try:
+        submitted = json.loads(payload.get("extra_keys") or "[]")
+        stored = json.loads(stored_extra or "[]")
+    except (ValueError, TypeError):
+        payload.pop("extra_keys", None)
+        return
+    if not isinstance(submitted, list):
+        payload.pop("extra_keys", None)
+        return
+    by_last4 = {}
+    for real in stored if isinstance(stored, list) else []:
+        if isinstance(real, str) and real:
+            by_last4[real[-4:]] = real
+    out = []
+    for entry in submitted:
+        if _is_masked(entry):
+            real = by_last4.get(entry[len(_MASK_PREFIX):])
+            if real:
+                out.append(real)
+            # else: drop an unmatchable mask instead of storing garbage
+        elif isinstance(entry, str) and entry:
+            out.append(entry)
+    payload["extra_keys"] = json.dumps(out)
+
+
+# ---- in-memory per-IP login rate limiter (in-process, best-effort) ----
+_LOGIN_MAX_FAILS = 5          # lock out after this many consecutive failures
+_LOGIN_LOCKOUT_SECONDS = 300  # ...for this long
+_login_fails = {}             # ip -> [fail_count, first_fail_ts]
+
+
+def _login_locked(ip):
+    """True if this IP is currently locked out. Expired windows self-reset."""
+    rec = _login_fails.get(ip)
+    if not rec:
+        return False
+    count, first_ts = rec
+    if count >= _LOGIN_MAX_FAILS:
+        if (time.time() - first_ts) < _LOGIN_LOCKOUT_SECONDS:
+            return True
+        _login_fails.pop(ip, None)  # window elapsed, forgive
+    return False
+
+
+def _login_note_fail(ip):
+    rec = _login_fails.get(ip)
+    now = time.time()
+    if not rec or (now - rec[1]) >= _LOGIN_LOCKOUT_SECONDS:
+        _login_fails[ip] = [1, now]
+    else:
+        rec[0] += 1
+
+
+def _login_note_success(ip):
+    _login_fails.pop(ip, None)
+
+
+def _need(payload, key):
+    """Return payload[key] or raise a clean 400 instead of a raw KeyError 500."""
+    if not isinstance(payload, dict) or key not in payload:
+        raise HTTPException(status_code=400, detail=f"missing required field: {key}")
+    return payload[key]
+
+
+def _need_int(payload, key):
+    """Return int(payload[key]) or a clean 400 (missing key or non-int value)."""
+    val = _need(payload, key)
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"field '{key}' must be an integer")
 
 
 # Addresses no exit proxy can ever have: loopback, link-local, RFC1918 private
@@ -153,9 +308,20 @@ async def health():
 
 # ---------------- admin API ----------------
 @app.post("/admin/login")
-async def login(payload: dict):
+async def login(payload: dict, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    if _login_locked(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="too many failed attempts, try again later")
     pw = db.get_setting("admin_password", "")
-    ok = (payload.get("password", "") == pw) or not pw
+    supplied = payload.get("password", "") if isinstance(payload, dict) else ""
+    # timing-safe compare; an unset password still permits first-run login
+    ok = (not pw) or hmac.compare_digest(str(supplied), str(pw))
+    if ok:
+        _login_note_success(ip)
+    else:
+        _login_note_fail(ip)
     return {"ok": ok}
 
 
@@ -163,17 +329,20 @@ async def login(payload: dict):
 async def state(x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
     s = db.get_all_settings()
-    # never echo the admin password back to the browser
-    safe = {k: v for k, v in s.items() if k != "admin_password"}
+    # never ship any secret to the browser: strip gateway_key/upstream_key/
+    # admin_password from settings, and redact every per-endpoint and client key.
+    safe = _sanitize_state_settings(s)
     proxies = db.list_proxies(limit=200)
     counts = db.proxy_counts()
     return {
         "settings": safe,
+        # masked view of the persisted embedded-agent brain (api_key -> last-4 only)
+        "agent_brain": agent.saved_brain_public(),
         "proxies": proxies,
         "counts": counts,
         "keywords": db.list_keywords(),
-        "endpoints": db.list_endpoints(),
-        "api_keys": db.list_api_keys(),
+        "endpoints": [_sanitize_endpoint(e) for e in db.list_endpoints()],
+        "api_keys": [_sanitize_api_key(k) for k in db.list_api_keys()],
         "stats": db.stats(),
         "logs": db.recent_logs(80),
     }
@@ -285,7 +454,17 @@ async def endpoint_add(payload: dict, x_admin_token: str = Header(default="")):
 @app.post("/admin/endpoint/update")
 async def endpoint_update(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
-    eid = payload.pop("id")
+    eid = _need(payload, "id")
+    payload.pop("id", None)
+    # The dashboard loads api_key/extra_keys as their masked view ("••••last4")
+    # and posts them back on every save. Never let a masked echo overwrite the
+    # real stored secret — a save that only changed the model would otherwise
+    # destroy the endpoint's API key.
+    current = db.get_endpoint(eid) or {}
+    _keep_secret_if_masked(payload, current.get("api_key", ""))
+    _keep_secret_if_masked(payload, current.get("scrape_do_token", ""),
+                           field="scrape_do_token")
+    _unmask_extra_keys(payload, current.get("extra_keys", ""))
     db.update_endpoint(eid, **payload)
     return {"ok": True}
 
@@ -293,7 +472,7 @@ async def endpoint_update(payload: dict, x_admin_token: str = Header(default="")
 @app.post("/admin/endpoint/delete")
 async def endpoint_delete(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
-    db.delete_endpoint(payload["id"])
+    db.delete_endpoint(_need(payload, "id"))
     return {"ok": True}
 
 
@@ -333,7 +512,12 @@ async def translation_add(payload: dict, x_admin_token: str = Header(default="")
 @app.post("/admin/translation/update")
 async def translation_update(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
-    tid = payload.pop("id")
+    tid = _need(payload, "id")
+    payload.pop("id", None)
+    # translation/list ships api_key masked ("••••last4"); don't let that echo
+    # overwrite the stored key on an unrelated field edit.
+    current = db.get_translation_endpoint(tid) or {}
+    _keep_secret_if_masked(payload, current.get("api_key", ""))
     db.update_translation_endpoint(tid, **payload)
     return {"ok": True}
 
@@ -341,7 +525,7 @@ async def translation_update(payload: dict, x_admin_token: str = Header(default=
 @app.post("/admin/translation/delete")
 async def translation_delete(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
-    db.delete_translation_endpoint(payload["id"])
+    db.delete_translation_endpoint(_need(payload, "id"))
     return {"ok": True}
 
 
@@ -351,7 +535,7 @@ async def translation_test(payload: dict, x_admin_token: str = Header(default=""
     the URL+key+model+format combo genuinely translates, not merely answers."""
     _require_admin(x_admin_token)
     from app import llm_translate
-    row = db.get_translation_endpoint(int(payload["id"]))
+    row = db.get_translation_endpoint(_need_int(payload, "id"))
     if not row:
         return JSONResponse({"ok": False, "error": "backend not found"}, 404)
     tr = llm_translate.LLMTranslator(row)
@@ -505,7 +689,7 @@ async def key_create(payload: dict, x_admin_token: str = Header(default="")):
 @app.post("/admin/key/delete")
 async def key_delete(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
-    db.delete_api_key(payload["id"])
+    db.delete_api_key(_need(payload, "id"))
     return {"ok": True}
 
 
@@ -517,33 +701,79 @@ async def agent_chat(payload: dict, x_admin_token: str = Header(default="")):
     cfg = payload.get("config") or {}
     if not messages:
         raise HTTPException(400, "no messages")
+    # Resolve which brain will actually be used, for accurate logging. The client now
+    # usually sends an empty cfg and the server-persisted brain is applied inside agent;
+    # derive the label from an explicit custom cfg OR the saved server-side brain.
+    _saved = agent.load_saved_brain()
+    _is_custom = ((cfg.get("mode") == "custom" and cfg.get("endpoint"))
+                  or (not (cfg.get("mode") == "custom" and cfg.get("endpoint"))
+                      and _saved.get("mode") == "custom" and _saved.get("endpoint")))
+    _brain_model = (cfg.get("model") if (cfg.get("mode") == "custom" and cfg.get("endpoint"))
+                    else (_saved.get("model", "") if _is_custom else "")) or ""
     t0 = time.time()
     try:
         res = await agent.chat(messages, cfg)
     except Exception as e:
         ms = int((time.time() - t0) * 1000)
-        brain = "custom" if (cfg.get("mode") == "custom" and cfg.get("endpoint")) else "default(gateway)"
+        brain = "custom" if _is_custom else "default(gateway)"
         err_msg = f"{type(e).__name__}: {e}"
         db.add_log(method="POST", path="agent/chat", status=500, proxy="", attempts=1,
                    stream=0, redactions=0, ms=ms, note=f"agent error: {err_msg[:60]}",
-                   model=cfg.get("model", ""), endpoint=brain, source="agent",
+                   model=_brain_model, endpoint=brain, source="agent",
                    detail=err_msg[:1500])
         return {"reply": f"Error: {err_msg[:100]}", "actions": []}
     ms = int((time.time() - t0) * 1000)
-    brain = "custom" if (cfg.get("mode") == "custom" and cfg.get("endpoint")) else "default(gateway)"
+    brain = "custom" if _is_custom else "default(gateway)"
     acts = ",".join(a.get("tool", "") for a in (res.get("actions") or [])) or "chat"
     status = 200 if not (res.get("reply", "").startswith("Brain error")) else 502
     db.add_log(method="POST", path="agent/chat", status=status, proxy="", attempts=1,
                stream=0, redactions=0, ms=ms, note=f"agent: {acts}",
-               model=cfg.get("model", ""), endpoint=brain, source="agent",
+               model=_brain_model, endpoint=brain, source="agent",
                detail=(res.get("reply", "") if status >= 400 else "")[:1500])
     return res
+
+
+@app.post("/admin/agent/brain")
+async def agent_brain_save(payload: dict, x_admin_token: str = Header(default="")):
+    """Persist the embedded-agent brain config server-side (settings table).
+
+    Body: {mode:"default"} clears it, or
+          {mode:"custom", sdk, endpoint, model, api_key?}.
+    The api_key is optional on update: if omitted/blank, the previously stored key
+    is kept (so the browser — which only ever sees a masked key — can save other
+    fields without wiping the secret). Read-back is masked via /admin/state.
+    """
+    _require_admin(x_admin_token)
+    mode = (payload.get("mode") or "default").strip()
+    if mode != "custom":
+        db.set_setting("agent_brain_json", "")
+        return {"ok": True, "brain": {}}
+    endpoint = (payload.get("endpoint") or "").strip()
+    model = (payload.get("model") or "").strip()
+    sdk = (payload.get("sdk") or "openai").strip()
+    if not endpoint or not endpoint.lower().startswith(("http://", "https://")):
+        raise HTTPException(400, "custom brain needs an http(s) endpoint")
+    if not model:
+        raise HTTPException(400, "custom brain needs a model id")
+    if sdk not in ("openai", "anthropic"):
+        sdk = "openai"
+    # api_key: blank/absent means "keep the existing stored key".
+    new_key = payload.get("api_key")
+    if new_key is None or str(new_key).strip() == "":
+        prev = agent.load_saved_brain()
+        api_key = prev.get("api_key", "") if prev.get("mode") == "custom" else ""
+    else:
+        api_key = str(new_key).strip()
+    cfg = {"mode": "custom", "sdk": sdk, "endpoint": endpoint,
+           "model": model, "api_key": api_key}
+    db.set_setting("agent_brain_json", json.dumps(cfg))
+    return {"ok": True, "brain": agent.saved_brain_public()}
 
 
 @app.post("/admin/proxy/toggle")
 async def proxy_toggle(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
-    p = db.get_proxy(payload["id"])
+    p = db.get_proxy(_need(payload, "id"))
     if not p:
         raise HTTPException(404)
     db.update_proxy(p["id"], enabled=0 if p["enabled"] else 1)
@@ -553,7 +783,7 @@ async def proxy_toggle(payload: dict, x_admin_token: str = Header(default="")):
 @app.post("/admin/proxy/delete")
 async def proxy_delete(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
-    db.delete_proxy(payload["id"])
+    db.delete_proxy(_need(payload, "id"))
     return {"ok": True}
 
 
@@ -561,7 +791,7 @@ async def proxy_delete(payload: dict, x_admin_token: str = Header(default="")):
 async def proxy_reset(payload: dict, x_admin_token: str = Header(default="")):
     """Clear a 'banned'/'unhealthy' flag so it can be retried."""
     _require_admin(x_admin_token)
-    db.update_proxy(payload["id"], status="unknown", fail_count=0, note="")
+    db.update_proxy(_need(payload, "id"), status="unknown", fail_count=0, note="")
     return {"ok": True}
 
 
@@ -586,7 +816,7 @@ async def proxy_test(payload: dict, x_admin_token: str = Header(default="")):
 @app.post("/admin/keyword/add")
 async def kw_add(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
-    kid = db.add_keyword(payload["value"], payload.get("mode", "redact"),
+    kid = db.add_keyword(_need(payload, "value"), payload.get("mode", "redact"),
                          payload.get("replacement", "[REDACTED]"))
     return {"id": kid}
 
@@ -594,7 +824,7 @@ async def kw_add(payload: dict, x_admin_token: str = Header(default="")):
 @app.post("/admin/keyword/delete")
 async def kw_del(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
-    db.delete_keyword(payload["id"])
+    db.delete_keyword(_need(payload, "id"))
     return {"ok": True}
 
 
@@ -602,7 +832,7 @@ async def kw_del(payload: dict, x_admin_token: str = Header(default="")):
 async def kw_toggle(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
     ks = {k["id"]: k for k in db.list_keywords()}
-    k = ks.get(payload["id"])
+    k = ks.get(_need(payload, "id"))
     if not k:
         raise HTTPException(404)
     db.update_keyword(k["id"], enabled=0 if k["enabled"] else 1)

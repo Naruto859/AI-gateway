@@ -405,10 +405,84 @@ async def _translate_fragment(text: str, translator: Translator) -> str:
     return lead + "".join(translated) + trail
 
 
+def _mask_token(nonce: str, index: int) -> str:
+    """Placeholder for a protected span. Pure ASCII alnum so every candidate
+    model and tokenizer reproduces it byte-for-byte, and the stock translation
+    prompt's "keep identifiers exactly" rule already protects it."""
+    return f"ZZ{nonce}Q{index}ZZ"
+
+
+def _mask_protected(text: str) -> tuple[str, list[str], str]:
+    """Replace protected (code/URL/JSON) spans with nonce placeholder tokens.
+
+    Returns ``(masked_text, spans, nonce)``. Empty ``spans`` and ``nonce`` when
+    there is nothing to protect.
+    """
+    import secrets
+    ranges = _protected_ranges(text)
+    if not ranges:
+        return text, [], ""
+    nonce = secrets.token_hex(6)
+    out: list[str] = []
+    spans: list[str] = []
+    pos = 0
+    for index, (start, end) in enumerate(ranges):
+        out.append(text[pos:start])
+        out.append(_mask_token(nonce, index))
+        spans.append(text[start:end])
+        pos = end
+    out.append(text[pos:])
+    return "".join(out), spans, nonce
+
+
+def _restore_protected(text: str, spans: list[str], nonce: str) -> str:
+    for index, span in enumerate(spans):
+        text = text.replace(_mask_token(nonce, index), span)
+    return text
+
+
+async def _translate_text_masked(text: str, translator: Translator) -> tuple[str, bool]:
+    """Whole-message translation for LLM backends.
+
+    An LLM cannot reorder words across a hole in the sentence: translating each
+    fragment BETWEEN protected spans independently shatters grammar (measured:
+    "Boss, I ``auth.py`` I need to fix a bug ..."). Instead mask every protected
+    span as a placeholder, translate the ENTIRE remaining prose in one call so
+    the model sees a whole coherent sentence, then restore the spans
+    byte-for-byte.
+
+    Fail-closed: if a placeholder is dropped, duplicated, or a protected span is
+    lost, raise so the caller falls to the next backend (or Google) instead of
+    forwarding a corrupt or partially-translated body.
+    """
+    masked, spans, nonce = _mask_protected(text)
+    limit = max(256, int(getattr(translator, "chunk_chars", _CHUNK_CHAR_LIMIT)
+                         or _CHUNK_CHAR_LIMIT))
+    pieces = _chunks(masked, limit)
+    translated = "".join([await translator(piece) for piece in pieces])
+    if not spans:
+        return translated, translated != text
+    for index in range(len(spans)):
+        if translated.count(_mask_token(nonce, index)) != 1:
+            raise ValueError(
+                f"protected-span placeholder {index} not preserved by backend")
+    restored = _restore_protected(translated, spans, nonce)
+    if any(_mask_token(nonce, index) in restored for index in range(len(spans))):
+        raise ValueError("protected-span placeholder survived restore")
+    for span in spans:
+        if span not in restored:
+            raise ValueError("protected span lost during masked translation")
+    return restored, restored != text
+
+
 async def translate_text(text: str, translator: Translator = _google_translate) -> tuple[str, bool]:
     """Translate only unprotected natural-language spans in ``text``."""
     if not needs_translation(text) and not getattr(translator, "collect_all", False):
         return text, False
+    # LLM backends translate the whole message with protected spans masked, so
+    # grammar survives; the built-in Google collector keeps the fragment path.
+    if getattr(translator, "whole_text_masking", False):
+        return await _translate_text_masked(text, translator)
     ranges = _protected_ranges(text)
     out: list[str] = []
     pos = 0
