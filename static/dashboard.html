@@ -2091,7 +2091,11 @@ function openEndpointSettings(e){
 
   async function _txLoadBackends() {
     try {
-      const r = await api('/admin/translation/list');
+      // /admin/translation/list is a GET route; api() is POST-only and returns
+      // 405 Method Not Allowed, which silently emptied _txCustom. That left the
+      // edit dialog unable to find a saved backend row (name/url/model rendered
+      // blank) and "+ Add saved backend" claiming none existed. Use apiGet.
+      const r = await apiGet('/admin/translation/list');
       _txCustom = (r && r.backends) || [];
     } catch (err) { _txCustom = []; }
   }
