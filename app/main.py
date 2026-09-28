@@ -689,7 +689,26 @@ async def endpoint_test(payload: dict, x_admin_token: str = Header(default="")):
     _require_admin(x_admin_token)
     url = (payload.get("url") or "").strip().rstrip("/")
     mode = payload.get("api_mode", "anthropic_messages")
-    key = payload.get("api_key", "") or db.get_setting("upstream_key") or db.get_setting("gateway_key", "")
+    # The dashboard renders every endpoint key MASKED ("••••"+last4, and "•" is
+    # U+2022 — non-ASCII). The Chat widget / Test button echoes that masked value
+    # straight back here as `api_key`. Treated as a real secret it lands in the
+    # x-api-key header and httpx blows up with
+    # `UnicodeEncodeError: 'ascii' codec can't encode characters in position 0-3`
+    # (the four bullets) — surfacing as a hard error on the widget for a plain
+    # "Hi". A masked echo means "use the stored key", so resolve it from the
+    # endpoint row (matched by URL, then last-4) instead of sending the mask.
+    raw_key = payload.get("api_key", "")
+    if _is_masked(raw_key):
+        want4 = raw_key[len(_MASK_PREFIX):]
+        stored = ""
+        for e in db.list_endpoints():
+            if (e.get("url") or "").strip().rstrip("/") == url:
+                k = e.get("api_key") or ""
+                if k and (not want4 or k[-4:] == want4):
+                    stored = k
+                    break
+        raw_key = stored
+    key = raw_key or db.get_setting("upstream_key") or db.get_setting("gateway_key", "")
     model = payload.get("model") or db.get_setting("model_note", "claude-sonnet-4-6")
     msg = payload.get("message", "Reply with exactly: OK")
     history = payload.get("history")

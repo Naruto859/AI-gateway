@@ -1651,6 +1651,25 @@ async def test_endpoint(url, api_mode, api_key, model, message, history=None, ma
     # "ConnectError" for endpoints that were actually healthy, which is exactly the
     # wrong diagnosis. Routed traffic never does this; it keeps using proxies only.
     candidates.append({"id": "__direct__", "url": ""})
+    # Defence in depth: HTTP header values must be ASCII (httpx encodes them with
+    # the 'ascii' codec). A masked-key echo from the dashboard ("••••"+last4, the
+    # bullet is U+2022) would otherwise raise UnicodeEncodeError inside every
+    # proxy attempt and surface as a hard error on the Test/Chat widget. The route
+    # layer already de-masks, but never trust a header value here: if the key is
+    # not ASCII-encodable, do not attempt the request — report it cleanly instead.
+    try:
+        (api_key or "").encode("ascii")
+    except UnicodeEncodeError:
+        db.add_log(final=1, method="POST", path="endpoint/test", status=0, proxy="",
+                   attempts=0, stream=0, redactions=0, ms=0,
+                   note="test skipped: non-ASCII api key (masked echo?)",
+                   model=model, endpoint=url.replace("https://", "").replace("http://", ""),
+                   source="test", detail="api_key contains non-ASCII characters; not sent")
+        return {"ok": False, "status": 0, "ms": 0, "reply": "",
+                "detail": "This endpoint has no usable saved key for the test "
+                          "(the masked key cannot be sent). Open the endpoint and "
+                          "re-enter its API key, then try again.",
+                "attempts": 0}
     ep_kind = translate.dialect_of_mode(api_mode)
     openai = (ep_kind == "openai")
     responses = (ep_kind == "responses")
@@ -1792,7 +1811,9 @@ async def forward(request, path):
     upstream_key = s.get("upstream_key") or gateway_key
     require_key = s.get("require_client_key", "1") == "1"
     max_retries = int(s.get("max_retries", "4") or 4)
-    conn_to = float(s.get("connect_timeout", "10") or 10)
+    # Proxy Engine card can override the live-request connect timeout; blank/0 falls
+    # back to the shared connect_timeout (Advanced Timings).
+    conn_to = float(s.get("proxy_connect_timeout") or s.get("connect_timeout", "10") or 10)
     timeout = httpx.Timeout(connect=conn_to,
                             read=float(s.get("read_timeout", "900") or 900),
                             write=float(s.get("write_timeout", "120.0") or 120.0),
