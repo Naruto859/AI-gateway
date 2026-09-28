@@ -190,7 +190,7 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .sbtn{display:inline-flex;align-items:center;gap:5px;line-height:1}
 .sbtn .i16{width:12px;height:12px}
 .keyrow{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);border-radius:13px;margin-bottom:9px;background:#fff}
-.keyrow .km{flex:1;min-width:0}.keyrow .kn{font-size:13.5px;font-weight:660;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.keyrow .km{flex:1;min-width:0}.keyrow .kn{font-size:13.5px;font-weight:660;font-family:ui-monospace,monospace;word-break:break-all;line-height:1.4}
 .keyrow .kt{font-size:11px;color:var(--ink-faint);margin-top:2px}
 .newkey{background:var(--g-50);border:1px solid var(--g-300);border-radius:13px;padding:13px;margin-bottom:10px}
 .newkey .nk{font-family:ui-monospace,monospace;font-size:13px;font-weight:660;color:var(--g-700);word-break:break-all}
@@ -370,6 +370,13 @@ label.fl{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:block;ma
 .chipbtn:hover{background:var(--g-50)}
 .modalbody input{width:100%;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:11px;padding:9px 12px;background:#fff;text-align:left;outline:none;transition:.2s}
 .modalbody input:focus{border-color:var(--c-mint-d);box-shadow:0 0 0 3px rgba(63,158,120,.16)}
+/* A reveal field inside a modal / agent-config panel: .modalbody input and
+   .apsettings input (declared later, same specificity as `.revealrow input`)
+   would otherwise clobber the padding-right that reserves room for the eye
+   button, so the revealed full key ran UNDER the button and felt cramped. Pin
+   the right padding back and give the field a comfortable min-height so the
+   whole key shows cleanly in both the hidden and revealed states. */
+.modalbody .revealrow input,.apsettings .revealrow input{padding-right:46px;min-height:42px;line-height:1.35}
 .kv{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}.kv .k{color:var(--ink-faint);font-weight:600;min-width:90px;flex:none}.kv .v{color:var(--ink);word-break:break-word;font-family:ui-monospace,monospace;font-size:12px}
 /* flex:1 already owns the height inside the fixed-height panel; the old max-height:48vh
    fought it and left dead space above the composer whenever settings were closed.

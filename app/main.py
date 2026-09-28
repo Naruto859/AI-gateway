@@ -111,13 +111,17 @@ def _sanitize_endpoint(ep):
 
 
 def _sanitize_api_key(k):
-    """Client api_keys: both `key` and `name` carry the full secret here."""
-    k = dict(k)
-    if k.get("key"):
-        k["key"] = _mask_secret(k.get("key"))
-    if k.get("name"):
-        k["name"] = _mask_secret(k.get("name"))
-    return k
+    """Client api_keys (the ``mugen_`` keys THIS gateway issues to the operator's
+    own apps): both ``key`` and ``name`` carry the full secret here.
+
+    These are the operator's OWN client keys, surfaced only on the admin-gated
+    dashboard Keys tab — the exact same private audience that created them. Per the
+    operator's explicit request they are shown in FULL (not ``••••last4``) so the
+    whole ``mugen_`` value can be read and copied straight from the Keys tab.
+    This deliberately does NOT touch the upstream provider/endpoint key path — those
+    stay masked via _sanitize_endpoint() and are only unmasked through the
+    admin-gated, per-endpoint /admin/endpoint/key reveal route."""
+    return dict(k)
 
 
 # Prefix that _mask_secret() puts in front of a redacted value. A real secret
