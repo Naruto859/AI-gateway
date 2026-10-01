@@ -1237,7 +1237,7 @@ def oai_request_to_responses(body: dict) -> dict:
             items.append({
                 "type": "function_call_output",
                 "call_id": m.get("tool_call_id") or "",
-                "output": [{"type": "input_text", "text": _as_text(content)}],
+                "output": _as_text(content),
             })
             continue
 
@@ -1848,6 +1848,7 @@ class ResponsesToOaiStream:
         self.created = int(time.time())
         self.sent_role = False
         self.tool_slots: Dict[str, int] = {}     # responses item_id -> oai tool index
+        self.tool_index_slots: Dict[int, int] = {} # responses output_index -> oai tool index
         self.next_tool = 0
         self.finish = "stop"
         self.usage: Dict[str, int] = {}
@@ -1902,6 +1903,15 @@ class ResponsesToOaiStream:
                     oi = self.next_tool
                     self.next_tool += 1
                     self.tool_slots[item_id] = oi
+                    cid = item.get("call_id")
+                    if isinstance(cid, str) and cid:
+                        self.tool_slots[cid] = oi
+                    iid = item.get("id")
+                    if isinstance(iid, str) and iid:
+                        self.tool_slots[iid] = oi
+                    out_idx = obj.get("output_index")
+                    if isinstance(out_idx, int):
+                        self.tool_index_slots[out_idx] = oi
                     out.extend(self._role())
                     out.append(self._chunk({"tool_calls": [{
                         "index": oi,
@@ -1918,8 +1928,14 @@ class ResponsesToOaiStream:
             return out
 
         if t == "response.function_call_arguments.delta":
-            item_id = obj.get("item_id") or ""
-            oi = self.tool_slots.get(item_id)
+            raw_id = obj.get("item_id") or obj.get("call_id")
+            item_id = str(raw_id) if raw_id else ""
+            oi = self.tool_slots.get(item_id) if item_id else None
+            out_idx = obj.get("output_index")
+            if oi is None and isinstance(out_idx, int):
+                oi = self.tool_index_slots.get(out_idx)
+            if oi is None and len(self.tool_slots) == 1:
+                oi = next(iter(self.tool_slots.values()))
             if oi is None:
                 oi = self.next_tool
                 self.next_tool += 1

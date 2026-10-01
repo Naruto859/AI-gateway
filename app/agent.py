@@ -264,8 +264,57 @@ def _key_count(e):
     return max(1, n)
 
 
+def load_saved_brain():
+    """The server-side persisted brain config, or {} if none/invalid.
+
+    Stored under the `agent_brain_json` setting so the custom brain (endpoint,
+    model, api_key, sdk) survives across browsers/devices instead of living only
+    in one browser's localStorage. Returns {} when nothing is saved, which makes
+    every caller fall through to the default gateway brain exactly as before.
+    """
+    raw = db.get_setting("agent_brain_json", "")
+    if not raw:
+        return {}
+    try:
+        d = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def saved_brain_public():
+    """Saved brain for the dashboard: same shape, but api_key masked to last-4.
+
+    The raw key is never shipped to the browser. Returns {} if nothing is saved.
+    The UI hydrates its fields from this and treats a masked key as "unchanged".
+    """
+    d = load_saved_brain()
+    if not d:
+        return {}
+    out = dict(d)
+    k = out.get("api_key") or ""
+    if k:
+        out["api_key_set"] = True
+        out["api_key_last4"] = k[-4:]
+    else:
+        out["api_key_set"] = False
+        out["api_key_last4"] = ""
+    out.pop("api_key", None)  # never echo the raw key
+    return out
+
+
 def _brain_config(cfg):
-    """Resolve the brain. cfg may be {} (default=gateway) or a custom dict."""
+    """Resolve the brain. cfg may be {} or a custom dict.
+
+    Precedence: an explicit custom cfg from the client wins; otherwise the
+    server-side saved brain (if any) is used; otherwise the default gateway brain.
+    """
+    # No explicit custom cfg from the client -> fall back to the saved server-side
+    # config so a fresh browser (empty localStorage) still gets the operator's brain.
+    if not (cfg and cfg.get("mode") == "custom" and cfg.get("endpoint")):
+        saved = load_saved_brain()
+        if saved.get("mode") == "custom" and saved.get("endpoint"):
+            cfg = saved
     if cfg and cfg.get("mode") == "custom" and cfg.get("endpoint"):
         return {
             "sdk": cfg.get("sdk", "openai"),

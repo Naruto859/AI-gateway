@@ -693,6 +693,7 @@ def _build_upstream_headers(request, upstream_key, kind):
         # OpenAI chat/completions expects a Bearer token
         headers.pop("x-api-key", None)
         headers["authorization"] = f"Bearer {upstream_key}"
+        headers["user-agent"] = "claude-cli/2.1.177 (external, cli)"
     else:
         # Anthropic /v1/messages expects x-api-key
         headers.pop("authorization", None)
@@ -820,15 +821,20 @@ def _targets(s):
         name = _label(e)
         if not (e.get("name") or "").strip() and host_counts.get(host, 0) > 1:
             name = f"{host} #{e.get('id')}"
+        model_ov = e.get("model_override") or s.get("global_model_override", "")
+        mode = translate.dialect_of_mode(e.get("api_mode") or "anthropic_messages")
+        if "agentrouter.org" in e.get("url", "") and model_ov == "gpt-6-astra":
+            if mode != "responses":
+                mode = "responses"
         return {
             "name": name,
             "base": e["url"].rstrip("/"),
             "key": e.get("api_key") or s.get("gateway_key", ""),
             "keys": _endpoint_keys(e, s),
-            "mode": translate.dialect_of_mode(e.get("api_mode") or "anthropic_messages"),
+            "mode": mode,
             "agentrouter": False,
             "id": e.get("id"),
-            "model_override": e.get("model_override") or s.get("global_model_override", ""),
+            "model_override": model_ov,
             "failover_trigger_keywords": e.get("failover_trigger_keywords", ""),
             "endpoint_failover_keywords": e.get("endpoint_failover_keywords", ""),
             "key_failover_keywords": e.get("key_failover_keywords", ""),
