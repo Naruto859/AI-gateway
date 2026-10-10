@@ -194,7 +194,7 @@ def _get_dedicated_candidates(tgt, max_needed):
 
     return candidates
 
-def _resolve_candidates(tgt, attempted_pids, max_needed):
+def _resolve_candidates(tgt, attempted_pids, max_needed, attempt_idx=None):
     dedicated = _get_dedicated_candidates(tgt, 99)
 
     # 1. Try dedicated proxies first, ONE AT A TIME (no hedging for premium proxies).
@@ -224,11 +224,11 @@ def _resolve_candidates(tgt, attempted_pids, max_needed):
     # Dedicated proxies exist, but all have been tried in this request (or are in cooldown)
     # and free pool fallback is disabled.
     # Honour the operator's "dedicated only" choice by cycling through the dedicated proxies
-    # up to max_retries (skipping proxies in cooldown if at least one is alive).
+    # in round-robin order up to max_retries (skipping proxies in cooldown if at least one is alive).
     alive = [p for p in dedicated if not _ded_in_cooldown(p["id"])]
     retry_pool = alive if alive else dedicated
     if retry_pool:
-        idx = len(attempted_pids) % len(retry_pool)
+        idx = (attempt_idx if attempt_idx is not None else len(attempted_pids)) % len(retry_pool)
         return [retry_pool[idx]]
 
     return [{"id": "__direct__", "url": ""}]
@@ -2143,7 +2143,7 @@ async def forward(request, path):
                         theaders = _target_headers(request, tgt, ep_keys[0])
                         for _ in range(max_retries * max(1, len(ep_keys))):
                             concurrency = int(db.get_setting("hedging_concurrency", "3"))
-                            candidates = _resolve_candidates(tgt, attempted_pids, concurrency)
+                            candidates = _resolve_candidates(tgt, attempted_pids, concurrency, attempt_idx=attempts)
                             if not candidates:
                                 break
                             # Only the proxies actually used or actually failed are
@@ -2662,7 +2662,7 @@ async def forward(request, path):
                 theaders = _target_headers(request, tgt, ep_keys[0])
                 for _ in range(max_retries * max(1, len(ep_keys))):
                     concurrency = int(db.get_setting("hedging_concurrency", "3"))
-                    candidates = _resolve_candidates(tgt, attempted_pids, concurrency)
+                    candidates = _resolve_candidates(tgt, attempted_pids, concurrency, attempt_idx=attempts)
                     if not candidates:
                         break
                     p = candidates[0]
@@ -2856,7 +2856,7 @@ async def forward(request, path):
         theaders = _target_headers(request, tgt, ep_keys[0])
         for _ in range(max_retries * max(1, len(ep_keys))):
             concurrency = int(db.get_setting("hedging_concurrency", "3"))
-            candidates = _resolve_candidates(tgt, attempted_pids, concurrency)
+            candidates = _resolve_candidates(tgt, attempted_pids, concurrency, attempt_idx=attempts)
             if not candidates:
                 break
             p = candidates[0]
