@@ -173,6 +173,12 @@ def _get_dedicated_candidates(tgt, max_needed):
     try: proxy_priority = json.loads(tgt.get("proxy_priority") or "[]")
     except: proxy_priority = []
 
+    # If priority list is empty but custom_proxies exist, use them in order
+    if not proxy_priority and custom_proxies:
+        for idx, cp in enumerate(custom_proxies):
+            if cp:
+                candidates.append({"id": f"custom_{idx}", "url": cp})
+
     for p_id in proxy_priority:
         if p_id == "direct":
             # Explicit no-proxy exit for endpoints that answer direct from this
@@ -186,37 +192,46 @@ def _get_dedicated_candidates(tgt, max_needed):
             if idx < len(custom_proxies) and custom_proxies[idx]:
                 candidates.append({"id": p_id, "url": custom_proxies[idx]})
 
-    if candidates and len(candidates) < max_needed:
-        base = list(candidates)
-        while len(candidates) < max_needed:
-            candidates.extend(base)
-
-    return candidates[:max_needed]
+    return candidates
 
 def _resolve_candidates(tgt, attempted_pids, max_needed):
     dedicated = _get_dedicated_candidates(tgt, 99)
 
-    # Try dedicated proxies first, ONE AT A TIME (no hedging for premium proxies).
-    # A proxy in cooldown is skipped — see note_dedicated_failure. If every dedicated
-    # proxy is cooling down we fall through to the free pool rather than stalling.
+    # 1. Try dedicated proxies first, ONE AT A TIME (no hedging for premium proxies).
+    # A proxy in cooldown is skipped — see note_dedicated_failure.
     for p in dedicated:
         if p["id"] not in attempted_pids and not _ded_in_cooldown(p["id"]):
             return [p]
 
-    # If all dedicated proxies are exhausted (or none configured), use the free pool with full hedging concurrency
-    fallback = tgt.get("proxy_fallback", 1) if dedicated else 1
+    # Resolve fallback setting: 0 = disabled (no free pool), 1 = enabled (use free pool)
+    # Honor the operator's explicit choice even when dedicated list is empty.
+    raw_fb = tgt.get("proxy_fallback")
+    fallback = int(raw_fb) if raw_fb is not None else 1
+
+    # 2. If dedicated proxies are exhausted (or none configured), and free pool fallback is enabled:
     if fallback == 1:
         pool = [p for p in proxy_pool.ordered_for_request(max_needed * 3) if p["id"] not in attempted_pids]
-        return pool[:max_needed]
+        if pool:
+            return pool[:max_needed]
 
-    # No fallback allowed. If the only thing standing in the way is a cooldown, honour
-    # the operator's "dedicated only" choice and retry the dedicated proxy anyway —
-    # returning nothing here would fail the request outright.
-    for p in dedicated:
-        if p["id"] not in attempted_pids:
-            return [p]
+    # 3. Fallback to free pool is disabled (fallback == 0) OR free pool had no live proxies:
+    if not dedicated:
+        # Operator configured NO dedicated proxies and disabled free pool fallback:
+        # Route directly through this server's own network connection (no proxy).
+        # Direct can be retried up to max_retries.
+        return [{"id": "__direct__", "url": ""}]
 
-    return []
+    # Dedicated proxies exist, but all have been tried in this request (or are in cooldown)
+    # and free pool fallback is disabled.
+    # Honour the operator's "dedicated only" choice by cycling through the dedicated proxies
+    # up to max_retries (skipping proxies in cooldown if at least one is alive).
+    alive = [p for p in dedicated if not _ded_in_cooldown(p["id"])]
+    retry_pool = alive if alive else dedicated
+    if retry_pool:
+        idx = len(attempted_pids) % len(retry_pool)
+        return [retry_pool[idx]]
+
+    return [{"id": "__direct__", "url": ""}]
 
 
 # TCP keepalive so the residential-proxy CONNECT tunnel is NOT idle-dropped while

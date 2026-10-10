@@ -1810,7 +1810,10 @@ function openEndpointSettings(e){
   <div style="margin-top:16px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
       <span style="font-weight:600;font-size:13px">Custom Premium Proxies</span>
-      <button class="btn ghost" id="btnAddProxy" style="padding:4px 8px;font-size:11px;border-radius:6px;min-height:unset;min-width:unset">+ Add Proxy</button>
+      <div style="display:flex;gap:6px;">
+        <button class="btn ghost" id="btnAddDirect" style="padding:4px 8px;font-size:11px;border-radius:6px;min-height:unset;min-width:unset">+ Add Direct</button>
+        <button class="btn ghost" id="btnAddProxy" style="padding:4px 8px;font-size:11px;border-radius:6px;min-height:unset;min-width:unset">+ Add Proxy</button>
+      </div>
     </div>
     <div id="customProxyList"></div>
   </div>
@@ -1931,6 +1934,7 @@ function openEndpointSettings(e){
     // Only rows with an actual value participate — an empty input is not a proxy.
     const active = ['scrape.do'].filter(() => $('#tgScrape').classList.contains('on'))
       .concat(currentCustomProxies.filter(p => p.val).map(p => p.uid));
+    if (priorityKeys.includes('direct')) active.push('direct');
 
     priorityKeys = priorityKeys.filter(k => active.includes(k));
     active.forEach(k => { if (!priorityKeys.includes(k)) priorityKeys.push(k); });
@@ -1938,7 +1942,11 @@ function openEndpointSettings(e){
     if (_epSortable) { try { _epSortable.destroy(); } catch (err) {} _epSortable = null; }
 
     if (!priorityKeys.length) {
-      $('#priorityList').innerHTML = '<div style="font-size:11px;color:var(--ink-faint);font-style:italic">No dedicated proxies enabled.</div>';
+      const fbOn = $('#tgFallback').classList.contains('on');
+      const hint = fbOn 
+        ? 'No dedicated proxies enabled — routing via Free Proxy Pool.'
+        : 'No dedicated proxies enabled — routing Direct (Server IP).';
+      $('#priorityList').innerHTML = `<div style="font-size:11px;color:var(--ink-faint);font-style:italic">${hint}</div>`;
       return;
     }
 
@@ -1946,6 +1954,8 @@ function openEndpointSettings(e){
       let label;
       if (k === 'scrape.do') {
         label = 'Scrape.do API';
+      } else if (k === 'direct') {
+        label = 'Direct (Server IP / No Proxy)';
       } else {
         const idx = currentCustomProxies.findIndex(p => p.uid === k);
         const host = (currentCustomProxies[idx] || {val: ''}).val.split('@').pop();
@@ -2018,6 +2028,14 @@ function openEndpointSettings(e){
 
   $('#tgFallback').onclick = () => {
     $('#tgFallback').classList.toggle('on');
+    renderPriority();
+  };
+
+  $('#btnAddDirect').onclick = () => {
+    if (priorityKeys.includes('direct')) { toast('Direct exit already in priority list', 'ok'); return; }
+    priorityKeys.push('direct');
+    renderPriority();
+    toast('Added Direct (Server IP) to priority list', 'ok');
   };
 
   $('#btnAddProxy').onclick = () => {
@@ -2361,6 +2379,7 @@ function openEndpointSettings(e){
     // FINAL compacted array, so the saved order matches the visible order.
     const finalPriority = priorityKeys.map(k => {
       if (k === 'scrape.do') return finalScrapeToken ? 'scrape.do' : null;
+      if (k === 'direct') return 'direct';
       const idx = kept.findIndex(p => p.uid === k);
       return idx >= 0 ? `custom_${idx}` : null;
     }).filter(Boolean);
